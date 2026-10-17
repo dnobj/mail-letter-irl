@@ -350,7 +350,8 @@ order's checkout sends (#279). A retry of an order whose session creation failed
 and its idempotency key, only when it would send the same request; otherwise it cancels the order
 (`PRICE_CHANGED_BEFORE_SESSION` or `CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION`) and opens a fresh one
 with a fresh key, because Stripe refuses a key it has seen with different parameters. Orders from
-before the field are compared on amount and currency alone.
+before the field are compared on amount and currency alone. An arrive-by refusal (#726) cancels such an order too, with
+`SCHEDULE_PASSED` or `SCHEDULE_FULL`, and opens none: nothing was paid on it, and it held the draft.
 
 ### stripe_disputes
 

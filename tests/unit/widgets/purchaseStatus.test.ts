@@ -98,7 +98,7 @@ function toolOutputFixture() {
 
 function mount(
   card: string,
-  options: { openExternalRejects?: boolean; mailCheckoutUrl?: string } = {}
+  options: { openExternalRejects?: boolean; mailCheckoutUrl?: string; scheduleMissed?: unknown } = {}
 ): Harness {
   // The card as served, with the host bridge inlined (#474).
   const html = inlineHostBridge(
@@ -150,7 +150,8 @@ function mount(
             return {
               structuredContent: {
                 orderId: 'ord_test_0001',
-                checkoutUrl: options.mailCheckoutUrl ?? 'https://checkout.stripe.com/c/pay/cs_test'
+                checkoutUrl: options.mailCheckoutUrl ?? 'https://checkout.stripe.com/c/pay/cs_test',
+                ...(options.scheduleMissed !== undefined ? { scheduleMissed: options.scheduleMissed } : {})
               }
             };
           }
@@ -279,6 +280,59 @@ function mount(
 async function checkout(harness: Harness): Promise<void> {
   await harness.click('pay-send-button');
 }
+
+describe.each(CARDS)('%s: an open checkout whose mail date has passed (#726)', card => {
+  it('says so before payment, shows the link, and does not open the checkout itself', async () => {
+    const harness = mount(card, { scheduleMissed: { arriveBy: '2020-01-13', mailOn: '2020-01-02' } });
+    await checkout(harness);
+    expect(harness.visible('checkout-note')).toBe(true);
+    expect(harness.text('checkout-note')).toBe(
+      'This was to go to the printer on Thu, Jan 2, 2020 to arrive by Mon, Jan 13, 2020, and that day has passed. ' +
+        'If you pay, it goes to the printer as soon as it can and may arrive after Mon, Jan 13, 2020.'
+    );
+    expect(harness.visible('checkout-link')).toBe(true);
+    expect(harness.calls.some(call => call.name === 'openExternal')).toBe(false);
+    expect(harness.text('pay-send-button-text')).toBe('Read the note, then use the checkout link below');
+    // The order is still followed, so paying from the link updates the card.
+    expect(harness.text('status-pill')).toBe('Checkout open - waiting for payment');
+  });
+
+  it('says so when a status answer marks it, as on a card reopened after the date passed', async () => {
+    const harness = mount(card);
+    await checkout(harness);
+    expect(harness.text('checkout-note')).not.toContain('has passed');
+    harness.setStatus({ purchaseStatus: 'pending_payment', scheduleMissed: { arriveBy: '2020-01-13', mailOn: '2020-01-02' } });
+    await harness.click('check-status-button');
+    await flush();
+    expect(harness.text('checkout-note')).toContain('to arrive by Mon, Jan 13, 2020, and that day has passed.');
+    // An answer with no status (a failed call) leaves it as it was.
+    harness.setStatus({});
+    await harness.click('check-status-button');
+    await flush();
+    expect(harness.visible('checkout-note')).toBe(true);
+    // Paid afterwards, through the link: the note about paying goes.
+    harness.setStatus({ purchaseStatus: 'processing' });
+    await harness.click('check-status-button');
+    await flush();
+    expect(harness.visible('checkout-note')).toBe(false);
+    // Not once it is paid.
+    const paid = mount(card);
+    await checkout(paid);
+    paid.setStatus({ purchaseStatus: 'processing', scheduleMissed: { arriveBy: '2020-01-13', mailOn: '2020-01-02' } });
+    await paid.click('check-status-button');
+    await flush();
+    expect(paid.text('checkout-note')).not.toContain('has passed');
+  });
+
+  it('opens the checkout as before when nothing is marked, or the mark is not a pair of dates', async () => {
+    for (const scheduleMissed of [undefined, { arriveBy: 'soon', mailOn: '2020-01-02' }, 'yes']) {
+      const harness = mount(card, { scheduleMissed });
+      await checkout(harness);
+      expect(harness.calls.some(call => call.name === 'openExternal')).toBe(true);
+      expect(harness.text('checkout-note')).not.toContain('has passed');
+    }
+  });
+});
 
 describe.each(CARDS)('%s purchase status', card => {
   let harness: Harness;

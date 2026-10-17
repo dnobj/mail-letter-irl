@@ -279,6 +279,103 @@ describe('image pipeline hardening', () => {
     it('keeps the budget at 100 MB of decoded bytes', () => {
       expect(_testing.MAX_FULL_DECODE_BYTES).toBe(100_000_000);
     });
+
+    /** A JPEG's first bytes up to its first scan: SOI, an APP0, a frame header with these factors, SOS. */
+    function jpegHeader(factors: Array<[number, number]>, { marker = 0xc2, width = 7000, height = 4750 } = {}): Buffer {
+      const app0 = Buffer.from([0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00]);
+      const sofBody = [0x08, height >> 8, height & 0xff, width >> 8, width & 0xff, factors.length];
+      factors.forEach(([h, v], index) => sofBody.push(index + 1, (h << 4) | v, 0));
+      const sof = Buffer.from([0xff, marker, 0x00, sofBody.length + 2, ...sofBody]);
+      return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, Buffer.from([0xff, 0xff]), sof, Buffer.from([0xff, 0xda, 0x00, 0x08])]);
+    }
+
+    it("counts a JPEG's coefficients by the sampling factors in its frame header (#622)", () => {
+      const samples = (factors: Array<[number, number]>, options?: { marker?: number }) => _testing.jpegSamplesPerPixel(jpegHeader(factors, options));
+      expect(samples([[2, 2], [1, 1], [1, 1]])).toBe(1.5); // 4:2:0
+      expect(samples([[2, 1], [1, 1], [1, 1]])).toBe(2); // 4:2:2, which libvips calls 4:2:0
+      expect(samples([[1, 2], [1, 1], [1, 1]])).toBe(2); // 4:4:0
+      expect(samples([[1, 2], [1, 2], [1, 1]])).toBe(2.5); // two full, one halved
+      expect(samples([[2, 2], [2, 2], [2, 1]])).toBe(2.5);
+      expect(samples([[2, 2], [2, 2], [1, 1]])).toBe(2.25);
+      expect(samples([[1, 1], [1, 1], [1, 1]])).toBe(3); // 4:4:4
+      expect(samples([[4, 1], [1, 1], [1, 1]])).toBe(1.5); // 4:1:1
+      expect(samples([[1, 1]])).toBe(1); // grayscale
+      expect(samples([[1, 1], [1, 1], [1, 1], [1, 1]])).toBe(4); // CMYK
+      // Every frame type that names factors, baseline (C0) as well as progressive (C2).
+      expect(samples([[2, 1], [1, 1], [1, 1]], { marker: 0xc0 })).toBe(2);
+      expect(samples([[2, 1], [1, 1], [1, 1]], { marker: 0xc1 })).toBe(2);
+      // A frame header after the segments libjpeg passes by length, a restart or TEM marker, or an
+      // EXIF thumbnail (whose own SOI and frame header in APP1 are not read): the image's own.
+      const segment = (marker: number, payload: number[]) => Buffer.from([0xff, marker, 0x00, payload.length + 2, ...payload]);
+      const after = (before: Buffer[], factors: Array<[number, number]>) => {
+        const header = jpegHeader(factors);
+        return _testing.jpegSamplesPerPixel(Buffer.concat([header.subarray(0, 2), ...before, header.subarray(2)]));
+      };
+      const thumbnail = [...jpegHeader([[2, 2], [1, 1], [1, 1]]).subarray(0, 40)];
+      expect(after([segment(0xe1, [0x45, 0x78, 0x69, 0x66, 0x00, 0x00, ...thumbnail])], [[1, 1], [1, 1], [1, 1]])).toBe(3);
+      expect(after([segment(0xfe, [0x41]), segment(0xdb, [0x00]), segment(0xc4, [0x00]), segment(0xdd, [0x00, 0x00])], [[2, 1], [1, 1], [1, 1]])).toBe(2);
+      expect(after([Buffer.from([0xff, 0xd0]), Buffer.from([0xff, 0x01])], [[1, 1], [1, 1], [1, 1]])).toBe(3);
+      // A pair libjpeg discards as stray data, and a marker it does not walk by length, end the walk
+      // unread rather than jump to wherever their bytes point: a frame header hidden after them is not read.
+      const hidden = segment(0xef, [...jpegHeader([[2, 2], [1, 1], [1, 1]]).subarray(22, 41)]);
+      expect(after([Buffer.from([0xff, 0x00, 0x00, 0x06]), hidden], [[1, 1], [1, 1], [1, 1]])).toBeNull();
+      expect(after([segment(0xf7, [0x00])], [[1, 1], [1, 1], [1, 1]])).toBeNull();
+      // A length of 0 or 1: unread.
+      expect(after([Buffer.from([0xff, 0xe0, 0x00, 0x01])], [[1, 1], [1, 1], [1, 1]])).toBeNull();
+      // No frame header before the scan, a broken one, or no JPEG: unknown.
+      expect(_testing.jpegSamplesPerPixel(Buffer.from([0xff, 0xd8, 0xff, 0xda, 0x00, 0x08]))).toBeNull();
+      expect(samples([[0, 1], [1, 1], [1, 1]])).toBeNull();
+      expect(_testing.jpegSamplesPerPixel(Buffer.from([0xff, 0xd8, 0x00, 0x00, 0x00, 0x00]))).toBeNull();
+      expect(_testing.jpegSamplesPerPixel(jpegHeader([[2, 2], [1, 1], [1, 1]]).subarray(0, 30))).toBeNull();
+
+      const bytes = (factors: Array<[number, number]> | null, channels = 3) =>
+        _testing.fullDecodeBytesPerPixel({ format: 'jpeg', channels, depth: 'uchar' } as never, factors ? jpegHeader(factors) : Buffer.from([0xff, 0xd8, 0xff, 0xda, 0x00, 0x08]));
+      // Two bytes a sample, or the image's own bytes when that is more.
+      expect(bytes([[2, 2], [1, 1], [1, 1]])).toBe(3);
+      expect(bytes([[2, 1], [1, 1], [1, 1]])).toBe(4);
+      expect(bytes([[1, 2], [1, 2], [1, 1]])).toBe(5);
+      expect(bytes([[1, 1], [1, 1], [1, 1]])).toBe(6);
+      expect(bytes([[1, 1], [1, 1], [1, 1], [1, 1]], 4)).toBe(8);
+      expect(bytes([[1, 1]], 1)).toBe(2);
+      // Unread factors: every component at full resolution.
+      expect(bytes(null)).toBe(6);
+      expect(bytes(null, 4)).toBe(8);
+      // A PNG holds no coefficients: its decoded bytes only.
+      expect(_testing.fullDecodeBytesPerPixel({ format: 'png', channels: 3, depth: 'uchar' } as never, Buffer.alloc(0))).toBe(3);
+      expect(_testing.fullDecodeBytesPerPixel({ format: 'png', channels: 4, depth: 'ushort' } as never, Buffer.alloc(0))).toBe(8);
+    });
+
+    it('refuses a 33 MP progressive JPEG at 4:4:4, naming the size that fits, and passes it at 4:2:0 (#622)', async () => {
+      // 7000 x 4750: 33.25 MP, 99.75 MB decoded, inside the old count. Real bytes, one colour, so small.
+      const photo = (chromaSubsampling: '4:2:0' | '4:4:4') =>
+        sharp({ create: { width: 7000, height: 4750, channels: 3, background: { r: 30, g: 60, b: 90 } } })
+          .jpeg({ progressive: true, chromaSubsampling })
+          .toBuffer();
+      const full = await photo('4:4:4');
+      await expect(_testing.getImageMetadata(full)).rejects.toMatchObject({
+        code: 'IMAGE_TOO_LARGE',
+        userMessage:
+          'Image is too large to process. Please use an image under 16 megapixels, or save it without interlacing or progressive encoding.'
+      });
+      const halved = await photo('4:2:0');
+      await expect(_testing.getImageMetadata(halved)).resolves.toEqual({ width: 7000, height: 4750, format: 'jpeg' });
+      // The same bytes with its luma's factors made 2x1, 4:2:2, which libvips still calls 4:2:0:
+      // counted at 4 bytes a pixel from the frame header, so refused, naming 25 megapixels.
+      const sof = halved.indexOf(Buffer.from([0xff, 0xc2]));
+      expect(halved[sof + 11]).toBe(0x22);
+      const fourTwoTwo = Buffer.from(halved);
+      fourTwoTwo[sof + 11] = 0x21;
+      await expect(_testing.getImageMetadata(fourTwoTwo)).rejects.toMatchObject({
+        code: 'IMAGE_TOO_LARGE',
+        userMessage:
+          'Image is too large to process. Please use an image under 25 megapixels, or save it without interlacing or progressive encoding.'
+      });
+      // The same photo at 4:4:4 without progressive encoding is streamed, and not counted.
+      const baseline = await sharp({ create: { width: 7000, height: 4750, channels: 3, background: { r: 30, g: 60, b: 90 } } })
+        .jpeg({ chromaSubsampling: '4:4:4' })
+        .toBuffer();
+      await expect(_testing.getImageMetadata(baseline)).resolves.toEqual({ width: 7000, height: 4750, format: 'jpeg' });
+    }, 30_000);
   });
 
   describe('one download deadline covers the body', () => {

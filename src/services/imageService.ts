@@ -91,19 +91,108 @@ const UNSUPPORTED_FORMAT_MESSAGE = 'Unsupported image format. Please use PNG, JP
 
 /**
  * Images that libvips must hold whole rather than stream (interlaced PNG,
- * progressive JPEG) are bounded by their decoded size as well as by pixels.
- * Measured through this pipeline at one libvips thread (pinned below): a
- * 49 MP baseline JPEG or plain 8-bit PNG peaks near 60 MB resident and a
- * plain 16-bit RGBA PNG near 130 MB, all streamed; an interlaced or
- * progressive image at this budget peaks near 140 to 165 MB. Without the
- * budget, a 49 MP interlaced 16-bit PNG, a 4 MB file that passes every
- * other check, measured near 500 MB.
+ * progressive JPEG) are bounded by their decoded size as well as by pixels,
+ * and a progressive JPEG by its coefficients too (fullDecodeBytesPerPixel,
+ * #622). Measured through this pipeline at one libvips thread (pinned
+ * below): a 49 MP baseline JPEG or plain 8-bit PNG peaks near 60 MB resident
+ * and a plain 16-bit RGBA PNG near 130 MB, all streamed; an interlaced or
+ * progressive image at this budget peaks near 140 to 167 MB, a 4:2:2 or
+ * 4:4:4 progressive JPEG at its limit (25 or 16 MP) near 153 MB. Without the budget, a
+ * 49 MP interlaced 16-bit PNG, a 4 MB file that passes every other check,
+ * measured near 500 MB, and before #622 a 33 MP 4:4:4 progressive JPEG near
+ * 269 MB.
  */
 const MAX_FULL_DECODE_BYTES = 100_000_000;
 
 const BYTES_PER_SAMPLE: Record<string, number> = {
   char: 1, uchar: 1, short: 2, ushort: 2, int: 4, uint: 4, float: 4, complex: 8, double: 8, dpcomplex: 16,
 };
+
+/** The JPEG start-of-frame markers, whose segment names each component's sampling factors. */
+const JPEG_SOF_MARKERS = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+
+/**
+ * The segments libjpeg passes over by their length before the frame header:
+ * APPn, COM, DQT, DHT, DRI, DAC and DNL. Anything else ends the walk unread,
+ * so the reader never takes a path through the bytes that libjpeg does not
+ * (#622 review: libjpeg discards a stray pair it does not know, and a walk that
+ * jumped by its "length" could land on a frame header libjpeg never reads).
+ */
+const JPEG_LENGTH_SKIPPED = new Set([0xfe, 0xdb, 0xc4, 0xdd, 0xcc, 0xdc]);
+
+function jpegSkipsByLength(marker: number): boolean {
+  return (marker >= 0xe0 && marker <= 0xef) || JPEG_LENGTH_SKIPPED.has(marker);
+}
+
+/**
+ * Samples per pixel of a JPEG's components, from the sampling factors in its
+ * frame header: each component holds (h / max h) x (v / max v) of a sample a
+ * pixel. 1.5 at 4:2:0, 2 at 4:2:2 and 4:4:0, 2.5 when two components are full
+ * and one is halved, 3 at 4:4:4. Read from the bytes because libvips reports
+ * only `4:4:4` or `4:2:0` (#622 review: 4:2:2 and mixed factors read as
+ * 4:2:0). Null when no frame header is found before the first scan.
+ */
+function jpegSamplesPerPixel(buffer: Buffer): number | null {
+  let offset = 2; // past SOI
+  while (offset + 4 <= buffer.length) {
+    if (buffer[offset] !== 0xff) return null;
+    const marker = buffer[offset + 1];
+    // Fill bytes before a marker.
+    if (marker === 0xff) {
+      offset += 1;
+      continue;
+    }
+    // Markers without a segment.
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) {
+      offset += 2;
+      continue;
+    }
+    // Anything but a frame header or a segment libjpeg skips by length (the first scan, the end,
+    // or a marker it does not know): no frame header was found.
+    if (!JPEG_SOF_MARKERS.has(marker) && !jpegSkipsByLength(marker)) return null;
+    // A segment's length under 2 lands inside the length field, on a byte that is not a marker: the
+    // walk ends there. A frame header's own length is libjpeg's to check: it refuses a wrong one
+    // before the metadata this budget follows is read.
+    const length = buffer.readUInt16BE(offset + 2);
+    if (JPEG_SOF_MARKERS.has(marker)) {
+      const components = buffer[offset + 9];
+      // A frame header cut short reads past the end as undefined, a factor of 0: refused below.
+      if (!components) return null;
+      const factors: Array<{ h: number; v: number }> = [];
+      for (let index = 0; index < components; index += 1) {
+        const sampling = buffer[offset + 11 + 3 * index];
+        factors.push({ h: sampling >> 4, v: sampling & 0x0f });
+      }
+      const maxH = Math.max(...factors.map((factor) => factor.h));
+      const maxV = Math.max(...factors.map((factor) => factor.v));
+      if (!(maxH > 0) || !(maxV > 0) || factors.some((factor) => !(factor.h > 0) || !(factor.v > 0))) return null;
+      return factors.reduce((sum, factor) => sum + (factor.h / maxH) * (factor.v / maxV), 0);
+    }
+    offset += 2 + length;
+  }
+  return null;
+}
+
+/**
+ * The bytes a whole decode holds per pixel, which the full-decode budget
+ * counts: the decoded image's (channels by bytes per sample) and, for a
+ * JPEG held whole, its DCT coefficients too, which libjpeg holds for every
+ * scan before it makes a pixel: two bytes a sample of each component at its
+ * own resolution (#622). At 4:2:0 that is 3 bytes a pixel, as the image's
+ * own; at 4:2:2 it is 4, and at 4:4:4 it is 6, which is why a 4:4:4 photo
+ * peaked near 265 MB where 4:2:0 at the same size peaked near 165 MB. The
+ * larger of the two is counted. A JPEG whose frame header cannot be read
+ * counts every component at full resolution: the most it can be.
+ */
+function fullDecodeBytesPerPixel(
+  metadata: Pick<Metadata, 'format' | 'channels' | 'depth'>,
+  buffer: Buffer
+): number {
+  const decoded = (metadata.channels ?? 4) * (BYTES_PER_SAMPLE[metadata.depth ?? ''] ?? 2);
+  if (metadata.format !== 'jpeg') return decoded;
+  const samples = jpegSamplesPerPixel(buffer) ?? Math.max(metadata.channels ?? 3, 1);
+  return Math.max(decoded, 2 * samples);
+}
 
 /** Names the size that would fit, for this image's channels and depth. */
 function tooLargeToDecodeMessage(bytesPerPixel: number): string {
@@ -146,9 +235,9 @@ const REMOTE_IMAGE_FETCH_CONFIG = {
  * downloads included: two at a time and one per account, and one that waits
  * has fetched nothing. The two add at most six held input buffers and two
  * sets of tiles (about 24 MB each at worst) to the figure above: about
- * 835 MB, or about 1.13 GB while a progressive JPEG without chroma
- * subsampling decodes at the 265 MB measured and not the 165 MB counted
- * (#622). Its photos share one budget for their downloads
+ * 835 MB. (Before #622 counted a progressive JPEG's coefficients, a 4:4:4
+ * one decoded at about 265 MB, and the figure was about 1.13 GB.) Its photos
+ * share one budget for their downloads
  * (COLLAGE_DOWNLOAD_BUDGET_MS), the queue waits and the transfers together,
  * so a collage cannot hold its slot four times as long as one photo.
  */
@@ -1119,7 +1208,7 @@ async function getImageMetadata(buffer: Buffer): Promise<{ width: number; height
   }
 
   if (metadata.isProgressive) {
-    const bytesPerPixel = (metadata.channels ?? 4) * (BYTES_PER_SAMPLE[metadata.depth ?? ''] ?? 2);
+    const bytesPerPixel = fullDecodeBytesPerPixel(metadata, buffer);
     if (metadata.width * metadata.height * bytesPerPixel > MAX_FULL_DECODE_BYTES) {
       throw new ImageProcessingError('IMAGE_TOO_LARGE', tooLargeToDecodeMessage(bytesPerPixel));
     }
@@ -1172,6 +1261,8 @@ export const _testing = {
   LETTER_IMAGE_CONFIG,
   MAX_INPUT_PIXELS,
   MAX_FULL_DECODE_BYTES,
+  fullDecodeBytesPerPixel,
+  jpegSamplesPerPixel,
   GATE_CONFIG,
   REMOTE_IMAGE_FETCH_CONFIG,
   decodeGate,

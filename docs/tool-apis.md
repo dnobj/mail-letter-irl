@@ -321,6 +321,10 @@ Returns sanitized, owner-scoped purchase state: `pending_payment`, `processing`,
 `submitted`, `payment_failed`, `refund_pending`, `refunded`, `on_hold`, or
 `cancelled`. It exposes no card, billing, address, content, or raw Stripe data.
 
+An unpaid Pay & Send order that can still be paid (a session open, its window not over) whose
+mail date has passed also carries `scheduleMissed` (`arriveBy`, `mailOn`), and its message says
+that paid now it goes to the printer as soon as it can and may arrive late (#726).
+
 For a letter-pack order it also returns the pack's figures, absent (never
 null) on Pay & Send orders: `letters` in the pack, `lettersRemaining` still on
 the account (active and unexpired), `lettersRefunded` returned as cash so far,

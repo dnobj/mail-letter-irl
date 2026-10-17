@@ -3131,7 +3131,7 @@ failed**. Production is not run.
 The owner kept the refusal of a sign-in that carries no confirmed address (#429, 2026-09-23). In
 ChatGPT that refusal surfaces only as "We couldn't connect this account", so a launch sign-in method
 must always vouch for the address. A method that fails here comes off the launch list: disable its
-connection for the Letter IRL applications before launch. The rule does not change.
+connection before launch, as [launch-promotion.md](launch-promotion.md) stage 0 step 6 says (its domain-level promotion off and unticked on the website, since unticking on an app does not reach the connected apps). The rule does not change.
 
 **Launch methods:** Google, GitHub, Microsoft (personal accounts only, per
 [auth0-tenant-configuration.md](auth0-tenant-configuration.md)), and email with a password. Apple is
