@@ -1481,6 +1481,8 @@ describe("the Words tab's editor (#586)", () => {
     const reAsk = card.lastRequest('tools/call', 'get_draft_status')!;
     await card.click(card.tab('words'));
     await type(card, 'studio-words-body', 'Dear Sam,\n\nMine.');
+    // It says so: the button reads as unavailable.
+    expect(card.byId('studio-words-update').getAttribute('aria-disabled')).toBe('true');
     await card.click(card.byId('studio-words-update'));
     expect(card.lastRequest('tools/call', 'set_letter_words')).toBeUndefined();
     // Once the draft as it is now is drawn, the words can be set.
@@ -2618,7 +2620,9 @@ describe('the content version the letter card sends (#695)', () => {
   it("holds the styles, the Arrives row and the words while a refused send asks for the draft, and says so on the buttons (words review round 2)", async () => {
     const card = mount();
     await card.show(output({ ...STYLED, contentVersion: 'v_preview', arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), ON);
-    await card.answer(ready('v_preview', PAGE), 'get_draft_status');
+    await card.answer(ready('v_preview', PAGE, { schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), 'get_draft_status');
+    // Free to change before the send.
+    expect((card.byId('arrives-asap') as HTMLButtonElement).disabled).toBe(false);
     await card.click(card.byId('send-button'));
     await card.answer(CHANGED, 'send_letter');
     const botanical = card.byId('style-row').querySelector('[data-theme="botanical"]')!;
