@@ -407,7 +407,7 @@ export async function runHeldPrintMaintenance(): Promise<void> {
   try {
     const backfill = await backfillHeldPrints();
     console.log('[Maintenance] Held print backfill summary:', backfill);
-    writeDiagnostic(backfill.layoutChanged > 0 ? 'error' : 'info', 'held_print.backfilled', backfill);
+    writeDiagnostic(backfill.layoutChanged + backfill.unprintable > 0 ? 'error' : 'info', 'held_print.backfilled', backfill);
   } catch (error) {
     writeDiagnostic('error', 'held_print.backfill_failed', {
       errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')

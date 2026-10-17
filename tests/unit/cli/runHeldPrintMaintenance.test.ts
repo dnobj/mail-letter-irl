@@ -34,18 +34,25 @@ describe('runHeldPrintMaintenance (#697)', () => {
 
   it('backfills, then sweeps, and logs the counts', async () => {
     const order: string[] = [];
-    mocks.backfill.mockImplementation(async () => { order.push('backfill'); return { stored: 2, layoutChanged: 0, failed: 0 }; });
+    mocks.backfill.mockImplementation(async () => { order.push('backfill'); return { stored: 2, layoutChanged: 0, unprintable: 0, failed: 0 }; });
     mocks.sweep.mockImplementation(async () => { order.push('sweep'); return { kept: 3, deleted: 1 }; });
     await runHeldPrintMaintenance();
     expect(order).toEqual(['backfill', 'sweep']);
     expect(mocks.diagnostics).toEqual([
-      { level: 'info', event: 'held_print.backfilled', fields: { stored: 2, layoutChanged: 0, failed: 0 } },
+      { level: 'info', event: 'held_print.backfilled', fields: { stored: 2, layoutChanged: 0, unprintable: 0, failed: 0 } },
       { level: 'info', event: 'held_print.swept', fields: { kept: 3, deleted: 1 } }
     ]);
   });
 
   it('logs a changed layout as an error, for an operator to act on before the mail date', async () => {
-    mocks.backfill.mockResolvedValue({ stored: 0, layoutChanged: 1, failed: 0 });
+    mocks.backfill.mockResolvedValue({ stored: 0, layoutChanged: 1, unprintable: 0, failed: 0 });
+    mocks.sweep.mockResolvedValue({ kept: 0, deleted: 0 });
+    await runHeldPrintMaintenance();
+    expect(mocks.diagnostics[0]).toMatchObject({ level: 'error', event: 'held_print.backfilled' });
+  });
+
+  it('logs a letter our renderer refuses as an error too', async () => {
+    mocks.backfill.mockResolvedValue({ stored: 0, layoutChanged: 0, unprintable: 1, failed: 0 });
     mocks.sweep.mockResolvedValue({ kept: 0, deleted: 0 });
     await runHeldPrintMaintenance();
     expect(mocks.diagnostics[0]).toMatchObject({ level: 'error', event: 'held_print.backfilled' });

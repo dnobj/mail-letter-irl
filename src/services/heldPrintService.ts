@@ -118,7 +118,7 @@ export async function recordHeldPrintWithClient(
   }
 }
 
-export type StoreHeldPrintOutcome = 'stored' | 'skipped' | 'layout_changed' | 'failed';
+export type StoreHeldPrintOutcome = 'stored' | 'skipped' | 'layout_changed' | 'unprintable' | 'failed';
 
 /**
  * Draw a held letter's PDF and keep it, once its send has committed. Only for
@@ -169,6 +169,12 @@ export async function storeHeldPrint(letterId: string): Promise<StoreHeldPrintOu
     }
     return 'stored';
   } catch (error) {
+    // Our renderer refusing this letter is the letter's, and the print will hold it the same way; anything
+    // else (the bucket, the database) is the store's, and fails the next letter too.
+    if (error instanceof RenderRefusal) {
+      writeDiagnostic('error', 'held_print.unprintable', { letterId, errorClass: error.reason });
+      return 'unprintable';
+    }
     writeDiagnostic('error', 'held_print.store_failed', { letterId, errorClass: errorClassOf(error) });
     return 'failed';
   }
@@ -181,7 +187,7 @@ export async function storeHeldPrint(letterId: string): Promise<StoreHeldPrintOu
  * grace ago and due more than the grace from now. A letter whose layout has
  * changed is reported, never stored.
  */
-export async function backfillHeldPrints(): Promise<{ stored: number; layoutChanged: number; failed: number }> {
+export async function backfillHeldPrints(): Promise<{ stored: number; layoutChanged: number; unprintable: number; failed: number }> {
   const due = await query<{ letter_id: string }>(
     `SELECT l.letter_id
        FROM letters l
@@ -199,11 +205,13 @@ export async function backfillHeldPrints(): Promise<{ stored: number; layoutChan
       LIMIT $2`,
     [HELD_PDF_GRACE_MS / 1000, BACKFILL_LIMIT]
   );
-  const summary = { stored: 0, layoutChanged: 0, failed: 0 };
+  const summary = { stored: 0, layoutChanged: 0, unprintable: 0, failed: 0 };
   for (const row of due.rows) {
     const outcome = await storeHeldPrint(row.letter_id);
     if (outcome === 'stored') summary.stored += 1;
     else if (outcome === 'layout_changed') summary.layoutChanged += 1;
+    // A letter our renderer refuses is the letter's own: the rest are tried.
+    else if (outcome === 'unprintable') summary.unprintable += 1;
     else if (outcome === 'failed') {
       // A bucket or database that failed once fails the rest the same way, each after its time limit:
       // the next run tries again, rather than this one holding up the tasks after it.

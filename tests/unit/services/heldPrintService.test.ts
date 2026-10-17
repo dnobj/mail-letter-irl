@@ -278,12 +278,26 @@ describe('sweepHeldPdfs (#697)', () => {
 });
 
 describe('backfillHeldPrints (#697)', () => {
+  it('counts a letter our renderer refuses as its own, and goes on to the next', async () => {
+    const refused = heldLetter({ content: { ...heldLetter().content, pages: 4 } });
+    refused.print_layout_fingerprint = fingerprintOf(heldLetter());
+    const next = heldLetter({ letter_id: '55555555-5555-4555-8555-555555555555' });
+    next.print_layout_fingerprint = fingerprintOf(next);
+    vi.mocked(query).mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM letters l')) return { rows: [{ letter_id: LETTER_ID }, { letter_id: next.letter_id }], rowCount: 2 } as never;
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [params?.[0] === LETTER_ID ? refused : next], rowCount: 1 } as never;
+      return { rows: [], rowCount: 1 } as never;
+    });
+    expect(await backfillHeldPrints()).toEqual({ stored: 1, layoutChanged: 0, unprintable: 1, failed: 0 });
+    expect(diagnostics.written).toContainEqual(expect.objectContaining({ event: 'held_print.unprintable', fields: { letterId: LETTER_ID, errorClass: 'pages' } }));
+  });
+
   it('stops at the first failed store, for the next run to try again', async () => {
     vi.mocked(query).mockImplementation(async (sql: string) => {
       if (sql.includes('FROM letters l')) return { rows: [{ letter_id: LETTER_ID }, { letter_id: '44444444-4444-4444-8444-444444444444' }], rowCount: 2 } as never;
       throw new Error('connection terminated');
     });
-    expect(await backfillHeldPrints()).toEqual({ stored: 0, layoutChanged: 0, failed: 1 });
+    expect(await backfillHeldPrints()).toEqual({ stored: 0, layoutChanged: 0, unprintable: 0, failed: 1 });
     // The list, then one letter's read: the second letter is left for the next run.
     expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
   });
@@ -298,7 +312,7 @@ describe('backfillHeldPrints (#697)', () => {
       if (sql.startsWith('SELECT * FROM letters')) return { rows: [params?.[0] === LETTER_ID ? letter : changed], rowCount: 1 } as never;
       return { rows: [], rowCount: 1 } as never;
     });
-    expect(await backfillHeldPrints()).toEqual({ stored: 1, layoutChanged: 1, failed: 0 });
+    expect(await backfillHeldPrints()).toEqual({ stored: 1, layoutChanged: 1, unprintable: 0, failed: 0 });
     expect((await listHeldPdfs()).map(entry => entry.letterId)).toEqual([LETTER_ID]);
     const [sql, params] = vi.mocked(query).mock.calls[0];
     // Left to the send's own store for the grace, and never one about to print.
