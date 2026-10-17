@@ -2729,7 +2729,8 @@
           if (state === "pending_payment") showScheduleMissed(status.scheduleMissed);
         }
         // Paid, or closed: the note about paying no longer applies.
-        if (state !== "pending_payment" && scheduleMissedShown) {
+        // A real status only: a failed call carries none, and leaves the note as it was.
+        if (typeof state === "string" && state !== "pending_payment" && scheduleMissedShown) {
           scheduleMissedShown = false;
           document.getElementById("checkout-note").style.display = "none";
         }

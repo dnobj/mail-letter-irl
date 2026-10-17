@@ -1055,7 +1055,7 @@ async function prepareJitOrder(
       // refusal is raised.
       if (existing) {
         const code = (scheduleRefusal as Error & { code: string }).code;
-        await client.query(
+        const cancelled = await client.query(
           `UPDATE orders SET status = 'cancelled',
              last_error_code = $2, last_error = $3, updated_at = NOW()
            WHERE order_id = $1 AND status = 'checkout_pending'`,
@@ -1067,7 +1067,9 @@ async function prepareJitOrder(
               : 'Mail date full before a session was opened'
           ]
         );
-        await recordOrderEvent(client, existing.order_id, 'checkout.schedule_refused', existing.status, 'cancelled');
+        if ((cancelled.rowCount ?? 0) > 0) {
+          await recordOrderEvent(client, existing.order_id, 'checkout.schedule_refused', existing.status, 'cancelled');
+        }
         return { refusal: scheduleRefusal };
       }
       throw scheduleRefusal;

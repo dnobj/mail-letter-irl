@@ -305,6 +305,11 @@ describe.each(CARDS)('%s: an open checkout whose mail date has passed (#726)', c
     await harness.click('check-status-button');
     await flush();
     expect(harness.text('checkout-note')).toContain('to arrive by Mon, Jan 13, 2020, and that day has passed.');
+    // An answer with no status (a failed call) leaves it as it was.
+    harness.setStatus({});
+    await harness.click('check-status-button');
+    await flush();
+    expect(harness.visible('checkout-note')).toBe(true);
     // Paid afterwards, through the link: the note about paying goes.
     harness.setStatus({ purchaseStatus: 'processing' });
     await harness.click('check-status-button');

@@ -4826,6 +4826,10 @@ describe('commerceService', () => {
         ['passed', { arrive_by: '2026-10-12', mail_on: '2026-09-30' }, 'SCHEDULE_PASSED']
       ])('cancels an order whose session was never made when its date is %s, and commits that before refusing (#726)', async (_label, dates, code) => {
         activeRows = [currentOrder()];
+        const base = mocks.query.getMockImplementation()!;
+        mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) =>
+          String(sql).includes("SET status = 'cancelled'") ? { rows: [], rowCount: 1 } : base(sql, params)
+        );
         draftRow = { ...draftRow, ...dates };
         await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code, diagnosticClass: code });
         const cancel = mocks.query.mock.calls.find(([sql]) => String(sql).includes("SET status = 'cancelled'"))!;
@@ -4838,6 +4842,17 @@ describe('commerceService', () => {
         await expect(mocks.transaction.mock.results[0].value).resolves.toEqual({ refusal: expect.objectContaining({ code }) });
         expect(inserted()).toBe(false);
         expect(mocks.createJitSession).not.toHaveBeenCalled();
+      });
+
+      it('records no event when the cancel changed no row (#726)', async () => {
+        activeRows = [currentOrder()];
+        draftRow = { ...draftRow, arrive_by: '2026-10-12', mail_on: '2026-09-30' };
+        const base = mocks.query.getMockImplementation()!;
+        mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) =>
+          String(sql).includes("SET status = 'cancelled'") ? { rows: [], rowCount: 0 } : base(sql, params)
+        );
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code: 'SCHEDULE_PASSED' });
+        expect(mocks.query.mock.calls.some(([sql, params]) => String(sql).includes('commerce_order_events') && (params as unknown[])?.[1] === 'checkout.schedule_refused')).toBe(false);
       });
 
       it('cancels nothing when there is no order yet, and refuses inside the transaction (#726)', async () => {
