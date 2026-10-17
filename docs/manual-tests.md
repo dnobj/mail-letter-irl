@@ -2079,7 +2079,7 @@ The account needs a saved return address whose name has initials (such as "Pat E
    - `stationery: "floral"`: refused by the tool's input check, which lists the six themes;
    - a Greek word in Handwritten: refused, naming the handwritten stationery;
    - `set_stationery` with no theme: with saved designs off, refused by the input check ("Required: one of classic, monogram, botanical, celebration, typewriter, handwritten"); with them on, "Name the stationery: classic, monogram, botanical, celebration, typewriter or handwritten, or a saved design's stationeryDesignId.";
-   - `set_stationery` on a postcard draft: "Stationery is for letters. A postcard keeps its own design."
+   - `set_stationery` with `stationery: "botanical"` on a postcard draft: "Stationery is for letters. A postcard keeps its own design."
 
    Also verify `stationery: "Botanical"` (capital B) is accepted.
 6. [ ] With room to write off, take a letter that nearly fills one page in Classic and ask `set_stationery` for typewriter. Verify the refusal: "Letter is N lines too long for one page on the typewriter stationery: … The typewriter stationery sets the text in its own typeface: shorten the message, or choose the classic stationery." (With room to write on, PAGES-01 step 7 applies instead.)
@@ -2109,7 +2109,7 @@ The account needs a saved return address whose name has initials (such as "Pat E
 - `JIT_PURCHASE_ENABLED=true` (Pay & Send is on only for exactly `true`);
 - `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID`, set to the Stripe test prices from `scripts/create-option-prices.ts` (#624): USD 5.99 and USD 6.99, the amounts the product table pins.
 
-Also `LETTER_IRL_PRINT_RENDERER=pdf` in the API. For the card's editor, `LETTER_IRL_STATIONERY_ENABLED` and `LETTER_IRL_STUDIO_CARD_ENABLED` (the editor shows only where the Style row does). For steps 8 and 9, `LETTER_IRL_GIFT_LETTERS_ENABLED`, and an account with a gift letter. The account needs no saved signature (the signature's band takes three lines), a saved return address, and at least one letter in its balance. Paying uses the Stripe test card 4242 (the owner's step unless they have said the loop may pay). Refresh the connectors so `set_letter_words` is listed.
+Also `LETTER_IRL_PRINT_RENDERER=pdf` in the API. For the card's editor, and for step 3's card checks (the summary, the Words tab, "Page 1 of 2"), `LETTER_IRL_STATIONERY_ENABLED` and `LETTER_IRL_STUDIO_CARD_ENABLED` (the editor shows only where the Style row does). For steps 8 and 9, `LETTER_IRL_GIFT_LETTERS_ENABLED`, and an account with a gift letter. The account needs no saved signature (the signature's band takes three lines), a saved return address, and at least one letter in its balance. Paying uses the Stripe test card 4242 (the owner's step unless they have said the loop may pay). Refresh the connectors so `set_letter_words` is listed.
 
 For lengths, use short numbered lines, one to a line with no blank lines. Page 1 holds 26 lines and pages 2 and 3 hold 33 each, with the sign-off counted.
 
@@ -2205,8 +2205,8 @@ The tools name sizes the PostGrid way: `6x4` is the 4x6 and `6x11` is the 11x6.
    - a 6x9 with a 16-line message, to `6x4`: verify "The message is too long for the back of a 4x6 postcard: it takes 16 lines and the back holds 11. Keep its size, or make a new preview with a shorter message.";
    - a border whose caption fits a 6x9 but not a 4x6, to `6x4`: verify "The postcard's caption is too long … To change the size, give layout border and a shorter caption with it.";
    - no arguments: verify "Name what to change: the size, or the layout with its caption or place.";
-   - a letter draft: verify "Sizes and layouts are for postcards. A letter changes its look with set_stationery."
-8. [ ] On the maker, press **4 x 6 in**. Verify "Drawing the postcard again.", then the server's sentence; the page, the size, the count and the cost follow. Press **Border** and type a caption. Verify the hint says "Up to 60 characters, or none. Sending waits until you Update or Put back.", Send waits, and **Put back** restores the line. Press **Greetings**. Verify "Write the place it greets from, then Update." and the line is labelled "Place". Type a place and press **Update**: verify the greeting is drawn. Press **Full**: verify the front goes back to full bleed.
+   - a letter draft, with `size: "6x4"`: verify "Sizes and layouts are for postcards. A letter changes its look with set_stationery."
+8. [ ] On the maker of a 6x9 whose message fits a 4x6 back (11 lines), press **4 x 6 in**. Verify "Drawing the postcard again.", then the server's sentence; the page, the size, the count and the cost follow. Press **Border** and type a caption. Verify the hint says "Up to 60 characters, or none. Sending waits until you Update or Put back.", Send waits, and **Put back** restores the line. Press **Greetings**. Verify "Write the place it greets from, then Update." and the line is labelled "Place". Type a place and press **Update**: verify the greeting is drawn. Press **Full**: verify the front goes back to full bleed.
 9. [ ] Gift postcards:
    - preview a 4x6 with `sendAsGift: true`: verify "A gift letter pays for a one-page letter or a 6x9 postcard, not for this one. …";
    - on a 6x9 gift postcard, verify the maker shows the plain size line, not the size buttons, and that `set_postcard_style` to `6x4` is refused with "A gift postcard is a 6x9: the gift letter pays for that size only. To send another size, make a new preview with sendAsGift set to false.";
