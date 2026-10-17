@@ -125,8 +125,8 @@
       options.input.max = state.max;
       options.input.value =
         state.busy && state.pending !== null ? state.pending : state.schedule ? state.schedule.arriveBy : "";
-      options.input.disabled = state.busy || !idle();
-      options.asap.disabled = state.busy || !idle() || !state.schedule;
+      options.input.disabled = state.busy;
+      options.asap.disabled = state.busy || !state.schedule;
       options.asap.setAttribute("aria-pressed", state.schedule ? "false" : "true");
       var text = state.message || (state.schedule ? mailsLine(state.schedule) : "");
       options.note.textContent = text;

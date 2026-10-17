@@ -1481,8 +1481,6 @@ describe("the Words tab's editor (#586)", () => {
     const reAsk = card.lastRequest('tools/call', 'get_draft_status')!;
     await card.click(card.tab('words'));
     await type(card, 'studio-words-body', 'Dear Sam,\n\nMine.');
-    // It says so: the button reads as unavailable.
-    expect(card.byId('studio-words-update').getAttribute('aria-disabled')).toBe('true');
     await card.click(card.byId('studio-words-update'));
     expect(card.lastRequest('tools/call', 'set_letter_words')).toBeUndefined();
     // Once the draft as it is now is drawn, the words can be set.
@@ -2617,7 +2615,37 @@ describe('the content version the letter card sends (#695)', () => {
     expect(sentWith(card).contentVersion).toBe('v_later');
   });
 
-  it("holds the styles, the Arrives row and the words while a refused send asks for the draft, and says so on the buttons (words review round 2)", async () => {
+  it("ends a refused send's wait only by its own answer, not by an edit's late one dropped as older (words review round 3)", async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.answer(ready('v_preview', PAGE), 'get_draft_status');
+    await restyle(card, 'botanical');
+    await card.answer(restyled('botanical', 'v_both', PAGE, 'v_chat'), 'set_stationery');
+    const editAsk = card.lastRequest('tools/call', 'get_draft_status')!;
+    card.window.dispatchEvent(new card.window.Event('focus'));
+    await flush();
+    const LATER = document1('Dear Sam, later,\nPat');
+    await card.answer(ready('v_later', LATER, { stationery: { theme: 'botanical', dateLine: 'October 1, 2026' } }), 'get_draft_status');
+    // Send is refused for a change since: the card asks for the draft as it is now.
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    const sendAsk = card.lastRequest('tools/call', 'get_draft_status')!;
+    expect(text(card, 'error-message')).toContain('Getting it as it is now');
+    // The edit's ask is answered now, older than the catch-up taken: dropped, and the wait goes on.
+    await card.answerTo(editAsk, ready('v_both', document1('Dear Sam, before,\nPat'), { stationery: { theme: 'botanical', dateLine: 'October 1, 2026' } }));
+    expect(text(card, 'error-message')).toContain('Getting it as it is now');
+    const sends = card.requests('tools/call', 'send_letter').length;
+    await card.click(card.byId('send-button'));
+    expect(card.requests('tools/call', 'send_letter')).toHaveLength(sends);
+    // Its own answer ends it.
+    const NOW = document1('Dear Sam, now,\nPat');
+    await card.answerTo(sendAsk, ready('v_now', NOW, { stationery: { theme: 'botanical', dateLine: 'October 1, 2026' } }));
+    expect(text(card, 'error-message')).not.toContain('Getting it as it is now');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_now');
+  });
+
+  it('changes nothing from the styles or the Arrives row while a refused send asks for the draft (words review rounds 2 and 3)', async () => {
     const card = mount();
     await card.show(output({ ...STYLED, contentVersion: 'v_preview', arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), ON);
     await card.answer(ready('v_preview', PAGE, { schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), 'get_draft_status');
@@ -2626,13 +2654,18 @@ describe('the content version the letter card sends (#695)', () => {
     await card.click(card.byId('send-button'));
     await card.answer(CHANGED, 'send_letter');
     const botanical = card.byId('style-row').querySelector('[data-theme="botanical"]')!;
-    expect(botanical.getAttribute('aria-disabled')).toBe('true');
-    expect((card.byId('arrives-asap') as HTMLButtonElement).disabled).toBe(true);
+    await card.click(botanical);
+    expect(card.lastRequest('tools/call', 'set_stationery')).toBeUndefined();
+    // A date chosen in the field (its change event), and As soon as possible: neither is set.
+    const field = card.byId('arrives-date') as HTMLInputElement;
+    field.value = '2026-10-25';
+    field.dispatchEvent(new card.window.Event('change'));
+    await flush();
     await card.click(card.byId('arrives-asap'));
     expect(card.lastRequest('tools/call', 'set_arrival_date')).toBeUndefined();
     await card.answer(ready('v_now', PAGE, { schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), 'get_draft_status');
-    expect(botanical.getAttribute('aria-disabled')).toBe('false');
-    expect((card.byId('arrives-asap') as HTMLButtonElement).disabled).toBe(false);
+    await card.click(card.byId('arrives-asap'));
+    expect(card.lastRequest('tools/call', 'set_arrival_date')!.params.arguments).toEqual({ draftId: 'draft_0001' });
   });
 
   it('draws no dates from an ask older than one taken, where the letter offers no stationery (words review round 2)', async () => {

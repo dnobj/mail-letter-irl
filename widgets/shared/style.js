@@ -145,10 +145,6 @@
       error: false
     };
     var element = typeof options.wordsElement === "function" ? options.wordsElement : function () { return null; };
-    // Whether the card may change the draft now: what each change asks before it starts, and what the buttons show.
-    function cardIdle() {
-      return typeof options.idle !== "function" || options.idle();
-    }
     var wordsBound = false;
 
     // The Signature switch (#608). offered: the preview says a signature is
@@ -253,8 +249,7 @@
       var shown = shownTheme();
       // aria-disabled, not disabled: a pressed button keeps keyboard focus
       // while the server answers, and set() ignores a press meanwhile.
-      // And while the card says it may not change the draft (idle), which it says only for as long as that lasts.
-      var waiting = state.busy || state.held || !cardIdle() ? "true" : "false";
+      var waiting = state.busy || state.held ? "true" : "false";
       for (var i = 0; i < options.buttons.length; i++) {
         var button = options.buttons[i];
         button.setAttribute("aria-pressed", button.getAttribute("data-theme") === shown ? "true" : "false");
@@ -720,7 +715,7 @@
       body.readOnly = words.updating;
       signOff.readOnly = words.updating;
       // aria-disabled, as the Style row's: a press meanwhile is ignored.
-      update.setAttribute("aria-disabled", state.busy || state.held || !cardIdle() ? "true" : "false");
+      update.setAttribute("aria-disabled", state.busy || state.held ? "true" : "false");
       element("studio-words-cancel").setAttribute("aria-disabled", words.updating ? "true" : "false");
       update.textContent = words.updating ? "Updating the page\u2026" : "Update the page";
       var room = editable ? roomText() : "";
