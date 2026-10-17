@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { FONT_FILES, fontBytes, type FontName } from './fonts.js';
 import type { Layout } from './layout.js';
 
 /**
@@ -10,9 +11,11 @@ import type { Layout } from './layout.js';
  * for an operator rather than printing something nobody saw.
  *
  * LAYOUT_ENGINE_VERSION names the layout engine whose output the golden
- * layouts record (tests/unit/render/layoutEngineVersion.test.ts): a change
- * to any golden layout must come with a new version, so a deploy that moves
- * line breaks says so in the letters it fingerprints from then on.
+ * layouts and glyph placements record (tests/unit/render/layoutEngineVersion.test.ts):
+ * a change to any of them must come with a new version. The version and the
+ * fonts' bytes are part of every fingerprint, so mail fingerprinted before a
+ * deploy that changes either is held rather than printed in glyphs nobody saw,
+ * even where every line, position and page stays where it was.
  */
 export const LAYOUT_ENGINE_VERSION = 'layout-1';
 
@@ -26,15 +29,29 @@ export function isLayoutFingerprint(value: unknown): value is string {
   return typeof value === 'string' && FINGERPRINT_SHAPE.test(value);
 }
 
-/** The scheme a stored fingerprint was made with: `fp1`, or another a later build writes. */
+/** The scheme a stored fingerprint was made with: `fp1`, or another a later build writes; '' for no fingerprint. */
 export function fingerprintScheme(fingerprint: string): string {
-  return fingerprint.slice(0, fingerprint.indexOf(':'));
+  const colon = fingerprint.indexOf(':');
+  return colon < 0 ? '' : fingerprint.slice(0, colon);
+}
+
+let fontDigestCache: Record<FontName, string> | undefined;
+
+/** The SHA-256 of each font file the renderer draws with, by name. */
+export function fontDigests(): Record<FontName, string> {
+  if (!fontDigestCache) {
+    fontDigestCache = Object.fromEntries(
+      (Object.keys(FONT_FILES) as FontName[]).map((name) => [name, createHash('sha256').update(fontBytes(name)).digest('hex')])
+    ) as Record<FontName, string>;
+  }
+  return fontDigestCache;
 }
 
 /**
  * A number to a thousandth of a point: what the page can show. Two builds
- * that compute the same position by different arithmetic agree here, where
- * their last bits may not.
+ * that compute the same position by different arithmetic almost always agree
+ * here, where their last bits may not. One that lands either side of a
+ * half-thousandth differs, which holds the mail: the safe way to be wrong.
  */
 function rounded(value: number): number | string {
   if (!Number.isFinite(value)) return String(value);
@@ -49,8 +66,10 @@ function rounded(value: number): number | string {
  */
 function canonical(value: unknown): unknown {
   if (typeof value === 'number') return rounded(value);
-  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
-    return { sha256: createHash('sha256').update(value).digest('hex') };
+  // Any view of bytes (a Buffer, or a Uint8Array from another realm), hashed as its bytes.
+  if (ArrayBuffer.isView(value)) {
+    const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    return { sha256: createHash('sha256').update(bytes).digest('hex') };
   }
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === 'object') {
@@ -67,13 +86,16 @@ function canonical(value: unknown): unknown {
 /**
  * The fingerprint of what a print draws: the pages' items (text runs as
  * their font, size, position and drawn text; images by their bytes' hash;
- * boxes, rectangles and paths as they are), the page size, and the renderer
- * version the PDF names. Line breaks, page breaks and positions all change it;
- * the order of fields in the code does not.
+ * boxes, rectangles and paths as they are), the page size, the renderer
+ * version the PDF names, the layout engine's version and the fonts' bytes.
+ * Line breaks, page breaks, positions, a font file and a new engine all
+ * change it; the order of fields in the code does not.
  */
 export function layoutFingerprint(layout: Layout, rendererVersion: string): string {
   const drawn = {
     rendererVersion,
+    engine: LAYOUT_ENGINE_VERSION,
+    fonts: fontDigests(),
     width: layout.width,
     height: layout.height,
     pages: layout.pages.map((page) => page.items)

@@ -12,8 +12,10 @@ import {
   layoutLetter,
   layoutPostcard,
   readImageDataUri,
+  POSTCARD_FRONT_RENDERER_VERSION,
   RENDERER_VERSION,
   renderPdf,
+  SIGNATURE_RENDERER_VERSION,
   STATIONERY_RENDERER_VERSION
 } from '../../../src/render/index.js';
 import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
@@ -59,6 +61,16 @@ describe('letterPrintLayout (#697)', () => {
     expect(print.layout.pages[1]).toEqual(layoutGiftPage(giftLetterPageCopy(GIFT_CARD, 'Test Sender')).valueOf());
   });
 
+  it('names the signature version for a signed letter, and refuses one that lost its signature', () => {
+    const signed = {
+      ...letter,
+      rendererVersion: SIGNATURE_RENDERER_VERSION,
+      signature: { image: PNG, closingParagraph: 2 }
+    };
+    expect(letterPrintLayout(signed as never, 1).rendererVersion).toBe(SIGNATURE_RENDERER_VERSION);
+    expect(() => letterPrintLayout({ ...signed, signature: undefined } as never, 1)).toThrow(RenderRefusal);
+  });
+
   it('names the stationery version for a themed letter', () => {
     const print = letterPrintLayout({ ...letter, rendererVersion: STATIONERY_RENDERER_VERSION, stationery: { theme: 'monogram' } } as never, 1);
     expect(print.rendererVersion).toBe(STATIONERY_RENDERER_VERSION);
@@ -78,6 +90,10 @@ describe('letterPrintLayout (#697)', () => {
     expect(() => letterPages({ ...letter, pages: 2 } as never, false)).toThrow(RenderRefusal);
     expect(() => letterPages({ ...letter, pages: 2, giftCard: GIFT_CARD } as never, true)).toThrow(RenderRefusal);
     expect(letterPages({ ...letter, pages: 3 } as never, true)).toBe(3);
+    expect(letterPages(letter as never, false)).toBe(1);
+    for (const pages of [0, -1, 1.5, Number.NaN, '2']) {
+      expect(() => letterPages({ ...letter, pages } as never, true), String(pages)).toThrow(RenderRefusal);
+    }
   });
 });
 
@@ -86,6 +102,19 @@ describe('postcardPrintLayout (#697)', () => {
     const print = postcardPrintLayout({ frontImageBase64: PNG, backMessage: 'Hi Sam', rendererVersion: RENDERER_VERSION } as never, '6x9');
     expect(print.rendererVersion).toBe(RENDERER_VERSION);
     expect(print.layout).toEqual(layoutPostcard({ message: 'Hi Sam', image: readImageDataUri(PNG), strip: undefined, size: '6x9' }));
+  });
+
+  it('names the front version for a postcard drawn with a front, and refuses a front it cannot read', () => {
+    const fronted = {
+      frontImageBase64: PNG,
+      backMessage: 'Hi Sam',
+      rendererVersion: POSTCARD_FRONT_RENDERER_VERSION,
+      front: { layout: 'border', caption: 'Cape Cod' }
+    };
+    const print = postcardPrintLayout(fronted as never, '6x9');
+    expect(print.rendererVersion).toBe(POSTCARD_FRONT_RENDERER_VERSION);
+    expect(print.layout).toEqual(layoutPostcard({ message: 'Hi Sam', image: readImageDataUri(PNG), strip: undefined, size: '6x9', layout: 'border', caption: 'Cape Cod' }));
+    expect(() => postcardPrintLayout({ ...fronted, front: { layout: 'collage' } } as never, '6x9')).toThrow(RenderRefusal);
   });
 
   it('refuses a gift card on any postcard but a 6x9', () => {

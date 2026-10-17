@@ -149,7 +149,7 @@ interface PostcardView {
 /**
  * A postcard's size and front (#594), for the page to name: its size, and its
  * front as the print reads it, only for a postcard drawn as 'pdf-3' and
- * through postcardFrontOf (PostGridProvider.renderPostcardForPrint), the photo
+ * through postcardFrontOf (printDocument.postcardPrintLayout), the photo
  * alone otherwise. Null for a letter, and for a front the print cannot read,
  * so the page never names one that will not print.
  */
