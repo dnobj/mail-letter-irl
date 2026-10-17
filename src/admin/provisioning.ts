@@ -155,10 +155,17 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * 064 adds purge_expired_admin_command_records (#771), which deletes admin
  * command runs and their operations two years after they finished. EXECUTE is
  * revoked from PUBLIC and the roles are granted none; they hold no DELETE on
- * either table. Nothing to re-run; required, as the newest is.
+ * either table. Nothing to re-run.
+ *
+ * 065 adds letters.print_pdf_sha256, print_layout_fingerprint and
+ * print_layout_engine (#697), with six CHECKs: what the send recorded of held
+ * mail's print. As for 040, the reader role's letters column list leaves them
+ * out and the operator role reads letters whole; no command writes them, so
+ * the operator's letters UPDATE list is unchanged. Nothing to re-run;
+ * required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "064_admin_command_retention.sql";
+  "065_letters_print_pdf.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

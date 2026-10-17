@@ -9,6 +9,7 @@ import { deductCreditsFromLedgerWithClient } from './creditLedgerService.js';
 import { isBetaAccessAllowed, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
 import { assertGiftSendWithinDailyCap, assertMailWithinDailyCaps } from './betaSpendLimits.js';
 import { createLetterJobWithClient } from './letterJobService.js';
+import { recordHeldPrintWithClient, storeHeldPrint } from './heldPrintService.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import { consumeGiftLetterForSendWithClient } from './giftLetterService.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
@@ -533,6 +534,9 @@ export async function createMailOrderFromDraftWithClient(
     [letterId, params.draftId]
   );
   const job = await createLetterJobWithClient(client as pg.PoolClient, letter, { notBefore: releaseAt });
+  // Held mail prints as previewed (#697): what the print will lay out, recorded
+  // with the send. Never refuses it: mail it cannot record prints as before.
+  await recordHeldPrintWithClient(client as pg.PoolClient, letter, releaseAt);
 
   if (jitOrder) {
     await client.query(
@@ -560,7 +564,13 @@ export async function createMailOrderFromDraftWithClient(
 export async function createMailOrderFromDraft(
   params: CreateMailOrderParams
 ): Promise<CreateMailOrderResult> {
-  return transaction(client => createMailOrderFromDraftWithClient(client, params));
+  const result = await transaction(client => createMailOrderFromDraftWithClient(client, params));
+  // Held mail's PDF (#697), drawn and stored once the send has committed. It
+  // never throws: the maintenance run stores any this could not.
+  if (!result.alreadyConsumed && result.job?.mail_hold_until) {
+    await storeHeldPrint(result.letter.letter_id);
+  }
+  return result;
 }
 
 export function asPostcardDraft(draft: MailDraftRow): PostcardDraft {

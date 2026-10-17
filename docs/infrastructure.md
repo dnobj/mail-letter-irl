@@ -96,7 +96,7 @@ attempt. While letters are waiting, the run withholds its heartbeat, so the exte
 the outbox is switched back on. It withholds it too while a letter with an arrival date is still waiting
 after 18:00 New York time on its mail day (#699).
 
-Generated images are stored in a private Railway bucket for 15 minutes, and so is a photo uploaded through the card in an app with no file store (#474, one per account under `uploaded-photos/`, never served at an address). Production must not fall back to process memory. Development may use memory only for local execution; deployed development uses the bucket so restart behavior matches production.
+Generated images are stored in a private Railway bucket for 15 minutes, and so is a photo uploaded through the card in an app with no file store (#474, one per account under `uploaded-photos/`, never served at an address). The same bucket keeps the print PDF of mail held for its mail date (#697, `held-pdf/<letter_id>.pdf`, never served at an address) from the send until the provider accepts it, the mail is cancelled, or the hourly sweep finds its letter no longer waiting: up to the schedule's horizon. A lifecycle rule that expires objects early only costs the stored PDF, and the print then lays the mail out again under its fingerprint. Production must not fall back to process memory. Development may use memory only for local execution; deployed development uses the bucket so restart behavior matches production.
 
 ## Database Connectivity
 
