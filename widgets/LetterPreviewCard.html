@@ -187,7 +187,7 @@
       .studio #arrives-row input[type=date]{font-size:12.5px;padding:4px 8px;border-radius:999px}
       .studio-quiet{margin:0;font-size:12px;color:var(--mut);line-height:1.45}
       .studio-words{max-height:300px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;font-family:Georgia,"Times New Roman",serif;font-size:13px;line-height:1.55;color:var(--tx);background:var(--sf2);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px}
-      .studio-words[hidden],.studio-words-edit[hidden],.studio-panel .note[hidden],#studio-words-open[hidden]{display:none}
+      .studio-words[hidden],.studio-words-edit[hidden],.studio-words-actions[hidden],.studio-panel .note[hidden]{display:none}
       /* The Words tab's editor (#586). */
       .studio-words-edit{display:flex;flex-direction:column;gap:6px}
       .studio-words-edit label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
@@ -385,7 +385,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t37</p>
+      <p class="rev">letter t38</p>
     </div>
 
     <!-- The studio card (#580): widgets/shared/studio.js lays the card out
@@ -425,14 +425,13 @@
               <label for="studio-words-signoff">Signed</label>
               <textarea id="studio-words-signoff" rows="2"></textarea>
               <p class="studio-quiet" id="studio-words-count" hidden></p>
-              <div class="studio-words-actions">
+              <div class="studio-words-actions" id="studio-words-actions" hidden>
                 <button type="button" class="words-button primary" id="studio-words-update">Update the page</button>
-                <button type="button" class="words-button" id="studio-words-cancel">Cancel</button>
+                <button type="button" class="words-button" id="studio-words-cancel">Put back</button>
               </div>
             </div>
             <p class="studio-quiet" id="studio-fit" hidden></p>
             <p class="note" id="studio-words-note" role="status" hidden></p>
-            <button type="button" class="words-button" id="studio-words-open" hidden>Change the words</button>
             <p class="studio-quiet" id="studio-words-chat">To change the words, ask in the chat.</p>
           </div>
           <div class="studio-panel" role="tabpanel" id="studio-panel-delivery" aria-labelledby="studio-tab-delivery" data-tab="delivery" hidden>
@@ -558,8 +557,18 @@
       // What set_arrival_date last said about this card's draft:
       // {draftId, schedule, deliveryEstimate}. render() shows its estimate.
       let arrivalChange = null;
+      // The changes this card has started on its draft, counted: an answer to a catch-up asked before one of them is
+      // older than it (catchUp).
+      let draftChanges = 0;
+      // Whether the card may change its draft now: not while it sends the letter or starts paying for it, nor while a
+      // send refused for a change since asks for the draft as it is now (#695), whose answer is taken whatever the card
+      // has set. The Style row, the Words tab and the Arrives row each ask it before a change.
+      function cardIdle() {
+        return !sendInProgress && !checkoutInProgress && changed === null;
+      }
       const picker = arrives.createPicker({
         host,
+        idle: () => cardIdle(),
         onVersion: (draftId, version, before) => takeEditVersion(draftId, version, before),
         row: document.getElementById("arrives-row"),
         input: document.getElementById("arrives-date"),
@@ -569,6 +578,7 @@
         resultText,
         onSet() {
           draftActedOn = true;
+          draftChanges += 1;
         },
         onChange(change) {
           arrivalChange = change;
@@ -639,18 +649,22 @@
         },
         readableError,
         resultText,
-        // Not while this card sends the letter or starts paying for it.
         idle() {
-          return !sendInProgress && !checkoutInProgress;
+          return cardIdle();
         },
         onSet() {
           draftActedOn = true;
+          draftChanges += 1;
         },
         onChange() {
           render();
         },
         onBusy() {
           render();
+        },
+        // New words refused for words changed elsewhere: the card asks for them now.
+        onStale(draftId) {
+          catchUp(draftId, true);
         },
         // The Words tab's editor (#586), drawn by the studio.
         wordsElement(id) {
@@ -820,13 +834,14 @@
         const fit = fitText(state);
         const fitLine = document.getElementById("studio-fit");
         fitLine.textContent = fit;
-        fitLine.hidden = !fit;
         // The words can change here while room to write is offered, as the
         // preview's count says (#586), and only where the Style row shows: the
         // card's one word on whether the draft can still change, the row goes
         // once the letter is sent, paid for, expired or on its confirmation page.
         const offered = Boolean(currentMeta().pageFit || styleRow.terms(state.draftId)?.pageFit);
         styleRow.showWords(state.draftId, currentWords(state.draftId), latestFit(state), offered, Boolean(state.giftCard));
+        // With the boxes open, the room line under them says how full one page is: the fit line would say it twice.
+        fitLine.hidden = !fit || (styleRow.wordsEditable() && pagesOf(state) === 1);
 
         // Under the Style tab the row's label would repeat the tab's name.
         document.getElementById("style-label").textContent = "Stationery";
@@ -1345,14 +1360,29 @@
       const draftStateAsked = new Set();
 
       // force (#695): asked again after a send refused for a change since, the answer is taken whatever this card
-      // has set, and its version with it.
+      // has set, and its version with it. "catchUp": asked again to hear what the chat changed (catchUp), the answer is
+      // taken the same way, unless the card started a change of its own since it asked, or is making one.
+      // Asks are numbered: a ready answer from an older ask than the last one taken is older than what the card shows,
+      // as a host may answer them out of order (MCP Apps hosts do not queue them).
+      let draftAsks = 0;
+      let draftAskTaken = 0;
       function askDraftState(draftId, force) {
         if (typeof host.callTool !== "function") return;
         if (typeof draftId !== "string" || !draftId || (!force && draftStateAsked.has(draftId))) return;
         draftStateAsked.add(draftId);
+        const changesAsked = draftChanges;
+        const ask = ++draftAsks;
         host.callTool("get_draft_status", { draftId }).then(
           (result) => {
             const answer = toolData(result);
+            // A catch-up's answer is older than any change the card started since it asked, and is not taken while
+            // one is under way or the card has moved on from the draft.
+            if (
+              force === "catchUp" &&
+              (draftChanges !== changesAsked || styleRow.busy() || picker.busy() || changed !== null || !catchUpOpen(draftId))
+            ) {
+              return;
+            }
             if (answer.draftId !== draftId) {
               // An error result (a host that resolves a failed call) is an ask that failed, to try again.
               if (force === true) changedRedrawn(draftId, result?.isError || typeof answer.draftId !== "string" ? "failed" : false);
@@ -1366,6 +1396,13 @@
             // now: this card may have changed them since that preview (#535).
             if (answer.status === "ready") {
               statusReadyFor = draftId;
+              // Ready all the same; but no answer older than one taken is drawn, however it was asked: the one taken is
+              // the draft as it is later. Dropped, it ends no wait: nothing asks while a refused send waits (cardIdle,
+              // catchUp), so no answer newer than its ask can drop it, and its own answer ends the wait (an edit's ask made
+              // before the refusal may answer first and end it early; the refused send's own then draws again). Nor is an answer drawn that
+              // was asked before a change the card started since, unless it was asked to be taken whatever the card has
+              // set (force: a refused send's, or an edit's made to another version).
+              if (ask < draftAskTaken || (force !== true && draftChanges !== changesAsked)) return;
               // And the style it is in now, with its page (#563): this card,
               // or the chat, may have restyled it since that preview.
               // How full its pages are (#592 review round 1): the preview's own
@@ -1376,15 +1413,19 @@
                 typeof statusPage === "string" && statusPage === currentMeta().previewHtml ? currentMeta().pageFit ?? null : null;
               // The terms it carries, with how the letter travels now (#625), are taken together or not at all: the style row
               // refuses an answer for another draft, while the card sets a style, and for a preview that named no stationery.
-              const styleTaken = styleRow.adopt(draftId, answer.stationery, statusPage, answer, statusFit, force === true);
+              const styleTaken = styleRow.adopt(draftId, answer.stationery, statusPage, answer, statusFit, force === true || force === "catchUp");
               // And what they mean for delivery, for the Delivery line.
-              const datesTaken = picker.adopt(draftId, answer.schedule, force === true);
+              // A catch-up takes the dates too: one the card set before it asked is in the answer, and one set after
+              // drops the answer (draftChanges), so the version it shows is the version of all it shows.
+              const datesTaken = picker.adopt(draftId, answer.schedule, force === true || force === "catchUp");
               if (datesTaken && typeof answer.deliveryEstimate === "string" && answer.deliveryEstimate) {
                 arrivalChange = { draftId, schedule: picker.schedule(), deliveryEstimate: answer.deliveryEstimate };
               }
               // Its version, once the card shows all it says (#695): its page, drawn from this answer, and its dates.
               const drawnWhole =
                 styleTaken && typeof statusPage === "string" && statusPage !== "" && (datesTaken || !picker.follows(draftId));
+              // Anything taken from it, its style or its dates, makes it the latest answer drawn.
+              if (styleTaken || datesTaken) draftAskTaken = ask;
               if (drawnWhole) showVersion(draftId, answer.contentVersion);
               if (drawnWhole && changed === null && changedNotice) {
                 changedNotice = false;
@@ -1416,6 +1457,36 @@
           },
         );
       }
+
+      // The chat can change the draft this card shows, its words, its style or its signature, and ChatGPT tells no card
+      // of it. So the card asks the server again when the person comes back to it (it gains focus, or is shown again)
+      // or goes to its words, at most every five seconds, and at once when new words were refused for words changed
+      // since (onStale). Words being typed meanwhile are kept (style.js). Only while the card shows a draft that can
+      // still change.
+      const CATCH_UP_AFTER_MS = 5000;
+      let caughtUpAt = 0;
+      function catchUpOpen(draftId) {
+        return (
+          typeof draftId === "string" && draftId !== "" && draftId === currentDraftId && cardIsShowingDraft() &&
+          !checkoutInProgress && !settledDraft() && !sendPageShown() && !keptOrderShown()
+        );
+      }
+      function catchUp(draftId = currentDraftId, now = false) {
+        if (!catchUpOpen(draftId) || changed !== null || styleRow.busy() || picker.busy()) return;
+        if (!now && Date.now() - caughtUpAt < CATCH_UP_AFTER_MS) return;
+        caughtUpAt = Date.now();
+        askDraftState(draftId, "catchUp");
+      }
+      window.addEventListener("focus", () => catchUp());
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) catchUp();
+      });
+      // Focus moving within the Words tab (from a box to its buttons, or the card's own move after an Update) is not
+      // a coming back.
+      document.addEventListener("focusin", (event) => {
+        if (event.relatedTarget?.closest?.("#studio-panel-words")) return;
+        if (event.target?.closest?.("#studio-panel-words, #studio-tab-words")) catchUp();
+      });
 
       function settledDraft() {
         return draftState !== null && draftState.draftId === currentDraftId ? draftState : null;
@@ -2732,6 +2803,14 @@
         if (typeof state === "string" && state !== "pending_payment" && scheduleMissedShown) {
           scheduleMissedShown = false;
           document.getElementById("checkout-note").style.display = "none";
+        }
+        // A checkout cancelled, or left until it expired, cancels its order: nothing can be paid on this card now, so
+        // its checkout link, the button that opened it, Check status and the note about paying go. The pill says what
+        // happened, and a new preview is the way to send it.
+        if (state === "cancelled") {
+          for (const id of ["pay-send-button", "checkout-link", "check-status-button", "checkout-note"]) {
+            document.getElementById(id).style.display = "none";
+          }
         }
         // "Settled" means nothing further will change SOON - not that nothing
         // will ever change. "processing" counts, and that is the point:

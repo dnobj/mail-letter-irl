@@ -107,13 +107,19 @@
    *
    * options: host, row, input, asap, note, readableError(error),
    *   resultText(result), onSet() (a date is being set on the draft),
-   *   onChange({ draftId, schedule, deliveryEstimate }), onBusy()
+   *   onChange({ draftId, schedule, deliveryEstimate }), onBusy(), and idle(),
+   *   where the card gives one (whether it may change the draft now)
    */
   function createPicker(options) {
     var host = options.host;
     // pending: the date being set while the server answers ("" for as soon
     // as possible), so the field keeps what the person chose meanwhile.
     var state = { draftId: null, schedule: null, min: "", max: "", busy: false, pending: null, message: "", error: false, set: false };
+    // Whether the card may change the draft now (options.idle, where the card gives one): not while it sends or pays,
+    // nor while a send refused for a change since asks for the draft as it is now.
+    function idle() {
+      return typeof options.idle !== "function" || options.idle();
+    }
 
     function draw() {
       options.input.min = state.min;
@@ -130,7 +136,7 @@
     }
 
     function set(arriveBy) {
-      if (state.busy || !state.draftId || typeof host.callTool !== "function") return;
+      if (state.busy || !state.draftId || typeof host.callTool !== "function" || !idle()) return;
       var draftId = state.draftId;
       state.busy = true;
       state.pending = arriveBy || "";

@@ -439,6 +439,33 @@ describe.each(CARDS)('%s purchase status', card => {
     expect(harness.pendingTimers().length).toBe(0);
   });
 
+  it('takes away the checkout link, the button that opened it and Check status once the checkout is cancelled or expired', async () => {
+    await checkout(harness);
+    expect(harness.visible('checkout-link')).toBe(true);
+    harness.setStatus({ purchaseStatus: 'cancelled', message: 'The checkout was cancelled or expired without sending the draft.' });
+
+    await harness.runNextTimer();
+
+    expect(harness.text('status-pill')).toBe('The checkout was cancelled or expired without sending the draft.');
+    for (const id of ['pay-send-button', 'checkout-link', 'check-status-button', 'checkout-note']) {
+      expect(harness.visible(id), id).toBe(false);
+    }
+    expect(harness.pendingTimers().length).toBe(0);
+    // A re-render of the preview it came from does not bring them back.
+    harness.fireGlobals();
+    await flush();
+    for (const id of ['pay-send-button', 'checkout-link', 'check-status-button']) {
+      expect(harness.visible(id), id).toBe(false);
+    }
+  });
+
+  it('keeps the checkout link through a failed payment, which may be tried again', async () => {
+    await checkout(harness);
+    harness.setStatus({ purchaseStatus: 'payment_failed', message: 'Payment was not completed.' });
+    await harness.runNextTimer();
+    expect(harness.visible('checkout-link')).toBe(true);
+  });
+
   it('does not flicker the button on an automatic refresh', async () => {
     // The reported symptom: the card appeared to cycle between "Checking..."
     // and "Check status". A label announcing the user's click has no business
