@@ -57,6 +57,7 @@ const REQUIRED = [
   'stationeryDesigns.postgres.test.ts',
   'signatureDrafts.postgres.test.ts',
   'certifiedMail.postgres.test.ts',
+  'heldPrintPdf.postgres.test.ts',
 ];
 
 /**

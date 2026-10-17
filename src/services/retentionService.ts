@@ -624,6 +624,9 @@ ${LETTER_DUE_PREDICATE}
         SET content = '{}'::jsonb,
             recipient = '{}'::jsonb,
             preview_html = NULL,
+            print_pdf_sha256 = NULL,
+            print_layout_fingerprint = NULL,
+            print_layout_engine = NULL,
             redacted_at = NOW()
       WHERE letter_id IN (SELECT letter_id FROM due)`,
     [
@@ -807,6 +810,9 @@ ${CANCELLED_HELD_LETTER_DUE_PREDICATE}
         SET content = '{}'::jsonb,
             recipient = '{}'::jsonb,
             preview_html = NULL,
+            print_pdf_sha256 = NULL,
+            print_layout_fingerprint = NULL,
+            print_layout_engine = NULL,
             redacted_at = NOW()
       WHERE letter_id IN (SELECT letter_id FROM due)`,
     [liveDays, SETTLED_JOB_STATUSES, SETTLED_ORDER_STATUSES, MONEY_BACKED_SOURCE_TYPES, batchLimit, retentionDays]

@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   deductCredits: vi.fn(),
   createOutboxJob: vi.fn(),
   transaction: vi.fn(),
+  recordHeldPrint: vi.fn(),
+  storeHeldPrint: vi.fn(),
   diagnostics: [] as Array<{ level: string; event: string; fields: Record<string, unknown> }>
 }));
 const deductCredits = mocks.deductCredits;
@@ -150,6 +152,11 @@ vi.mock('../../../src/services/creditLedgerService.js', () => ({
 }));
 vi.mock('../../../src/services/letterJobService.js', () => ({
   createLetterJobWithClient: mocks.createOutboxJob
+}));
+// Held mail's print (#697): spied here, run for real in heldPrintService.test.ts.
+vi.mock('../../../src/services/heldPrintService.js', () => ({
+  recordHeldPrintWithClient: mocks.recordHeldPrint,
+  storeHeldPrint: mocks.storeHeldPrint
 }));
 vi.mock('../../../src/utils/diagnosticLog.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/utils/diagnosticLog.js')>()),
@@ -947,6 +954,39 @@ describe('createMailOrderFromDraft', () => {
       });
       // The value moved as for any send: the hold is only when it prints.
       expect(deductCredits).toHaveBeenCalledTimes(1);
+    });
+
+    it("records held mail's print in the send's transaction, and stores its PDF once it has committed (#697)", async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      const order: string[] = [];
+      mocks.recordHeldPrint.mockImplementation(async () => { order.push('record'); });
+      mocks.storeHeldPrint.mockImplementation(async () => { order.push('store'); return 'stored'; });
+      createOutboxJob.mockImplementation(async (_client, letter, options) => ({
+        job_id: 'job-1',
+        letter_id: letter.letter_id,
+        status: 'pending',
+        idempotency_key: letter.letter_id,
+        mail_hold_until: options.notBefore
+      }));
+      const committed = vi.fn(() => order.push('commit'));
+      mocks.transaction.mockImplementation(async (callback: (dbClient: typeof client) => Promise<unknown>) => {
+        const result = await runTransaction(callback);
+        committed();
+        return result;
+      });
+
+      const result = await send();
+
+      expect(mocks.recordHeldPrint).toHaveBeenCalledWith(client, expect.objectContaining({ letter_id: result.letter.letter_id }), new Date('2026-10-06T13:00:00Z'));
+      expect(mocks.storeHeldPrint).toHaveBeenCalledWith(result.letter.letter_id);
+      expect(order).toEqual(['record', 'commit', 'store']);
+    });
+
+    it('stores no PDF for mail not held, and records it with no date to hold for (#697)', async () => {
+      await send();
+      expect(mocks.recordHeldPrint).toHaveBeenCalledWith(client, expect.anything(), undefined);
+      expect(mocks.storeHeldPrint).not.toHaveBeenCalled();
     });
 
     it('mails today when today is its mail date, released at once since 09:00 has passed', async () => {

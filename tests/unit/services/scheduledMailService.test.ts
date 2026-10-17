@@ -9,11 +9,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/db/index.js', () => ({ transaction: vi.fn(), query: vi.fn() }));
 vi.mock('../../../src/services/creditLedgerService.js', () => ({ returnConsumedCreditsForLetter: vi.fn() }));
 vi.mock('../../../src/services/giftLetterService.js', () => ({ returnGiftLetterForFailedSendWithClient: vi.fn() }));
+vi.mock('../../../src/services/heldPrintPdf.js', () => ({ forgetHeldPdf: vi.fn() }));
 
 import { query, transaction } from '../../../src/db/index.js';
 import { returnConsumedCreditsForLetter } from '../../../src/services/creditLedgerService.js';
 import { returnGiftLetterForFailedSendWithClient } from '../../../src/services/giftLetterService.js';
 import { leftForOperatorSql } from '../../../src/services/heldMail.js';
+import { forgetHeldPdf } from '../../../src/services/heldPrintPdf.js';
 import {
   CANCELLED_BY_CUSTOMER,
   MISSED_MAIL_DAY_ALERT,
@@ -46,9 +48,31 @@ beforeEach(() => {
   vi.mocked(transaction).mockReset();
   vi.mocked(returnConsumedCreditsForLetter).mockReset().mockResolvedValue(2);
   vi.mocked(returnGiftLetterForFailedSendWithClient).mockReset().mockResolvedValue(1);
+  vi.mocked(forgetHeldPdf).mockReset().mockResolvedValue(undefined);
 });
 
 describe('cancelScheduledMail (#535)', () => {
+  it("deletes a cancelled letter's held PDF once the cancel has committed, and keeps it on a refusal (#697)", async () => {
+    let committed = false;
+    const client = { query: vi.fn() };
+    client.query.mockResolvedValueOnce({ rows: [HELD] }).mockResolvedValueOnce({ rows: [JOB] }).mockResolvedValue({ rows: [], rowCount: 1 });
+    vi.mocked(transaction).mockImplementation(async callback => {
+      const result = await callback(client as never);
+      committed = true;
+      return result;
+    });
+    vi.mocked(forgetHeldPdf).mockImplementation(async () => {
+      expect(committed).toBe(true);
+    });
+    await expect(cancel()).resolves.toMatchObject({ ok: true });
+    expect(forgetHeldPdf).toHaveBeenCalledWith(LETTER);
+
+    vi.mocked(forgetHeldPdf).mockClear();
+    inTransaction({ rows: [{ ...HELD, status: 'processing' }] });
+    await expect(cancel()).resolves.toMatchObject({ ok: false, refusal: 'too_late' });
+    expect(forgetHeldPdf).not.toHaveBeenCalled();
+  });
+
   it("cancels held prepaid mail: locks the caller's letter, then its job without waiting, cancels both, records it and returns the letter", async () => {
     const client = inTransaction({ rows: [HELD] }, { rows: [JOB] });
 

@@ -13,7 +13,7 @@ Revalidate before acting: numbers below are as of `dev` at `3db2f57` (2026-10-16
 
 | Repository | Production | Development | Pending |
 | --- | --- | --- | --- |
-| API (`mail-letter-irl`) | `master` at `27e160a` (#416, 2026-09-16) | `dev` | 248 pull requests (#336, #415 to #782), migrations `033` to `064` |
+| API (`mail-letter-irl`) | `master` at `27e160a` (#416, 2026-09-16) | `dev` | 248 pull requests (#336, #415 to #782), migrations `033` to `065` |
 | Website (`mail-letter-irl-website`) | `main` at `bc81767` (2026-09-16) | `dev` | 31 commits (#31 to #72) |
 
 [status.md](status.md) summarises what the launch version adds.
@@ -247,10 +247,10 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
 
 1. Between :10 and :40, merge `dev` into `master` (a pull request, the owner's merge).
 2. Watch the API's and the maintenance service's deploy logs (either may run the migrations first;
-   the other then finds nothing to apply): the pre-deploy applies `033` to `064` in one transaction, then the
+   the other then finds nothing to apply): the pre-deploy applies `033` to `065` in one transaction, then the
    new build starts. If the API's pre-deploy fails, read the migration ledger first: the
    maintenance service's run may have applied them while the API's waited on the lock. If the
-   ledger's newest row is `064`, they did: redeploy the API, and leave the maintenance service on
+   ledger's newest row is `065`, they did: redeploy the API, and leave the maintenance service on
    the new build. Otherwise the old API build keeps serving and nothing was applied; fix the cause
    and redeploy, the maintenance service too. A service with its own migrating pre-deploy (the
    maintenance service, by `railway.toml`) stays on its old deployment when that run fails; one
@@ -260,11 +260,11 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
    see, such as the OAuth scopes), the old build keeps serving on the new schema, which it
    tolerates. Fix the variable and redeploy; do not roll back the migrations. If the API's run
    succeeds and the maintenance service's fails, redeploy the maintenance service: the ledger is
-   already at `064`.
+   already at `065`.
 3. Check:
    - `/readyz` answers 200 with the new `X-Build-Commit`;
    - the boot log shows `boot.thread_pool` with size 16;
-   - the ledger's newest row is `064_admin_command_retention.sql`;
+   - the ledger's newest row is `065_letters_print_pdf.sql`;
    - one production sign-in with each method chosen in stage 0, through the website and through a
      connected app (the ChatGPT connector, with "Connect another account"), each sign-in page
      offering exactly the chosen methods; sign out on the website between methods, so a remembered
@@ -385,7 +385,7 @@ stage B allows (see "Rollback").
 
 ## Migrations
 
-All of `033` to `064` apply in one transaction, with a 60-second lock timeout. None breaks the old
+All of `033` to `065` apply in one transaction, with a 60-second lock timeout. None breaks the old
 build while it serves during the deploy; the columns, tables and check lists only widen. What to
 know:
 
@@ -414,7 +414,7 @@ mail it would mishandle, so:
   1. Roll back the API **and the maintenance service together**, with Railway's Rollback (it restores
      the previous image and its variables, rather than building the old commit again). The
      maintenance run is what dispatches the queue. The admin service stays on the new build: it reads
-     the `064` schema and holds the commands below.
+     the `065` schema and holds the commands below.
   2. Do it between maintenance runs, and only when this read-only count, run as the owner role
      (the admin roles cannot read `letters.content`), is 0 in every column; run it again right
      before:

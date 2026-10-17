@@ -79,7 +79,9 @@ export async function renderPdf(layout: Layout, version: string = RENDERER_VERSI
     margin: 0,
     autoFirstPage: false,
     // A fixed date: pdfkit would stamp the time, and derive the file's ID from it, so two renders of
-    // one layout would differ. Held mail's stored PDF is checked by its hash (#697).
+    // one layout would differ. Held mail's stored PDF is checked by its hash (#697). The ID is made
+    // from these fields alone, so it is the same for every PDF of a renderer version: never read it
+    // as naming a letter.
     info: { Title: layout.title ?? 'Letter', Creator: 'Letter IRL', Producer: `Letter IRL renderer ${version}`, CreationDate: PDF_CREATION_DATE }
   });
   const chunks: Buffer[] = [];

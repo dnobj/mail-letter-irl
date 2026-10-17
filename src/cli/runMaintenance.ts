@@ -23,6 +23,7 @@ import { lettersPastMailDay, raiseMissedMailDayAlerts } from '../services/schedu
 import { notifyOperator, OPERATOR_NOTICES, settleOperatorNotices } from '../services/operatorNotify.js';
 import { enabledUnlessDisabled, positiveIntegerSetting } from '../utils/envSettings.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
+import { backfillHeldPrints, sweepHeldPdfs } from '../services/heldPrintService.js';
 import {
   carriedDiagnosticClass,
   classifyDiagnosticError,
@@ -396,6 +397,33 @@ async function runAccountErasures(): Promise<void> {
  */
 const RETENTION_RESTORE_INTERVAL_MS = 30 * 60 * 1000;
 
+/**
+ * Held mail's stored PDFs (#697): draw one for each held letter the send could
+ * not, then delete those whose letter no longer waits to print. Every run, and
+ * after the outbox, so mail it just sent has given its PDF up. Wrapped, so a
+ * bucket that is down never stops the run; counts only, never a letter id.
+ */
+export async function runHeldPrintMaintenance(): Promise<void> {
+  try {
+    const backfill = await backfillHeldPrints();
+    console.log('[Maintenance] Held print backfill summary:', backfill);
+    writeDiagnostic(backfill.layoutChanged + backfill.unprintable > 0 ? 'error' : 'info', 'held_print.backfilled', backfill);
+  } catch (error) {
+    writeDiagnostic('error', 'held_print.backfill_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+  try {
+    const sweep = await sweepHeldPdfs();
+    console.log('[Maintenance] Held print sweep summary:', sweep);
+    writeDiagnostic('info', 'held_print.swept', sweep);
+  } catch (error) {
+    writeDiagnostic('error', 'held_print.sweep_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
 async function runRetentionRestores(): Promise<void> {
   try {
     const run = await runMaintenanceTaskIfDue(
@@ -525,6 +553,7 @@ export async function runMaintenance(): Promise<void> {
 
   const expiredImages = await cleanupExpiredImages();
   console.log(`[Maintenance] Removed ${expiredImages} expired temporary images`);
+  await runHeldPrintMaintenance();
 
   const status = await runMaintenanceTaskIfDue('provider-status-sync', SIX_HOURS_MS, runStatusSync);
   console.log(`[Maintenance] Provider status sync ${status.ran ? 'completed' : 'not due'}`);
