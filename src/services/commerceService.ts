@@ -2010,8 +2010,10 @@ async function processCheckoutSessionEvent(
     ]);
 
     const intentId = paymentIntentId(session);
-    const unmatchedMoney = await client.query<{ event_id: string; event_type: string }>(
-      `SELECT event_id, event_type FROM stripe_webhook_events
+    const unmatchedMoney = await client.query<{
+      event_id: string; event_type: string; provider_object_id: string | null;
+    }>(
+      `SELECT event_id, event_type, provider_object_id FROM stripe_webhook_events
        WHERE processing_status = 'unmatched'
          AND (($1::varchar IS NOT NULL AND provider_payment_intent_id = $1)
            OR metadata_order_id = $2)
@@ -2042,6 +2044,7 @@ async function processCheckoutSessionEvent(
          WHERE order_id = $1`,
         [order.order_id, session.id, intentId, blockedStatus]
       );
+      if (isDispute) await applyRecoveredDisputes(client, order.user_id, unmatchedMoney.rows);
       await client.query(
         `UPDATE stripe_webhook_events SET order_id = $2, processing_status = 'processed',
            resolved_at = NOW() WHERE event_id = ANY($1::varchar[])`,
@@ -3562,6 +3565,45 @@ async function blockAccountSends(
      WHERE user_id = $1`,
     [userId, reason]
   );
+}
+
+/**
+ * The loss rule for disputes recorded while no order matched, run when a later
+ * checkout ties their money to an order (processCheckoutSessionEvent's
+ * recovery). Their events returned before processDisputeEvent's loss rule, so
+ * without this the account went on sending until the dispute's next event.
+ *
+ * The recovery returns before the checkout grants a pack or queues mail, so the
+ * block is what is left of the rule; the order itself is the recovery's
+ * business, as before. The dispute rows take the
+ * order's account, which processDisputeEvent reads as "its effects ran": the
+ * next event of a loss records only, as for a matched loss, and the unblock
+ * after another dispute's win (unblockAccountSends) and an operator's lift
+ * (countStandingDisputes) see this one standing.
+ *
+ * Each dispute's lock first, as its events take it, so an event being handled
+ * now finishes before the status it wrote is read.
+ */
+async function applyRecoveredDisputes(
+  client: Pick<pg.PoolClient, 'query'>,
+  userId: string,
+  events: Array<{ event_type: string; provider_object_id: string | null }>
+): Promise<void> {
+  const disputeIds = [...new Set(events
+    .filter(event => event.event_type.startsWith('charge.dispute.') && event.provider_object_id)
+    .map(event => event.provider_object_id as string))].sort();
+  for (const disputeId of disputeIds) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`stripe_dispute:${disputeId}`]);
+  }
+  const disputes = await client.query<{ status: string }>(
+    `UPDATE stripe_disputes SET user_id = COALESCE(user_id, $2), updated_at = NOW()
+     WHERE dispute_id = ANY($1::text[])
+     RETURNING status`,
+    [disputeIds, userId]
+  );
+  if (disputes.rows.some(row => !NON_LOSS_DISPUTE_STATUSES.has(row.status))) {
+    await blockAccountSends(client, userId, 'payment_disputed');
+  }
 }
 
 /**

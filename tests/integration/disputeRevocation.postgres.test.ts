@@ -850,4 +850,173 @@ describePostgres('dispute and refund pack revocation', () => {
       else process.env.JIT_PURCHASE_ENABLED = previous;
     }
   }, 60_000);
+
+  describe('a dispute that arrives before its checkout completes', () => {
+    /** A pack order waiting at Checkout: no payment intent yet, so a dispute matches nothing. */
+    async function seedPendingPackOrder(): Promise<{ userId: string; orderId: string; paymentIntentId: string }> {
+      const userId = `user_${randomUUID()}`;
+      const orderId = `order_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO users (user_id, email) VALUES ($1, $2)`,
+        [userId, `${userId}@test.invalid`]
+      );
+      await pool.query(
+        `INSERT INTO orders (
+           order_id, user_id, credits, amount_cents, currency, status, order_type,
+           product_code, idempotency_key
+         ) VALUES ($1, $2, 10, 1999, 'USD', 'checkout_pending', 'letter_pack', 'starter', $3)`,
+        [orderId, userId, `idem_${orderId}`]
+      );
+      return { userId, orderId, paymentIntentId: `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}` };
+    }
+
+    function completed(orderId: string, paymentIntentId: string): Stripe.Event {
+      return {
+        id: `evt_${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+        type: 'checkout.session.completed',
+        data: { object: {
+          id: `cs_${randomUUID().replace(/-/g, '').slice(0, 20)}`, object: 'checkout.session',
+          client_reference_id: orderId, metadata: { orderId }, payment_intent: paymentIntentId,
+          payment_status: 'paid', amount_total: 1999, currency: 'usd'
+        } }
+      } as unknown as Stripe.Event;
+    }
+
+    async function disputeFirst(
+      paymentIntentId: string,
+      events: Array<[commerceServiceModule.DisputeEventType, string]>
+    ): Promise<string> {
+      const disputeId = `dp_${randomUUID().slice(0, 8)}`;
+      for (const [type, status] of events) {
+        await commerceService.processStripeWebhookEvent(
+          disputeEvent(type, disputeFixture({ id: disputeId, payment_intent: paymentIntentId, status } as never))
+        );
+      }
+      return disputeId;
+    }
+
+    async function readDispute(disputeId: string) {
+      const result = await pool.query<{ user_id: string | null; status: string }>(
+        'SELECT user_id, status FROM stripe_disputes WHERE dispute_id = $1', [disputeId]
+      );
+      return result.rows[0];
+    }
+
+    it('blocks the account when the recovered dispute is a loss', async () => {
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+      // Recorded, matched to nothing, and nothing blocked yet.
+      expect((await readAccount(userId)).sends_blocked_at).toBeNull();
+
+      const result = await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+
+      expect(result).toMatchObject({ orderId, status: 'disputed' });
+      const account = await readAccount(userId);
+      expect(account.sends_blocked_at).not.toBeNull();
+      expect(account.sends_blocked_reason).toBe('payment_disputed');
+      expect(await readDispute(disputeId)).toEqual({ user_id: userId, status: 'needs_response' });
+      // The recovery never grants the pack.
+      expect(await readLedgerStatuses(userId)).toEqual([]);
+    }, 60_000);
+
+    it('blocks the account for a dispute already closed as lost', async () => {
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      await disputeFirst(paymentIntentId, [
+        ['charge.dispute.created', 'needs_response'],
+        ['charge.dispute.closed', 'lost']
+      ]);
+
+      await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+
+      expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
+    }, 60_000);
+
+    it('leaves the account sending for a card-network inquiry', async () => {
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'warning_needs_response']]);
+
+      const result = await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+
+      expect(result).toMatchObject({ orderId, status: 'disputed' });
+      const account = await readAccount(userId);
+      expect(account.sends_blocked_at).toBeNull();
+      expect(account.sends_blocked_reason).toBeNull();
+      expect((await readDispute(disputeId)).user_id).toBe(userId);
+    }, 60_000);
+
+    it('leaves the account sending for a dispute already won', async () => {
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      await disputeFirst(paymentIntentId, [
+        ['charge.dispute.created', 'needs_response'],
+        ['charge.dispute.closed', 'won']
+      ]);
+
+      await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+
+      const account = await readAccount(userId);
+      expect(account.sends_blocked_at).toBeNull();
+      expect(account.sends_blocked_reason).toBeNull();
+    }, 60_000);
+
+    it('keeps an earlier block as it was, and the next loss event changes nothing', async () => {
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      await pool.query(
+        `UPDATE users SET sends_blocked_at = NOW() - INTERVAL '1 day', sends_blocked_reason = 'operator_review'
+         WHERE user_id = $1`,
+        [userId]
+      );
+      const before = await readAccount(userId);
+      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+
+      await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+      await commerceService.processStripeWebhookEvent(
+        disputeEvent('charge.dispute.funds_withdrawn', disputeFixture({ id: disputeId, payment_intent: paymentIntentId }))
+      );
+
+      const after = await readAccount(userId);
+      expect(after.sends_blocked_at?.toISOString()).toBe(before.sends_blocked_at?.toISOString());
+      expect(after.sends_blocked_reason).toBe('operator_review');
+    }, 60_000);
+
+    it('an inquiry recovered and then escalated blocks through the matched path', async () => {
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'warning_needs_response']]);
+      await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+      expect((await readAccount(userId)).sends_blocked_at).toBeNull();
+
+      await commerceService.processStripeWebhookEvent(
+        disputeEvent('charge.dispute.updated', disputeFixture({
+          id: disputeId, payment_intent: paymentIntentId, status: 'needs_response'
+        }))
+      );
+
+      expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
+    }, 60_000);
+
+    it("another dispute's win does not lift the block a recovered loss set", async () => {
+      const { userId, paymentIntentId: heldIntent } = await seedPackHolder({ credits: 5 });
+      const wonId = `dp_${randomUUID().slice(0, 8)}`;
+      await commerceService.processStripeWebhookEvent(
+        disputeEvent('charge.dispute.created', disputeFixture({ id: wonId, payment_intent: heldIntent }))
+      );
+      // A second order on the same account, disputed before its checkout completed.
+      const orderId = `order_${randomUUID()}`;
+      const paymentIntentId = `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+      await pool.query(
+        `INSERT INTO orders (
+           order_id, user_id, credits, amount_cents, currency, status, order_type,
+           product_code, idempotency_key
+         ) VALUES ($1, $2, 10, 1999, 'USD', 'checkout_pending', 'letter_pack', 'starter', $3)`,
+        [orderId, userId, `idem_${orderId}`]
+      );
+      await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+      await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+
+      await commerceService.processStripeWebhookEvent(
+        disputeEvent('charge.dispute.closed', disputeFixture({ id: wonId, payment_intent: heldIntent, status: 'won' }))
+      );
+
+      expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
+    }, 60_000);
+  });
 });
