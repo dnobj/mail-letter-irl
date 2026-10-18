@@ -190,27 +190,3 @@ describe('friendlyCheckoutError and the daily limits', () => {
     expect(friendly.message).not.toBe('Unable to create Pay & Send checkout. Please try again.');
   });
 });
-
-describe('a live Pay & Send order on the send surface (#679)', () => {
-  const refusal = (paymentTaken?: boolean) =>
-    Object.assign(new Error('Draft draft-1 has an active Pay & Send checkout'), {
-      code: 'DRAFT_CHECKOUT_PENDING',
-      ...(paymentTaken === undefined ? {} : { paymentTaken })
-    });
-
-  it.each([
-    ['send_letter', letterDraftError],
-    ['send_postcard', postcardDraftError]
-  ])('%s asks for the open checkout to finish or lapse, and says a taken payment needs a new preview', (_name, friendlyDraftError) => {
-    for (const open of [refusal(), refusal(false)]) {
-      expect(friendlyDraftError(open, 'draft-1').message).toBe(
-        'This draft has an active Pay & Send checkout. Complete or wait for that checkout to expire before using prepaid balance.'
-      );
-    }
-    const taken = friendlyDraftError(refusal(true), 'draft-1').message;
-    expect(taken).toBe(
-      'A Pay & Send payment was already taken for this draft, so it cannot also be sent from prepaid balance, and nothing more was charged. For that payment, the person can write to support@letterirl.com.'
-    );
-    expect(taken).not.toMatch(/expire|draft-1/);
-  });
-});

@@ -326,11 +326,12 @@ export async function createMailOrderFromDraftWithClient(
   let jitOrder: Order | undefined;
   if (funding.type === 'prepaid_balance') {
     // Any live Pay & Send order on the draft refuses a send from the balance, by the statuses the edit lock and
-    // idx_orders_active_jit_draft_unique count (#679): a dispute can arrive before Stripe's completion, leaving
-    // the order 'disputed' (or 'held') while its draft still waits, and a pack letter would pay again for mail a Stripe
-    // payment was taken for.
-    const activeCheckout = await client.query<{ order_id: string; status: string }>(
-      `SELECT order_id, status FROM orders
+    // idx_orders_active_jit_draft_unique count (#679): a dispute can arrive before Stripe's completion, leaving the
+    // order 'disputed' while its draft still waits, and a pack letter would pay again for mail a Stripe payment was
+    // taken for. ('held' is listed with them, though only a consumed draft's order reaches it.) The refusal's words
+    // still speak of an open checkout; words for a payment already taken are #804.
+    const activeCheckout = await client.query<{ order_id: string }>(
+      `SELECT order_id FROM orders
        WHERE draft_id = $1
          AND order_type = 'jit_mail'
          AND status = ANY($2::varchar[])
@@ -342,11 +343,9 @@ export async function createMailOrderFromDraftWithClient(
       [params.draftId, [...LIVE_PAY_AND_SEND_STATUSES]]
     );
     if (activeCheckout.rows[0]) {
-      // Past the checkout, the payment was taken and nothing will expire: the refusal says so rather than ask the
-      // person to finish or wait for a checkout there is not (#679 review).
-      throw Object.assign(
-        draftError('DRAFT_CHECKOUT_PENDING', `Draft ${params.draftId} has an active Pay & Send checkout`),
-        { paymentTaken: activeCheckout.rows[0].status !== 'checkout_pending' }
+      throw draftError(
+        'DRAFT_CHECKOUT_PENDING',
+        `Draft ${params.draftId} has an active Pay & Send checkout`
       );
     }
     // Room on its mail date (#700), for a prepaid or gift send, after the open

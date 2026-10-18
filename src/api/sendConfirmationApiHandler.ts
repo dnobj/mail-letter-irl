@@ -260,11 +260,7 @@ export function refusalFor(error: unknown): Refusal {
     case 'DRAFT_CHANGED_SINCE_SHOWN':
       return refuse(409, 'changed_since_shown', 'This changed after this page showed it, so nothing was sent. Refresh this page to see it as it is now, then press Send.');
     case 'DRAFT_CHECKOUT_PENDING':
-      // A payment already taken has no checkout to finish and will not expire (#679 review). What becomes of it
-      // depends on its order (mailed, refunded, or held under a dispute), so the words claim none of them.
-      return (error as { paymentTaken?: unknown }).paymentTaken === true
-        ? refuse(409, 'checkout_open', 'A payment was already taken for this preview, so it is not sent from your balance, and nothing more was charged. For that payment, write to support@letterirl.com.')
-        : refuse(409, 'checkout_open', 'A payment for this preview is still open. Finish it, or wait for it to expire, then try again.');
+      return refuse(409, 'checkout_open', 'A payment for this preview is still open. Finish it, or wait for it to expire, then try again.');
     case 'GIFT_LETTERS_DISABLED':
     case 'GIFT_LETTER_UNAVAILABLE':
       return refuse(409, 'gift_unavailable', 'The gift letter for this preview is no longer available. Make a new preview.');

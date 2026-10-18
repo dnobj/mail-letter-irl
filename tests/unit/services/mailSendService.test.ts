@@ -15,8 +15,7 @@ type DraftState = Record<string, any>;
 let draft: DraftState;
 let savedLetter: Record<string, any> | null;
 let commerceOrder: Record<string, any> | null;
-// A live order on the draft: true for an open checkout, or the status of one past it (#679).
-let activeCheckout: boolean | string = false;
+let activeCheckout = false;
 // Today's letter counts, for the daily caps (#179). Defaults of 0 keep every
 // pre-existing test on the "well under the ceiling" path.
 let lettersTodayForUser = 0;
@@ -72,12 +71,8 @@ const client = {
     if (sql.startsWith('SELECT credits FROM users')) {
       return { rows: [{ credits: 8 }] };
     }
-    if (sql.includes('SELECT order_id, status FROM orders')) {
-      return {
-        rows: activeCheckout
-          ? [{ order_id: 'order-active', status: typeof activeCheckout === 'string' ? activeCheckout : 'checkout_pending' }]
-          : []
-      };
+    if (sql.includes('SELECT order_id FROM orders')) {
+      return { rows: activeCheckout ? [{ order_id: 'order-active' }] : [] };
     }
     if (sql.startsWith('SELECT * FROM orders')) {
       return { rows: commerceOrder ? [{ ...commerceOrder }] : [] };
@@ -664,26 +659,14 @@ describe('createMailOrderFromDraft', () => {
         userId: 'user-1',
         mailType: 'letter'
       })
-    ).rejects.toMatchObject({ code: 'DRAFT_CHECKOUT_PENDING', diagnosticClass: 'DRAFT_CHECKOUT_PENDING', paymentTaken: false });
+    ).rejects.toMatchObject({ code: 'DRAFT_CHECKOUT_PENDING', diagnosticClass: 'DRAFT_CHECKOUT_PENDING' });
     expect(deductCredits).not.toHaveBeenCalled();
     expect(createOutboxJob).not.toHaveBeenCalled();
   });
 
-  it.each(['paid', 'fulfillment_pending', 'refund_pending', 'disputed', 'held'])(
-    'says a payment was taken when the live order is %s, not an open checkout (#679 review)',
-    async (status) => {
-      activeCheckout = status;
-      await expect(createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' })).rejects.toMatchObject({
-        code: 'DRAFT_CHECKOUT_PENDING',
-        paymentTaken: true
-      });
-      expect(deductCredits).not.toHaveBeenCalled();
-    }
-  );
-
   it('counts every live Pay & Send order as blocking, a disputed or held one too (#679)', async () => {
     await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
-    const call = client.query.mock.calls.find(([sql]) => String(sql).includes('SELECT order_id, status FROM orders'));
+    const call = client.query.mock.calls.find(([sql]) => String(sql).includes('SELECT order_id FROM orders'));
     expect(call, 'the send asks for a live order').toBeDefined();
     expect(String(call![0])).toContain('AND status = ANY($2::varchar[])');
     expect(call![1]).toEqual(['draft-1', ['checkout_pending', 'paid', 'fulfillment_pending', 'refund_pending', 'disputed', 'held']]);

@@ -341,8 +341,6 @@ describePostgres('the confirmation page API against PostgreSQL (#470)', () => {
 
       expect(code, status).toBe(409);
       expect(body.error, status).toBe('checkout_open');
-      // The payment was taken: nothing to finish or wait for (#679 review).
-      expect(body.message, status).toMatch(/^A payment was already taken for this preview/);
       expect(await accountState(userId), status).toEqual({ credits: 10, letters: '0', jobs: '0' });
       expect((await draftRow(draftId)).status, status).toBe('pending');
     }

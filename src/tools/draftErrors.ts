@@ -184,11 +184,6 @@ export function friendlyDraftError(
     );
   }
   if (code === 'DRAFT_CHECKOUT_PENDING') {
-    if ((error as { paymentTaken?: unknown }).paymentTaken === true) {
-      return new Error(
-        'A Pay & Send payment was already taken for this draft, so it cannot also be sent from prepaid balance, and nothing more was charged. For that payment, the person can write to support@letterirl.com.'
-      );
-    }
     return new Error(
       'This draft has an active Pay & Send checkout. Complete or wait for that checkout to expire before using prepaid balance.'
     );

@@ -3136,7 +3136,7 @@
           }
           const result = toolData(raw);
           // The draft's Pay & Send order took a payment that did not send it (#679): a refund under way, or a dispute
-          // that came before the payment's completion, which leaves the draft pending. The server answers with that
+          // (before the payment's completion, or on an order being refunded), which leaves the draft pending. The server answers with that
           // order, not a checkout. Nothing more is charged; the card follows the order, as after a checkout it opened.
           if (!result.checkoutUrl && typeof result.orderId === "string" && result.orderId && typeof result.status === "string" && result.status !== "checkout_pending") {
             trackedOrderId = result.orderId;
