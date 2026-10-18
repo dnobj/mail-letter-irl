@@ -2026,12 +2026,12 @@ Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v95, s
    Repeat with a dated letter, whose button reads **Schedule Letter**: verify the pill reads "Scheduled", Delivery is shown, and **Cancel this letter** is there. Press it, and confirm: verify the pill reads "Cancelled" and the button **Letter Cancelled** (on widgets v94 it still read "Letter Scheduled").
 7. [ ] (Room to write) Preview a two-page letter. Verify:
    - the page reads "Page 1 of 2" with **Next page**, which turns to "First page" on page 2;
-   - **Enlarge** turns to "Show smaller";
+   - **Enlarge** turns to "Show smaller", and the page spreads across the card (since widgets v95; before, it stayed about 300 px wide);
    - the summary has "2 pages, both sides";
    - the cost reads "Pay & Send USD 5.99".
 
    Restyle it: verify the page you were on stays shown.
-8. [ ] In Claude (DEV), preview the same letter. Verify the same layout, at about 580 px tall at Claude's 736 px width with no inner scroll bar, and that the card sends with **Send Letter** as in ChatGPT (Claude lets the card send; **Open the confirmation page** is for apps that do not, such as VS Code). Reopen the conversation. Verify the card asks `get_draft_status` and shows the letter as it is now.
+8. [ ] In Claude (DEV), preview the same letter. Verify the same layout, at about 580 px tall at Claude's 736 px width with no inner scroll bar (with the page not enlarged), and that the card sends with **Send Letter** as in ChatGPT (Claude lets the card send; **Open the confirmation page** is for apps that do not, such as VS Code). Reopen the conversation. Verify the card asks `get_draft_status` and shows the letter as it is now.
 9. [ ] Preview a gift letter (`sendAsGift: true`). Verify the cost reads "Free: a gift letter" and the card page is page 2.
 10. [ ] Preview a postcard. Verify the maker:
     - the header reads "Postcard to <name>" with "Draft · <City>, <ST> <ZIP>", and there are no tabs;
