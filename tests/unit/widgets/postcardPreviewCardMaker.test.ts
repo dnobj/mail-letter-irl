@@ -82,8 +82,8 @@ async function flush(times = 8): Promise<void> {
   for (let i = 0; i < times; i += 1) await new Promise(resolve => setImmediate(resolve));
 }
 
-/** The card as served, in a fake MCP Apps host. */
-function mount() {
+/** The card as served, in a fake MCP Apps host, which offers the capabilities given. */
+function mount(hostCapabilities: Json = {}) {
   const served = stampPreviewTool(
     inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'PostcardPreviewCard.html'), 'utf-8'), WIDGET_DIR),
     'quote_and_preview_postcard'
@@ -114,6 +114,12 @@ function mount() {
     window,
     document,
     requests,
+    /** Every request of a method, oldest first. */
+    messages: (method: string) => sent.filter(message => message.method === method && message.id !== undefined),
+    /** Answers one request in particular. */
+    async answerTo(request: Json, reply: Json) {
+      await deliver({ id: request.id, ...reply });
+    },
     byId,
     async show(result: Json, meta: Json) {
       await flush();
@@ -121,7 +127,7 @@ function mount() {
         initialized = true;
         await deliver({
           id: lastRequest('ui/initialize')!.id,
-          result: { protocolVersion: '2026-01-26', hostInfo: { name: 'fake' }, hostContext: {}, hostCapabilities: {} }
+          result: { protocolVersion: '2026-01-26', hostInfo: { name: 'fake' }, hostContext: {}, hostCapabilities }
         });
         await deliver({ method: 'ui/notifications/tool-input', params: { arguments: ARGS } });
       }
@@ -819,5 +825,331 @@ describe('the content version the postcard card sends (#695)', () => {
     );
     expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(false);
     expect(card.byId('pay-send-button-text').textContent).toMatch(/^Pay & Send/);
+  });
+});
+
+// The postcard card shares the draft it shows as model context (#650), as the letter card does, and with it what the
+// person changed on the card (#795): the model sees none of the card's own calls.
+describe('the postcard draft and its changes, told to the model (#650, #795)', () => {
+  const WINDOW = { earliestArrival: '2026-10-14', latestArrival: '2026-11-30' };
+  const DRAFT_SHARE =
+    /^Shared by a Letter IRL postcard card on (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}:\d{2}) UTC: the card shows the postcard draft draft_0001\. Several Letter IRL cards may each share a draft; the one shared latest is most likely the one the person means, so ask if unsure\. It may have been sent or have expired since: a Letter IRL tool given this draftId says so\.(?: (.+))?$/s;
+  const CHANGED =
+    /^The person changed this postcard's (.+) on its Letter IRL card \(draft draft_0001\)(, most recently)? on (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}:\d{2}) UTC, and the chat does not see the card's changes: what it last saw of them may be out of date\.( To change its style, give set_postcard_style only what is to change, since a size or front given again as last seen would undo the person's change; its answer says the size and front the postcard has\.)?$/;
+  const FLAGGED = (page = drawn()) => ({ ...ON(page), modelContextEnabled: true });
+  const ready = (extra: Json = {}) => ({
+    result: { content: [{ type: 'text', text: 'Ready.' }], structuredContent: { draftId: 'draft_0001', status: 'ready', ...extra } }
+  });
+  const toSmall = restyled(
+    { draftId: 'draft_0001', size: '6x4', layout: 'full_bleed', canSendNow: false, sendEligibility: PER_SEND, message: 'The postcard is now a 4x6.' },
+    drawn('6x4')
+  );
+  const bordered = restyled(
+    { draftId: 'draft_0001', size: '6x9', layout: 'border', canSendNow: true, sendEligibility: PACK, message: 'Bordered.' },
+    drawn('6x9', { layout: 'border' })
+  );
+
+  /** Answers every share the card has made, in turn (each waits for the last), and gives their texts, oldest first. */
+  function shares(card: ReturnType<typeof mount>) {
+    const answered = new Set<unknown>();
+    return async () => {
+      for (;;) {
+        const next = card.messages('ui/update-model-context').find(request => !answered.has(request.id));
+        if (!next) break;
+        answered.add(next.id);
+        await card.answerTo(next, { result: {} });
+      }
+      return card.messages('ui/update-model-context').map(request => (request.params.content[0]?.text ?? '') as string);
+    };
+  }
+
+  /** What the latest share says of the card's changes, or null for none. */
+  function changes(texts: string[]) {
+    const last = texts[texts.length - 1] ?? '';
+    const share = last.match(DRAFT_SHARE);
+    expect(share, last).not.toBeNull();
+    if (share![3] === undefined) return null;
+    const said = share![3].match(CHANGED);
+    expect(said, share![3]).not.toBeNull();
+    // "most recently" exactly when more than one thing was changed.
+    expect(Boolean(said![2]), share![3]).toBe(said![1].includes(' and '));
+    return { what: said![1], date: said![3], time: said![4], style: said![5] !== undefined };
+  }
+
+  async function shownAndReady(extra: Json = {}, status: Json = {}) {
+    const card = mount({ updateModelContext: { text: {} } });
+    const shared = shares(card);
+    await card.show(output({ size: '6x9', layout: 'full_bleed', ...extra }), FLAGGED());
+    await card.answer(ready(status), 'get_draft_status');
+    await shared();
+    return { card, shared };
+  }
+
+  it('shares the draft once the server says it is ready, never without the flag, and takes it back once sent', async () => {
+    const card = mount({ updateModelContext: { text: {} } });
+    const shared = shares(card);
+    await card.show(output({ size: '6x9' }), FLAGGED());
+    expect(await shared()).toEqual([]);
+    await card.answer(ready(), 'get_draft_status');
+    const texts = await shared();
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toMatch(DRAFT_SHARE);
+    expect(changes(texts)).toBeNull();
+    expect(Math.abs(Date.parse(`${texts[0].match(DRAFT_SHARE)![1]}T${texts[0].match(DRAFT_SHARE)![2]}Z`) - Date.now())).toBeLessThan(5000);
+
+    await card.click(card.byId('send-button'));
+    const after = await shared();
+    expect(after[after.length - 1]).toBe('');
+    expect(card.messages('ui/update-model-context').at(-1)!.params.content).toEqual([]);
+
+    const unflagged = mount({ updateModelContext: { text: {} } });
+    await unflagged.show(output({ size: '6x9' }), ON());
+    await unflagged.answer(ready(), 'get_draft_status');
+    await unflagged.click(unflagged.byId('studio-sizes'));
+    expect(unflagged.messages('ui/update-model-context')).toEqual([]);
+
+    const sent = mount({ updateModelContext: { text: {} } });
+    await sent.show(output({ size: '6x9' }), FLAGGED());
+    await sent.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'sent', orderId: 'order-9', orderStatus: 'sent' } } },
+      'get_draft_status'
+    );
+    expect(sent.messages('ui/update-model-context').filter(request => request.params.content.length > 0)).toEqual([]);
+  });
+
+  it('shares, with the draft, that the size was changed on the card, and how not to undo it', async () => {
+    const { card, shared } = await shownAndReady();
+    const before = (await shared()).length;
+    await card.click(card.document.querySelector('[data-size="6x4"]')!);
+    await card.answer(toSmall, 'set_postcard_style');
+    const after = await shared();
+    // The press shares (a use of the card), and the change once made: two, and no more.
+    expect(after.length - before).toBe(2);
+    const said = changes(after)!;
+    expect(said).toMatchObject({ what: 'size', style: true });
+    // Stamped with the change's own time.
+    expect(Math.abs(Date.parse(`${said.date}T${said.time}Z`) - Date.now())).toBeLessThan(5000);
+  });
+
+  it('says every change the card made, in one order, with one time', async () => {
+    const { card, shared } = await shownAndReady();
+    await card.click(card.document.querySelector('[data-layout="border"]')!);
+    await card.answer(bordered, 'set_postcard_style');
+    expect(changes(await shared())).toMatchObject({ what: 'front', style: true });
+
+    await card.type('Cape Cod');
+    await card.click(card.byId('studio-line-apply'));
+    await card.answer(
+      restyled(
+        { draftId: 'draft_0001', size: '6x9', layout: 'border', caption: 'Cape Cod', canSendNow: true, sendEligibility: PACK, message: 'Captioned.' },
+        drawn('6x9', { layout: 'border', caption: 'Cape Cod' })
+      ),
+      'set_postcard_style'
+    );
+    expect(changes(await shared())).toMatchObject({ what: 'front', style: true });
+
+    await card.click(card.document.querySelector('[data-size="6x11"]')!);
+    await card.answer(
+      restyled({ draftId: 'draft_0001', size: '6x11', layout: 'border', caption: 'Cape Cod', canSendNow: false, sendEligibility: PER_SEND, message: 'Bigger.' }, drawn('6x11', { layout: 'border', caption: 'Cape Cod' })),
+      'set_postcard_style'
+    );
+    const texts = await shared();
+    expect(changes(texts)).toMatchObject({ what: 'size and front', style: true });
+    // Never the caption the person wrote, nor the message or an address.
+    for (const words of ['Cape Cod', 'Wish you were here', 'Fifth']) expect(texts[texts.length - 1]).not.toContain(words);
+  });
+
+  it("says the card's change of arrival date without the style sentence, and with a size after it", async () => {
+    const dated = { arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } };
+    const { card, shared } = await shownAndReady(dated, { schedule: { ...dated.schedule, ...WINDOW } });
+    await card.click(card.byId('arrives-asap'));
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    expect(changes(await shared())).toMatchObject({ what: 'arrival date', style: false });
+
+    await card.click(card.document.querySelector('[data-size="6x4"]')!);
+    await card.answer(toSmall, 'set_postcard_style');
+    expect(changes(await shared())).toMatchObject({ what: 'size and arrival date', style: true });
+  });
+
+  it('says a change whose page did not come back, and nothing of one the server refused', async () => {
+    const refused = await shownAndReady();
+    await refused.card.click(refused.card.document.querySelector('[data-size="6x4"]')!);
+    await refused.card.answer({ result: { isError: true, content: [{ type: 'text', text: 'This preview has expired.' }] } }, 'set_postcard_style');
+    await refused.card.click(refused.card.byId('arrives-asap'));
+    for (const text of await refused.shared()) expect(text).not.toMatch(/the person changed/i);
+
+    const pageless = await shownAndReady();
+    await pageless.card.click(pageless.card.document.querySelector('[data-size="6x4"]')!);
+    await pageless.card.answer(restyled({ draftId: 'draft_0001', size: '6x4', layout: 'full_bleed', canSendNow: false, sendEligibility: PER_SEND }), 'set_postcard_style');
+    expect(pageless.card.byId('studio-style-note').textContent).toContain('its page did not come back here');
+    expect(changes(await pageless.shared())).toMatchObject({ what: 'size' });
+  });
+
+  it('keeps saying it in every share after, through a redraw of the draft', async () => {
+    const { card, shared } = await shownAndReady();
+    await card.click(card.document.querySelector('[data-size="6x4"]')!);
+    await card.answer(toSmall, 'set_postcard_style');
+    await card.show(output({ size: '6x9', layout: 'full_bleed' }), FLAGGED());
+    const before = (await shared()).length;
+    await card.click(card.byId('studio-sizes'));
+    const after = await shared();
+    expect(after.length).toBeGreaterThan(before);
+    expect(changes(after)).toMatchObject({ what: 'size' });
+  });
+
+  /** The card in ChatGPT, keeping its state and sharing through window.openai. */
+  function inChatGpt(widgetState: Json | null = null, extra: Json = {}) {
+    const kept: Json[] = [];
+    const updates: string[] = [];
+    const served = stampPreviewTool(
+      inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'PostcardPreviewCard.html'), 'utf-8'), WIDGET_DIR),
+      'quote_and_preview_postcard'
+    );
+    const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
+      runScripts: 'dangerously',
+      beforeParse(window) {
+        (window as any).setTimeout = () => 0;
+        (window as any).clearTimeout = () => undefined;
+        (window as any).openai = {
+          theme: 'light',
+          toolInput: ARGS,
+          toolOutput: output({ size: '6x9', layout: 'border', caption: 'Cape Cod' }),
+          toolResponseMetadata: FLAGGED(drawn('6x9', { layout: 'border', caption: 'Cape Cod' })),
+          widgetState,
+          setWidgetState: async (value: Json) => {
+            kept.push(JSON.parse(JSON.stringify(value)));
+          },
+          updateModelContext: async (value: Json) => {
+            updates.push(value.content[0]?.text ?? '');
+            return {};
+          },
+          callTool: async (name: string, args: Json) => {
+            if (name === 'get_draft_status') return { structuredContent: { draftId: args.draftId, status: 'ready' } };
+            if (name === 'set_postcard_style') {
+              return {
+                structuredContent: { draftId: args.draftId, size: '6x9', layout: 'border', caption: args.caption, canSendNow: true, sendEligibility: PACK, message: 'Captioned.' },
+                _meta: { previewHtml: drawn('6x9', { layout: 'border', caption: args.caption }) }
+              };
+            }
+            return {};
+          },
+          ...extra
+        };
+      }
+    });
+    dom.window.dispatchEvent(new dom.window.Event('openai:set_globals'));
+    const window = dom.window as any;
+    const click = async (element: Element) => {
+      element.dispatchEvent(new window.Event('click', { bubbles: true }));
+      await flush();
+    };
+    return { document: dom.window.document, window, kept, updates, click };
+  }
+
+  it('in ChatGPT, keeps the change in widgetState with a sentence for the model, beside what the card keeps, and shares it', async () => {
+    const card = inChatGpt();
+    await flush();
+    const input = card.document.getElementById('studio-line-input') as HTMLInputElement;
+    input.value = 'Rye Harbor';
+    input.dispatchEvent(new card.window.Event('input', { bubbles: true }));
+    await flush();
+    await card.click(card.document.getElementById('studio-line-apply')!);
+    const last = card.kept[card.kept.length - 1];
+    // What a reopened card reads (#389) is as it was.
+    expect(last).toMatchObject({ v: 1, draftId: 'draft_0001' });
+    expect(last.changedOnCard).toEqual({ draftId: 'draft_0001', what: ['front'], at: expect.any(String), note: expect.stringMatching(CHANGED) });
+    for (const words of ['Rye Harbor', 'Cape Cod', 'Wish you were here', 'Fifth']) expect(JSON.stringify(last)).not.toContain(words);
+    expect(card.updates[card.updates.length - 1]).toContain(last.changedOnCard.note);
+  });
+
+  // As on a reopen: the card finds its kept state beside its result, which it draws.
+  it('in a ChatGPT card that finds a kept change, shares it in its own words, for its own draft only', async () => {
+    const at = '2026-10-17T14:03:22.000Z';
+    const own = inChatGpt({ v: 1, draftId: 'draft_0001', changedOnCard: { draftId: 'draft_0001', what: ['front', 'nonsense', 'size'], at, note: 'Anything.' } });
+    await flush();
+    expect(changes(own.updates)).toEqual({ what: 'size and front', date: '2026-10-17', time: '14:03:22', style: true });
+    expect(own.updates[own.updates.length - 1]).not.toContain('Anything.');
+
+    for (const changedOnCard of [
+      { draftId: 'draft_0002', what: ['size'], at, note: 'Anything.' },
+      { draftId: 'draft_0001', what: ['nonsense'], at },
+      { draftId: 'draft_0001', what: ['size'], at: 'yesterday' }
+    ]) {
+      const other = inChatGpt({ v: 1, draftId: 'draft_0001', changedOnCard });
+      await flush();
+      expect(other.updates.length).toBeGreaterThan(0);
+      for (const text of other.updates) expect(text).not.toMatch(/the person changed|Anything/i);
+    }
+  });
+
+  // ChatGPT carries model context on the MCP Apps handshake, not window.openai (#665). The postcard card, as served,
+  // opens it on request, once flagged and ready, as the letter card does (#675, #676).
+  function framed(meta: Json, extra: Json = {}) {
+    const sent: Json[] = [];
+    const parent = { postMessage: (message: Json) => sent.push(JSON.parse(JSON.stringify(message))) };
+    const served = stampPreviewTool(
+      inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'PostcardPreviewCard.html'), 'utf-8'), WIDGET_DIR),
+      'quote_and_preview_postcard'
+    );
+    const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
+      runScripts: 'dangerously',
+      beforeParse(window) {
+        (window as any).setTimeout = () => 0;
+        (window as any).clearTimeout = () => undefined;
+        Object.defineProperty(window, 'parent', { value: parent, configurable: true });
+        (window as any).openai = {
+          theme: 'light', toolInput: ARGS, toolOutput: output({ size: '6x9' }), toolResponseMetadata: meta, widgetState: null,
+          setWidgetState: async () => undefined,
+          callTool: async (name: string, args: Json) => (name === 'get_draft_status' ? { structuredContent: { draftId: args.draftId, status: 'ready' } } : {}),
+          ...extra
+        };
+      }
+    });
+    const window = dom.window as any;
+    window.dispatchEvent(new window.Event('openai:set_globals'));
+    const deliver = (message: Json) =>
+      window.dispatchEvent(new window.MessageEvent('message', { data: { jsonrpc: '2.0', ...message }, source: parent }));
+    const requests = (method: string) => sent.filter(message => message.method === method);
+    return { sent, deliver, requests };
+  }
+
+  it('as served, opens the handshake on request, only when flagged and ready, and shares once ChatGPT takes model context there', async () => {
+    const served = fs.readFileSync(path.join(WIDGET_DIR, 'PostcardPreviewCard.html'), 'utf-8');
+    expect(served).toMatch(/<html[^>]*data-plugin-extensions="on-request"/);
+    const card = framed(FLAGGED());
+    await flush();
+    const opened = card.requests('ui/initialize');
+    expect(opened).toHaveLength(1);
+    expect(String(opened[0].id)).toMatch(/^lirl-ext-/);
+    expect(card.requests('ui/update-model-context')).toHaveLength(0);
+    card.deliver({ id: opened[0].id, result: { hostCapabilities: { experimental: { 'openai/modelContext': {} } } } });
+    await flush();
+    const shared = card.requests('ui/update-model-context');
+    expect(shared).toHaveLength(1);
+    expect(shared[0].params.content[0].text).toMatch(DRAFT_SHARE);
+    // Drawn again, it is not opened again.
+    expect(card.requests('ui/initialize')).toHaveLength(1);
+  });
+
+  it('never opens the handshake unflagged, for a draft the server says was sent, nor where ChatGPT takes model context itself', async () => {
+    const unflagged = framed(ON());
+    await flush();
+    expect(unflagged.sent).toHaveLength(0);
+
+    const sent = framed(FLAGGED(), {
+      callTool: async (name: string, args: Json) =>
+        name === 'get_draft_status' ? { structuredContent: { draftId: args.draftId, status: 'sent', orderId: 'order-9', orderStatus: 'sent' } } : {}
+    });
+    await flush();
+    expect(sent.requests('ui/initialize')).toHaveLength(0);
+
+    const native: Json[] = [];
+    const own = framed(FLAGGED(), { updateModelContext: async (value: Json) => { native.push(value); return {}; } });
+    await flush();
+    expect(own.requests('ui/initialize')).toHaveLength(0);
+    expect(native).toHaveLength(1);
   });
 });

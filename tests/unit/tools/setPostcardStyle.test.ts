@@ -29,6 +29,8 @@ import { getDraftForPostcardStyle, setDraftPostcardStyle, type DraftForPostcardS
 import { ImageProcessingError, reprocessPostcardImage } from '../../../src/services/imageService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { setPostcardStyleTool } from '../../../src/tools/setPostcardStyle.js';
+import { clientProfileNamed, type ClientProfile } from '../../../src/auth/clientProfiles.js';
+import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
 import { PAID_PER_SEND_REASON, withDisplayImage } from '../../../src/tools/letterHelpers.js';
 import {
   layoutPostcard,
@@ -517,6 +519,29 @@ describe('the set_postcard_style tool', () => {
     expect(described()).toMatch(/^Change a previewed postcard's front layout without previewing it again\./);
     expect(described()).toContain('give its caption again to keep it');
     expect(described()).not.toMatch(/size|Pay & Send/);
+  });
+
+  // Steering r53: the model never sees the card's changes (#795), and a size or front it gives again as last seen would
+  // undo the person's change on the postcard card.
+  it('says, where the app shows the card, that the card changes the style unseen, in the words of what is offered', () => {
+    const described = (client?: ClientProfile) => (setPostcardStyleTool.description as (client?: ClientProfile) => string)(client);
+    const said = (choices: string, both: boolean) =>
+      ` The person can change the ${choices} on the postcard card too, and you do not see those changes, so what you last saw ` +
+      `may be out of date: ${both ? 'give only what is to change, since a size or front given again as you last saw it would undo theirs. ' : ''}` +
+      `Each answer says the ${choices} the postcard has now.`;
+    for (const [sizes, layouts, choices] of [[true, true, 'size and front'], [true, false, 'size'], [false, true, 'front']] as const) {
+      offer(sizes, layouts);
+      const plain = described();
+      for (const app of ['chatgpt', 'claude'] as const) {
+        expect(described(clientProfileNamed(app)), `${app} ${choices}`).toBe(plain + said(choices, sizes && layouts));
+      }
+      // An app that shows no card keeps the words it had.
+      for (const app of ['claude_code', 'vscode', 'codex', 'generic'] as const) {
+        expect(described(clientProfileNamed(app)), `${app} ${choices}`).toBe(plain);
+      }
+      expect(plain).not.toContain('postcard card');
+    }
+    expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(53);
   });
 
   it('is a card-callable, idempotent drafting tool', () => {

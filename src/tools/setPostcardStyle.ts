@@ -1,4 +1,5 @@
 import type { Address, McpToolDefinition, ToolContext } from '../contracts/types.js';
+import type { ClientProfile } from '../auth/clientProfiles.js';
 import { isPostcardSizesOffered, offeredPostcardSizes } from '../config/postcardSizes.js';
 import { isPostcardLayoutsOffered } from '../config/postcardLayouts.js';
 import { isPackPayable } from '../services/mailOptions.js';
@@ -317,9 +318,12 @@ export const setPostcardStyleTool: McpToolDefinition<SetPostcardStyleInput, SetP
   title: 'Change the postcard style',
   // In the words of what is offered, read as the tools are listed, so a model
   // is never steered to an argument this deployment withholds (#601 review round 1).
-  description: () => {
+  // Where the app shows our postcard card, the person may change the size and
+  // front there unseen (steering r53), as the letter card's words (#795).
+  description: (client?: ClientProfile) => {
     const sizes = isPostcardSizesOffered();
     const layouts = isPostcardLayoutsOffered();
+    const choices = sizes && layouts ? 'size and front' : sizes ? 'size' : 'front';
     return (
       `Change a previewed postcard's ${sizes && layouts ? 'size or front layout' : sizes ? 'size' : 'front layout'} without previewing it again. ` +
       `Give the draftId from the preview, and ${
@@ -329,7 +333,13 @@ export const setPostcardStyleTool: McpToolDefinition<SetPostcardStyleInput, SetP
       (layouts ? 'A layout given replaces the front, so give its caption again to keep it. ' : '') +
       (sizes
         ? 'The postcard is drawn again and priced again: the 4x6 and 11x6 are paid per send with Pay & Send.'
-        : 'The postcard is drawn again.')
+        : 'The postcard is drawn again.') +
+      (client?.rendersCards
+        ? ` The person can change the ${choices} on the postcard card too, and you do not see those changes, so what you ` +
+          `last saw may be out of date: ${
+            sizes && layouts ? 'give only what is to change, since a size or front given again as you last saw it would undo theirs. ' : ''
+          }Each answer says the ${choices} the postcard has now.`
+        : '')
     );
   },
   readOnly: false,

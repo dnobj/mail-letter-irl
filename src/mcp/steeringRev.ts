@@ -210,4 +210,8 @@
 // wordsVersion last seen, which changes nothing either way (STUDIO-01, DEV 2026-10-17: ChatGPT answered from the
 // preview's words and called nothing). Apps without our cards keep the words they had. The letter card also tells the
 // model of its own changes in what it shares.
-export const STEERING_COPY_REV = 52;
+// r53: where the app shows our cards, set_postcard_style's description says the person can change the size and front
+// on the postcard card, unseen by the model, so it gives only what is to change (a size or front given again as last
+// seen would undo theirs), and each answer says the style the postcard has now. The postcard card, like the letter
+// card, now tells the model of its own changes in what it shares. Apps without our cards keep the words they had.
+export const STEERING_COPY_REV = 53;

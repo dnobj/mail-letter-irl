@@ -2755,14 +2755,29 @@ describe.each([LETTER, POSTCARD])('$file when the app sends from the confirmatio
   });
 });
 
-describe('PostcardPreviewCard in ChatGPT, which keeps its own state (#474)', () => {
-  it('never asks the server what became of its draft', async () => {
+// The postcard card opens the handshake too, to share its draft and what the person changed on it, so it asks there
+// as the letter card does (#676).
+describe('PostcardPreviewCard in ChatGPT asks the server what became of its draft (#676)', () => {
+  it('asks once for each draft it shows', async () => {
     const harness = mount(POSTCARD, { toolOutput: POSTCARD.output('draft_host_0001') });
     await flush();
     await harness.deliverHostResult(POSTCARD.output('draft_host_0002'));
+    await flush();
 
-    expect(harness.callsTo('get_draft_status')).toEqual([]);
+    expect(harness.callsTo('get_draft_status').map(call => call.args.draftId)).toEqual(['draft_host_0001', 'draft_host_0002']);
     expect(harness.visible('send-button')).toBe(true);
+  });
+
+  it('shows a postcard the server says was sent as sent, not offering Send again, when its own state was lost', async () => {
+    const harness = mount(POSTCARD, {
+      toolOutput: POSTCARD.output('draft_host_0001'),
+      draftStatus: args => ({ draftId: args.draftId, status: 'sent', orderId: 'ord_sent_0009', orderStatus: 'sent' })
+    });
+    await flush();
+    await flush();
+
+    expect(harness.visible('send-button')).toBe(false);
+    expect(harness.actions()).toEqual([]);
   });
 });
 
@@ -3226,7 +3241,7 @@ describe('PostcardPreviewCard in ChatGPT, refused for a change since (#695)', ()
   const CHANGED_TEXT =
     'This postcard changed after it was shown, so nothing was sent. Show the person the postcard as it is now (its preview card, or a new preview), and send it once they have seen it.';
 
-  it('asks what became of its draft, refused as ChatGPT refuses, though it does not ask on opening there', async () => {
+  it('asks again what became of its draft, refused as ChatGPT refuses', async () => {
     const harness = mount(POSTCARD, {
       toolOutput: POSTCARD.output('draft_host_0001', { contentVersion: 'v_preview' }),
       draftStatus: args => ({ draftId: args.draftId, status: 'ready', contentVersion: 'v_now' }),
@@ -3235,11 +3250,11 @@ describe('PostcardPreviewCard in ChatGPT, refused for a change since (#695)', ()
       }
     });
     await flush();
-    // ChatGPT keeps the card's own state, so the postcard does not ask on opening there.
-    expect(harness.callsTo('get_draft_status')).toEqual([]);
+    // Asked on opening (#676): ready, with no page to draw, so the card keeps the preview's version.
+    expect(harness.callsTo('get_draft_status')).toHaveLength(1);
 
     await harness.click('send-button');
-    expect(harness.callsTo('get_draft_status').map(call => call.args)).toEqual([{ draftId: 'draft_host_0001' }]);
+    expect(harness.callsTo('get_draft_status').map(call => call.args)).toEqual([{ draftId: 'draft_host_0001' }, { draftId: 'draft_host_0001' }]);
     // This answer gives no page to draw: the card says so, and keeps the version it shows.
     expect(harness.text('error-message')).toBe(
       "This postcard changed after it was shown here, so nothing was sent. This card can't show it as it is now: ask in the chat for a new preview, and send from that."
@@ -3249,7 +3264,7 @@ describe('PostcardPreviewCard in ChatGPT, refused for a change since (#695)', ()
     // Refused again for that version: it asks no more.
     await harness.click('send-button');
     expect(harness.callsTo('send_postcard').map(call => call.args.contentVersion)).toEqual(['v_preview', 'v_preview']);
-    expect(harness.callsTo('get_draft_status')).toHaveLength(1);
+    expect(harness.callsTo('get_draft_status')).toHaveLength(2);
   });
 
   it.each([
@@ -3269,7 +3284,8 @@ describe('PostcardPreviewCard in ChatGPT, refused for a change since (#695)', ()
     await flush();
     await harness.click(button);
     expect(harness.callsTo(tool)).toHaveLength(1);
-    expect(harness.callsTo('get_draft_status')).toHaveLength(1);
+    // One on opening (#676), and one for the refusal.
+    expect(harness.callsTo('get_draft_status')).toHaveLength(2);
     expect(harness.text('error-message')).toContain('changed after it was shown here');
   });
 });
