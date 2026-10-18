@@ -527,7 +527,7 @@ describe('the set_postcard_style tool', () => {
     const described = (client?: ClientProfile) => (setPostcardStyleTool.description as (client?: ClientProfile) => string)(client);
     const said = (choices: string, both: boolean) =>
       ` The person can change the ${choices} on the postcard card too, and you do not see those changes, so what you last saw ` +
-      `may be out of date: ${both ? 'give only what is to change, since a size or front given again as you last saw it would undo theirs. ' : ''}` +
+      `may be out of date${both ? ': give only what is to change, since a size or front given again as you last saw it would undo theirs' : ''}. ` +
       `Each answer says the ${choices} the postcard has now.`;
     for (const [sizes, layouts, choices] of [[true, true, 'size and front'], [true, false, 'size'], [false, true, 'front']] as const) {
       offer(sizes, layouts);

@@ -835,7 +835,7 @@ describe('the postcard draft and its changes, told to the model (#650, #795)', (
   const DRAFT_SHARE =
     /^Shared by a Letter IRL postcard card on (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}:\d{2}) UTC: the card shows the postcard draft draft_0001\. Several Letter IRL cards may each share a draft; the one shared latest is most likely the one the person means, so ask if unsure\. It may have been sent or have expired since: a Letter IRL tool given this draftId says so\.(?: (.+))?$/s;
   const CHANGED =
-    /^The person changed this postcard's (.+) on its Letter IRL card \(draft draft_0001\)(, most recently)? on (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}:\d{2}) UTC, and the chat does not see the card's changes: what it last saw of them may be out of date\.( To change its style, give set_postcard_style only what is to change, since a size or front given again as last seen would undo the person's change; its answer says the size and front the postcard has\.)?$/;
+    /^The person changed this postcard's (.+) on its Letter IRL card \(draft draft_0001\)(, most recently)? on (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}:\d{2}) UTC, and the chat does not see the card's changes: what it last saw of them may be out of date\.( To change its style, give set_postcard_style only what is to change, since a size or front given again as last seen would undo the person's change; its answer says the style the postcard has\.)?$/;
   const FLAGGED = (page = drawn()) => ({ ...ON(page), modelContextEnabled: true });
   const ready = (extra: Json = {}) => ({
     result: { content: [{ type: 'text', text: 'Ready.' }], structuredContent: { draftId: 'draft_0001', status: 'ready', ...extra } }
@@ -931,6 +931,20 @@ describe('the postcard draft and its changes, told to the model (#650, #795)', (
     expect(Math.abs(Date.parse(`${said.date}T${said.time}Z`) - Date.now())).toBeLessThan(5000);
   });
 
+  it('takes the share back once Pay & Send opens a checkout', async () => {
+    const { card, shared } = await shownAndReady({ canSendNow: false, sendEligibility: PER_SEND });
+    expect(changes(await shared())).toBeNull();
+    await card.click(card.byId('pay-send-button'));
+    await shared();
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    const texts = await shared();
+    expect(texts[texts.length - 1]).toBe('');
+    expect(card.messages('ui/update-model-context').at(-1)!.params.content).toEqual([]);
+  });
+
   it('says every change the card made, in one order, with one time', async () => {
     const { card, shared } = await shownAndReady();
     await card.click(card.document.querySelector('[data-layout="border"]')!);
@@ -978,8 +992,10 @@ describe('the postcard draft and its changes, told to the model (#650, #795)', (
     const refused = await shownAndReady();
     await refused.card.click(refused.card.document.querySelector('[data-size="6x4"]')!);
     await refused.card.answer({ result: { isError: true, content: [{ type: 'text', text: 'This preview has expired.' }] } }, 'set_postcard_style');
-    await refused.card.click(refused.card.byId('arrives-asap'));
-    for (const text of await refused.shared()) expect(text).not.toMatch(/the person changed/i);
+    const refusedShares = await refused.shared();
+    // The ready answer's share and the press's, at least: the loop below reads something.
+    expect(refusedShares.length).toBeGreaterThanOrEqual(2);
+    for (const text of refusedShares) expect(text).not.toMatch(/the person changed/i);
 
     const pageless = await shownAndReady();
     await pageless.card.click(pageless.card.document.querySelector('[data-size="6x4"]')!);

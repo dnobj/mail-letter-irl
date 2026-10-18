@@ -336,9 +336,9 @@ export const setPostcardStyleTool: McpToolDefinition<SetPostcardStyleInput, SetP
         : 'The postcard is drawn again.') +
       (client?.rendersCards
         ? ` The person can change the ${choices} on the postcard card too, and you do not see those changes, so what you ` +
-          `last saw may be out of date: ${
-            sizes && layouts ? 'give only what is to change, since a size or front given again as you last saw it would undo theirs. ' : ''
-          }Each answer says the ${choices} the postcard has now.`
+          `last saw may be out of date${
+            sizes && layouts ? ': give only what is to change, since a size or front given again as you last saw it would undo theirs' : ''
+          }. Each answer says the ${choices} the postcard has now.`
         : '')
     );
   },
