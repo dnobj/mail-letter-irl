@@ -3610,9 +3610,8 @@ async function blockAccountSends(
  * A dispute's payment intent is read once, unlocked; it changes only from none
  * to one, which Stripe does not do for a card payment's dispute.
  *
- * Each loss gets the alert the matched path raises, which the dispute's close
- * resolves (an inquiry alerts when it escalates), and the order shows a
- * dispute's status, a loss's first.
+ * Each gets the alert the matched path raises, which the dispute's close
+ * resolves, and the order shows a dispute's status, a loss's first.
  */
 async function applyRecoveredDisputes(
   client: pg.PoolClient,
@@ -3679,9 +3678,8 @@ async function applyRecoveredDisputes(
       }
     }
   }
-  if (losses.length === 0) return;
-  await blockAccountSends(client, order.user_id, 'payment_disputed');
-  for (const dispute of losses) {
+  if (losses.length > 0) await blockAccountSends(client, order.user_id, 'payment_disputed');
+  for (const dispute of disputes) {
     const closed = dispute.resolved_at !== null;
     await client.query(
       `INSERT INTO commerce_operational_alerts (
@@ -3692,7 +3690,7 @@ async function applyRecoveredDisputes(
         latestEvent.get(dispute.dispute_id),
         order.order_id,
         closed ? 'stripe_dispute_closed' : 'stripe_dispute_created',
-        closed && dispute.status === 'lost' ? 'critical' : 'warning',
+        closed ? (dispute.status === 'lost' ? 'critical' : dispute.status === 'won' ? 'info' : 'warning') : 'warning',
         JSON.stringify({
           disputeStatus: dispute.status,
           reason: dispute.reason,

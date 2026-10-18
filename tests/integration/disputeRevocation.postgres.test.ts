@@ -982,7 +982,7 @@ describePostgres('dispute and refund pack revocation', () => {
       ]);
     }, 60_000);
 
-    it('blocks when one of two recovered disputes is a loss, and alerts for that one', async () => {
+    it('blocks when one of two recovered disputes is a loss, and alerts for each', async () => {
       const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
       const inquiry = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'warning_needs_response']]);
       const loss = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
@@ -994,9 +994,8 @@ describePostgres('dispute and refund pack revocation', () => {
       expect((await readDispute(loss)).user_id).toBe(userId);
       const shown = await pool.query('SELECT stripe_dispute_status FROM orders WHERE order_id = $1', [orderId]);
       expect(shown.rows[0].stripe_dispute_status).toBe('needs_response');
-      expect(await readDisputeAlerts(orderId)).toEqual([
-        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null }
-      ]);
+      const created = { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null };
+      expect(await readDisputeAlerts(orderId)).toEqual([created, created]);
     }, 60_000);
 
     it("takes a funded order's pack when it recovers a loss", async () => {
@@ -1143,6 +1142,9 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(account.sends_blocked_at).toBeNull();
       expect(account.sends_blocked_reason).toBeNull();
       expect((await readDispute(disputeId)).user_id).toBe(userId);
+      expect(await readDisputeAlerts(orderId)).toEqual([
+        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null }
+      ]);
     }, 60_000);
 
     it('leaves the account sending for a dispute already won', async () => {
@@ -1157,10 +1159,13 @@ describePostgres('dispute and refund pack revocation', () => {
       const account = await readAccount(userId);
       expect(account.sends_blocked_at).toBeNull();
       expect(account.sends_blocked_reason).toBeNull();
+      expect(await readDisputeAlerts(orderId)).toEqual([
+        { alert_type: 'stripe_dispute_closed', severity: 'info', status: 'open', resolution_code: null }
+      ]);
     }, 60_000);
 
     // Guards that the recovery's block never clobbers an earlier one, and that
-    // the loss's next event finds its effects ran (one alert, not two).
+    // the loss's next event finds its effects ran and records only.
     it('keeps an earlier block as it was, and the next loss event changes nothing', async () => {
       const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
       await pool.query(
@@ -1201,7 +1206,7 @@ describePostgres('dispute and refund pack revocation', () => {
       expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
     }, 60_000);
 
-    it("counts a loss recovered on a funded order among the account's standing disputes", async () => {
+    it("counts a loss recovered on an order whose intent was committed among the account's standing disputes", async () => {
       const { userId, paymentIntentId: heldIntent } = await seedPackHolder({ credits: 5 });
       const wonId = `dp_${randomUUID().slice(0, 8)}`;
       await commerceService.processStripeWebhookEvent(
