@@ -999,9 +999,10 @@ describePostgres('dispute and refund pack revocation', () => {
       ]);
     }, 60_000);
 
-    it('leaves a dispute on an order already funded to its next event, which takes the pack', async () => {
-      // The dispute was recorded while the order's payment intent was not yet
-      // committed, and a later checkout event for the funded order recovers it.
+    it("takes a funded order's pack when it recovers a loss", async () => {
+      // The direct UPDATEs stand in for the dispute's event running alongside
+      // the checkout event that funded the order, neither seeing the other; a
+      // later checkout event for the order recovers the dispute.
       const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 10 });
       await pool.query('UPDATE orders SET stripe_payment_intent_id = NULL WHERE order_id = $1', [orderId]);
       const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
@@ -1009,48 +1010,39 @@ describePostgres('dispute and refund pack revocation', () => {
 
       await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
 
-      const blocked = await readAccount(userId);
-      expect(blocked.sends_blocked_reason).toBe('payment_disputed');
-      expect(blocked.credits).toBe(10);
-      expect((await readDispute(disputeId)).user_id).toBeNull();
+      const account = await readAccount(userId);
+      expect(account.sends_blocked_reason).toBe('payment_disputed');
+      expect(account.credits).toBe(0);
+      expect(await readLedgerStatuses(userId)).toEqual(['revoked']);
+      expect((await readDispute(disputeId)).user_id).toBe(userId);
       const recoveredAlert = { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null };
       expect(await readDisputeAlerts(orderId)).toEqual([recoveredAlert]);
 
+      // Its effects ran, so its next event records only.
       await commerceService.processStripeWebhookEvent(
         disputeEvent('charge.dispute.funds_withdrawn', disputeFixture({ id: disputeId, payment_intent: paymentIntentId }))
       );
-
-      expect((await readAccount(userId)).credits).toBe(0);
-      expect(await readLedgerStatuses(userId)).toEqual(['revoked']);
-      expect((await readDispute(disputeId)).user_id).toBe(userId);
-      // The matched path raises its own alert for that event, beside the recovery's.
-      expect(await readDisputeAlerts(orderId)).toEqual([recoveredAlert, recoveredAlert]);
+      expect(await readDisputeAlerts(orderId)).toEqual([recoveredAlert]);
     }, 60_000);
 
-    it('leaves an open dispute on a funded order with no intent recorded to its next event', async () => {
+    it('takes the pack of a funded order with no intent recorded', async () => {
       const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 10 });
       await pool.query('UPDATE orders SET stripe_payment_intent_id = NULL WHERE order_id = $1', [orderId]);
       const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
 
       await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
 
-      expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
-      expect((await readDispute(disputeId)).user_id).toBeNull();
-
-      // The recovery recorded the intent, so the next event matches the order and takes the pack.
-      await commerceService.processStripeWebhookEvent(
-        disputeEvent('charge.dispute.funds_withdrawn', disputeFixture({ id: disputeId, payment_intent: paymentIntentId }))
-      );
-      expect((await readAccount(userId)).credits).toBe(0);
+      const account = await readAccount(userId);
+      expect(account.sends_blocked_reason).toBe('payment_disputed');
+      expect(account.credits).toBe(0);
       expect(await readLedgerStatuses(userId)).toEqual(['revoked']);
       expect((await readDispute(disputeId)).user_id).toBe(userId);
     }, 60_000);
 
-    it('treats an order whose intent was committed while it waited at Checkout like a funded one', async () => {
+    it('owns a dispute on an order whose intent was committed while it waited at Checkout', async () => {
       // The direct UPDATE stands in for an unpaid completed event that commits
       // the payment intent and leaves the order at Checkout, running alongside
-      // the dispute's event so that neither sees the other; the next checkout
-      // event recovers the dispute.
+      // the dispute's event so that neither sees the other.
       const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
       const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
       await pool.query('UPDATE orders SET stripe_payment_intent_id = $2 WHERE order_id = $1', [orderId, paymentIntentId]);
@@ -1059,15 +1051,10 @@ describePostgres('dispute and refund pack revocation', () => {
 
       expect(result).toMatchObject({ orderId, status: 'disputed' });
       expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
-      expect((await readDispute(disputeId)).user_id).toBeNull();
-
-      await commerceService.processStripeWebhookEvent(
-        disputeEvent('charge.dispute.funds_withdrawn', disputeFixture({ id: disputeId, payment_intent: paymentIntentId }))
-      );
       expect((await readDispute(disputeId)).user_id).toBe(userId);
     }, 60_000);
 
-    it("takes over a closed dispute even when its intent is the one the order's row carries", async () => {
+    it("owns a closed dispute on an order whose intent was committed", async () => {
       const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
       const disputeId = await disputeFirst(paymentIntentId, [
         ['charge.dispute.created', 'needs_response'],
@@ -1077,9 +1064,26 @@ describePostgres('dispute and refund pack revocation', () => {
 
       await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
 
-      // No event of a closed dispute is still to come, so it is owned now.
       expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
       expect((await readDispute(disputeId)).user_id).toBe(userId);
+      expect(await readDisputeAlerts(orderId)).toEqual([
+        { alert_type: 'stripe_dispute_closed', severity: 'critical', status: 'open', resolution_code: null }
+      ]);
+    }, 60_000);
+
+    it('leaves a dispute whose own event already matched the order as that event left it', async () => {
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+      await pool.query('UPDATE orders SET stripe_payment_intent_id = $2 WHERE order_id = $1', [orderId, paymentIntentId]);
+      // The close matches the order and runs the whole rule itself.
+      await commerceService.processStripeWebhookEvent(
+        disputeEvent('charge.dispute.closed', disputeFixture({ id: disputeId, payment_intent: paymentIntentId, status: 'lost' }))
+      );
+      expect((await readDispute(disputeId)).user_id).toBe(userId);
+
+      await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+
+      // One closed alert, the close's own.
       expect(await readDisputeAlerts(orderId)).toEqual([
         { alert_type: 'stripe_dispute_closed', severity: 'critical', status: 'open', resolution_code: null }
       ]);
@@ -1197,7 +1201,7 @@ describePostgres('dispute and refund pack revocation', () => {
       expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
     }, 60_000);
 
-    it("counts a loss left to its next event among the account's standing disputes", async () => {
+    it("counts a loss recovered on a funded order among the account's standing disputes", async () => {
       const { userId, paymentIntentId: heldIntent } = await seedPackHolder({ credits: 5 });
       const wonId = `dp_${randomUUID().slice(0, 8)}`;
       await commerceService.processStripeWebhookEvent(
@@ -1214,10 +1218,10 @@ describePostgres('dispute and refund pack revocation', () => {
          ) VALUES ($1, $2, 10, 1999, 'USD', 'checkout_pending', 'letter_pack', 'starter', $3)`,
         [orderId, userId, `idem_${orderId}`]
       );
-      const leftId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+      const recoveredId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
       await pool.query('UPDATE orders SET stripe_payment_intent_id = $2 WHERE order_id = $1', [orderId, paymentIntentId]);
       await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
-      expect((await readDispute(leftId)).user_id).toBeNull();
+      expect((await readDispute(recoveredId)).user_id).toBe(userId);
 
       await commerceService.processStripeWebhookEvent(
         disputeEvent('charge.dispute.closed', disputeFixture({ id: wonId, payment_intent: heldIntent, status: 'won' }))

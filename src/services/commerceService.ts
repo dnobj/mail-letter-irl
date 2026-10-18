@@ -3463,10 +3463,6 @@ async function compensateDisputedPacks(
  * let a benign outcome on one order unlock a block a different, still-standing
  * chargeback had set.
  *
- * A dispute counts as the account's by its account, or by its payment intent
- * being one of the account's orders' (one whose next event is still to tie it
- * to the account), as readErasureBlockers counts them.
- *
  * "Would justify a block" means exactly the statuses that revoke - the inverse
  * of NON_LOSS_DISPUTE_STATUSES. Counting inquiries here was a dead end: an open
  * inquiry never blocks anything, but it would veto the unblock, and when it
@@ -3486,10 +3482,7 @@ async function unblockAccountSends(
        AND sends_blocked_reason = 'payment_disputed'
        AND NOT EXISTS (
          SELECT 1 FROM stripe_disputes other
-          WHERE (other.user_id = $1
-                 OR other.payment_intent_id IN (
-                      SELECT o.stripe_payment_intent_id FROM orders o
-                       WHERE o.user_id = $1 AND o.stripe_payment_intent_id IS NOT NULL))
+          WHERE other.user_id = $1
             AND other.dispute_id <> $2
             AND NOT (other.status = ANY($3::text[]))
        )`,
@@ -3604,14 +3597,15 @@ async function blockAccountSends(
  * serialises them and no dispute lock is taken: one may be held by an event
  * waiting for the order.
  *
- * A dispute is taken over when the order is still at Checkout with no intent
- * committed, so nothing has been granted or queued for it, or when the dispute
- * is closed and has no event to come: its row takes the order's account, which
- * processDisputeEvent reads as "its effects ran", so its next loss event
- * records only. Any other is left to its next event, which matches this order
- * and runs the whole rule, the order's lots and mail included; its row keeps
- * no account so that event acts. unblockAccountSends and countStandingDisputes
- * count both, by account or by the order's intent.
+ * Each dispute not already the account's is taken over and its effects run
+ * here, as the matched path would run them: its row takes the order's account,
+ * which processDisputeEvent reads as "its effects ran" (its next loss event
+ * records only, and unblockAccountSends and countStandingDisputes count it).
+ * An order still at Checkout with no intent committed has had nothing granted
+ * or queued, so the block is the whole of it. Any other order may hold funded
+ * mail and a pack's lots, which the matched path's own steps take. A dispute
+ * already the account's had them run when an event of its own matched this
+ * order, or when an earlier checkout event recovered it.
  *
  * A dispute's payment intent is read once, unlocked; it changes only from none
  * to one, which Stripe does not do for a card payment's dispute.
@@ -3621,7 +3615,7 @@ async function blockAccountSends(
  * dispute's status, a loss's first.
  */
 async function applyRecoveredDisputes(
-  client: Pick<pg.PoolClient, 'query'>,
+  client: pg.PoolClient,
   order: Order,
   committedIntent: string | null,
   sessionIntent: string | null,
@@ -3650,30 +3644,40 @@ async function applyRecoveredDisputes(
   }
   const read = await client.query<{
     dispute_id: string; status: string; resolved_at: Date | null; reason: string | null;
-    amount_cents: number; currency: string; charge_id: string;
+    amount_cents: number; currency: string; charge_id: string; user_id: string | null;
   }>(
-    `SELECT dispute_id, status, resolved_at, reason, amount_cents, currency, charge_id
+    `SELECT dispute_id, status, resolved_at, reason, amount_cents, currency, charge_id, user_id
      FROM stripe_disputes WHERE dispute_id = ANY($1::text[])`,
     [ours]
   );
-  const disputes = [...read.rows].sort((a, b) => a.dispute_id.localeCompare(b.dispute_id));
-  const nothingFunded = committedIntent === null && order.status === 'checkout_pending';
-  const takenOver = disputes
-    .filter(row => nothingFunded || row.resolved_at !== null)
-    .map(row => row.dispute_id);
-  if (takenOver.length > 0) {
-    await client.query(
-      `UPDATE stripe_disputes SET user_id = COALESCE(user_id, $2), updated_at = NOW()
-       WHERE dispute_id = ANY($1::text[])`,
-      [takenOver, order.user_id]
-    );
-  }
+  const disputes = read.rows
+    .filter(row => row.user_id === null)
+    .sort((a, b) => a.dispute_id.localeCompare(b.dispute_id));
+  if (disputes.length === 0) return;
+  await client.query(
+    `UPDATE stripe_disputes SET user_id = $2, updated_at = NOW()
+     WHERE dispute_id = ANY($1::text[]) AND user_id IS NULL`,
+    [disputes.map(row => row.dispute_id), order.user_id]
+  );
   const losses = disputes.filter(row => !NON_LOSS_DISPUTE_STATUSES.has(row.status));
   const shown = losses[0] ?? disputes[0];
-  if (shown) {
-    await client.query('UPDATE orders SET stripe_dispute_status = $2 WHERE order_id = $1', [
-      order.order_id, shown.status
-    ]);
+  await client.query('UPDATE orders SET stripe_dispute_status = $2 WHERE order_id = $1', [
+    order.order_id, shown.status
+  ]);
+  const nothingFunded = committedIntent === null && order.status === 'checkout_pending';
+  if (!nothingFunded) {
+    for (const dispute of disputes) {
+      await stopFundedMailBeforeFinancialReversal(
+        client, order, latestEvent.get(dispute.dispute_id) as string, 'payment_disputed'
+      );
+    }
+    if (order.order_type === 'letter_pack') {
+      for (const dispute of losses) {
+        const eventId = latestEvent.get(dispute.dispute_id) as string;
+        await holdMailFundedByOrder(client, order, eventId, 'funding_disputed');
+        await revokePackLots(client, order, { credits: 'all', cause: 'payment_disputed', disputeId: dispute.dispute_id });
+      }
+    }
   }
   if (losses.length === 0) return;
   await blockAccountSends(client, order.user_id, 'payment_disputed');
