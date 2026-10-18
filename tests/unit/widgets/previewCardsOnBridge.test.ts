@@ -565,6 +565,24 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     expect(setCalls(card)).toHaveLength(1);
   });
 
+  it('shows the dates it had again when a date picked after a key is refused: the pick ends the typing', async () => {
+    const card = await offering();
+    const input = dateInput(card);
+
+    input.dispatchEvent(new card.window.KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 80));
+    input.value = '2026-10-13';
+    input.dispatchEvent(new card.window.Event('change'));
+    await flush();
+    await answerTool(card, 'set_arrival_date', {
+      isError: true,
+      content: [{ type: 'text', text: 'The earliest this can arrive is Wed, Oct 14 (2026-10-14). Choose that date or later, or leave arriveBy out to mail as soon as possible.' }]
+    });
+
+    expect(input.value).toBe('');
+    expect(card.text('arrives-note')).toMatch(/^That date can't be met any more\. The earliest on offer is now Wed, Oct 14(, 2026)?\.$/);
+  });
+
   it('sets a typed date when the field is left', async () => {
     const card = await offering();
 
