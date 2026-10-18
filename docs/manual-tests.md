@@ -1996,7 +1996,7 @@ The studio rearranges both preview cards. The letter card becomes a header, the 
 - For step 7: `LETTER_IRL_ROOM_TO_WRITE_ENABLED` on the maintenance service too, and `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` set to the Stripe test prices (as in PAGES-01).
 - `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 9 (without one, `sendAsGift` is refused).
 
-Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v94, steering r53). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
+Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v95, steering r54). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
 
 **Steps:**
 
@@ -2016,22 +2016,22 @@ Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v94, s
    - With no editor offered: verify "To change the words, ask in the chat."
    - With the editor offered: verify two boxes, "The letter" and "Signed" (labels shown in capitals), holding the words, with a line under them, "About N characters left on this page.", and no fit line or buttons. Type: verify the line counts down, **Update the page** and **Put back** appear, and **Send Letter** waits. Press **Put back**: verify the words come back, the buttons go and focus is in the letter's box. Change a word again and press **Update the page**. Verify the call is `set_letter_words`, the page is drawn again, the note says the words are changed and nothing has been sent, and the buttons go.
    - Catching up: ask in the chat to change a word of the letter. Click the card (or its Words tab). Verify the boxes and the page show the chat's words. Then type in the boxes, ask the chat to change another word, and click the card: verify your words stay in the boxes, the page shows the chat's, and the note says "The words were changed in the chat. What you typed is kept here, and the page shows the chat's: Update the page to use yours instead, or Put back to take the chat's."
-   - The chat hears of the card's changes (letter home on, so the card shares its draft): on the card, add "Come and see the roses when you can." and press **Update the page**. Then ask the chat "change 'roses' to 'sunflowers'" without naming a tool. Verify ChatGPT calls `set_letter_words` (a first call refused with the words as they are now is expected), the letter then says sunflowers, and it never says the letter has no "roses". Click the card: verify the boxes show the chat's words and the message under the boxes ("The letter's words are changed...") is gone. The sentence the card shares with the chat about its change is expected to stay for the draft's life. Repeat in Claude. On 2026-10-17 (widgets v89, before this check) ChatGPT called nothing and answered from the preview's words that there were no roses; it worked only when told to call `get_draft_status` first, and the message under the boxes stayed after the catch-up.
+   - The chat hears of the card's changes (letter home on, so the card shares its draft): on the card, add "Come and see the roses when you can." and press **Update the page**. Then ask the chat "change 'roses' to 'sunflowers'" without naming a tool. Verify ChatGPT calls `set_letter_words` (a first call refused with the words as they are now is expected), the letter then says sunflowers, and it never says the letter has no "roses". Click the card: verify the boxes show the chat's words and the message under the boxes ("The letter's words are changed...") is gone. The sentence the card shares with the chat about its change is expected to stay for the draft's life. Repeat in Claude, where the card's share does not reach the model (HOME-02) and the preview's own text says to call `set_letter_words` first (steering r54; on 2026-10-18, on r53, Claude called nothing and said the letter had no roses). On 2026-10-17 (widgets v89, before this check) ChatGPT called nothing and answered from the preview's words that there were no roses; it worked only when told to call `get_draft_status` first, and the message under the boxes stayed after the catch-up.
 4. [ ] On **Delivery**, verify, in order: the Arrives by row (**As soon as possible** pressed; the row labels show in capitals), the Mail row (**First-Class** pressed, while certified mail is on), the Delivery line "USPS First-Class Mail - Mailed in 1-2 business days; usually arrives in 1-2 weeks - USPS timing varies and can take longer.", and the Draft id. Then ask in the chat for a new preview with an arrival date. Verify the new card opens on Delivery, and the summary says "held until <the mail date>".
 5. [ ] Keyboard: Tab into the tabs. Verify the tabs take only one stop in the tab order, the arrow keys move between them, and Home and End jump to Style and Delivery.
 6. [ ] Press **Send Letter**. Verify:
    - the pill reads "With the printer" and the subtitle starts "Sent";
    - the summary ends "with the printer", the Style row is gone, and the id row reads "Order".
 
-   Repeat with a dated letter, whose button reads **Schedule Letter**: verify the pill reads "Scheduled", Delivery is shown, and **Cancel this letter** is there.
+   Repeat with a dated letter, whose button reads **Schedule Letter**: verify the pill reads "Scheduled", Delivery is shown, and **Cancel this letter** is there. Press it, and confirm: verify the pill reads "Cancelled" and the button **Letter Cancelled** (on widgets v94 it still read "Letter Scheduled").
 7. [ ] (Room to write) Preview a two-page letter. Verify:
    - the page reads "Page 1 of 2" with **Next page**, which turns to "First page" on page 2;
-   - **Enlarge** turns to "Show smaller";
+   - **Enlarge** turns to "Show smaller", and the page spreads across the card (since widgets v95; before, it stayed about 300 px wide);
    - the summary has "2 pages, both sides";
    - the cost reads "Pay & Send USD 5.99".
 
    Restyle it: verify the page you were on stays shown.
-8. [ ] In Claude (DEV), preview the same letter. Verify the same layout, at about 580 px tall at Claude's 736 px width with no inner scroll bar, and that the card sends with **Send Letter** as in ChatGPT (Claude lets the card send; **Open the confirmation page** is for apps that do not, such as VS Code). Reopen the conversation. Verify the card asks `get_draft_status` and shows the letter as it is now.
+8. [ ] In Claude (DEV), preview the same letter. Verify the same layout, at about 580 px tall at Claude's 736 px width with no inner scroll bar (with the page not enlarged), and that the card sends with **Send Letter** as in ChatGPT (Claude lets the card send; **Open the confirmation page** is for apps that do not, such as VS Code). Reopen the conversation. Verify the card asks `get_draft_status` and shows the letter as it is now.
 9. [ ] Preview a gift letter (`sendAsGift: true`). Verify the cost reads "Free: a gift letter" and the card page is page 2.
 10. [ ] Preview a postcard. Verify the maker:
     - the header reads "Postcard to <name>" with "Draft · <City>, <ST> <ZIP>", and there are no tabs;
@@ -2248,7 +2248,7 @@ The tools name sizes the PostGrid way: `6x4` is the 4x6 and `6x11` is the 11x6.
 
 The envelope is drawn on the letter card and on the website's confirmation page (website #77): nothing prints differently, and postcards have none.
 
-**Preconditions:** Development, with `LETTER_IRL_ENVELOPE_REVEAL_ENABLED` on in the API (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf`: the envelope dresses our renderer's page. `LETTER_IRL_STATIONERY_ENABLED` for step 2, `LETTER_IRL_ARRIVE_BY_ENABLED` for steps 4 and 10, `LETTER_IRL_WORDS_EDITOR_ENABLED` (or room to write) for steps 5 and 10, and `LETTER_IRL_STUDIO_CARD_ENABLED`, `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 6. Refresh the ChatGPT (DEV) and Claude connectors (widgets v94). The account needs letters in its balance.
+**Preconditions:** Development, with `LETTER_IRL_ENVELOPE_REVEAL_ENABLED` on in the API (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf`: the envelope dresses our renderer's page. `LETTER_IRL_STATIONERY_ENABLED` for step 2, `LETTER_IRL_ARRIVE_BY_ENABLED` for steps 4 and 10, `LETTER_IRL_WORDS_EDITOR_ENABLED` (or room to write) for steps 5 and 10, and `LETTER_IRL_STUDIO_CARD_ENABLED`, `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 6. Refresh the ChatGPT (DEV) and Claude connectors (widgets v95). The account needs letters in its balance.
 
 **Steps:**
 
