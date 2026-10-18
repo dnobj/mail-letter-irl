@@ -2438,7 +2438,10 @@
         // Mail no pack pays for (#579), such as a longer letter (#586), says its price.
         const letters = lettersRequired ?? 1;
         const costPayAndSend = sendEligibility?.payAndSend;
-        document.getElementById("cost").textContent = isGiftSend
+        // A sent letter that travelled otherwise than its price was heard for (#625): no price, as on the studio.
+        document.getElementById("cost").textContent = pricedOtherwise.has(state)
+          ? "—"
+          : isGiftSend
           ? "Free (gift letter)"
           : sendEligibility?.packPays === false
             ? unpayableReason(state)

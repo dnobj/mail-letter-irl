@@ -2372,6 +2372,15 @@ describe('how the letter travels, as the latest answer with its terms says (#625
     expect(text(card, 'studio-cost')).toBe('');
   });
 
+  it('names no price on the card without the studio either, for a sent letter that travelled otherwise', async () => {
+    const card = mount();
+    await card.show(ordinaryPreview(), { previewHtml: PAGE });
+    expect(text(card, 'cost')).toBe('1 Letter');
+    await card.answerTo(card.requests('tools/call', ASK)[0], sent({ mailService: 'certified', ...CERTIFIED_WORDS }));
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+    expect(text(card, 'cost')).toBe('—');
+  });
+
   it('keeps the price when a sent letter travelled as the card last heard', async () => {
     const card = mount();
     await card.show(certifiedPreview(), ON);

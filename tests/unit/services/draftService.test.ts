@@ -1012,7 +1012,7 @@ describe('draftService', () => {
       expect(client.query).toHaveBeenCalledTimes(5);
     });
 
-    it("tells the written row's service, not the one it was written to (#625 follow-up)", async () => {
+    it("tells the service of the row as written, read after the change, not the row before it (#625 follow-up)", async () => {
       const before = { mail_type: 'letter', body_text: 'Hello', mail_service: 'standard', arrive_by: null, mail_on: null };
       const written = { ...before, mail_service: 'certified', arrive_by: '2026-10-16', mail_on: '2026-10-06' };
       inTransaction({ rows: [pending] }, { rows: [] }, { rows: [before] }, { rows: [] }, { rows: [written] });
