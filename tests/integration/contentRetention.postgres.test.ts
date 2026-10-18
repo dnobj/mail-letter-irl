@@ -883,7 +883,7 @@ describePostgres('content retention sweep', () => {
         expect((await readLetter(seeded.letterId)).content.bodyText, seeded.letterId).toBe(SECRET_BODY);
       }
 
-      // The dispute settles: those go too.
+      // Their orders settle (the order-status arm alone: a refund or a lost dispute also revokes the returned lot, which holds): those go too.
       await pool.query("UPDATE orders SET status = 'refunded' WHERE order_id = ANY($1)", [[disputed.orderId, disputedTwice.orderId]]);
       expect(await retention.purgeExpiredLetterContent()).toBe(2);
     });
