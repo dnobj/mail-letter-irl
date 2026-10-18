@@ -181,7 +181,32 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+/** A signature as the cleaner stores one, decodable: 1200 x 300, grey ink on white (#614). */
+async function realSignature(): Promise<string> {
+  const strokes = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300"><rect width="100%" height="100%" fill="#fff"/>' +
+      '<path d="M20 220 C 300 0, 700 300, 1180 80" stroke="#000" stroke-width="8" fill="none"/></svg>'
+  );
+  const png = await (await import('sharp')).default(strokes).toColourspace('b-w').png().toBuffer();
+  return `data:image/png;base64,${png.toString('base64')}`;
+}
+/** The pixel size of the preview's signature. */
+const drawnSignatureSize = (html: string) => {
+  const bytes = Buffer.from(html.match(/<image data-role="signature" href="([^"]+)"/)![1].split(',')[1], 'base64');
+  return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+};
+
 describe('set_letter_words on a signed letter (#608)', () => {
+  it('draws the page from a small copy of the signature, and is drawn with the draft\'s own (#614)', async () => {
+    const stored = await realSignature();
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(4), signed: true }), signature_image: stored } as never);
+    await change('Dear Sam,\n\nThe garden is in.', context(), 'Love,\nPat');
+    const words = written();
+    // What the service checks under the lock is the stored copy; the page shows the small one.
+    expect(words.drawnWith).toBe(stored);
+    expect(drawnSignatureSize(words.previewHtml)).toEqual([480, 120]);
+  });
+
   it.each([['a text-only letter', false], ['an enclosed image', true]])(
     'draws %s with its own signature under the new sign-off, recording pdf-4 in the page',
     async (_label, inline) => {

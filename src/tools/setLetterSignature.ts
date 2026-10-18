@@ -4,6 +4,7 @@ import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import type { SendEligibility } from '../services/commerceService.js';
 import { SIGNATURE_LINES, stationeryOf, type PageFit } from '../render/index.js';
 import { getDraftForStationery, setDraftSignature } from '../services/draftService.js';
+import { withDisplaySignature } from '../services/signatureDisplay.js';
 import { getSignature } from '../services/signatureService.js';
 import { PAGE_WORDS, editorPageFit, layoutLetterForPreview, letterPayment, letterRunsPast, pageChangeSentence, redrawLetterPreview, type LetterTravel } from './letterHelpers.js';
 import { letterOption } from '../services/mailOptions.js';
@@ -145,7 +146,8 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
   // the letter's own, a gift letter's card, as they were.
   const previewHtml = redrawLetterPreview(
     { previewHtml: draft.preview_html, pages: pagesBefore },
-    layout,
+    // The signature from its small copy (#614); the print keeps the stored one.
+    await withDisplaySignature(layout),
     { sender, recipient, bodyText, signOff },
     stationery
   );

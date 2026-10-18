@@ -237,7 +237,34 @@ describe('rememberPreviewSignature', () => {
   });
 });
 
+/** A signature as the cleaner stores one, decodable: 1200 x 300, grey ink on white. */
+async function realSignature(): Promise<Buffer> {
+  const strokes = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300"><rect width="100%" height="100%" fill="#fff"/>' +
+      '<path d="M20 220 C 300 0, 700 300, 1180 80" stroke="#000" stroke-width="8" fill="none"/></svg>'
+  );
+  return (await import('sharp')).default(strokes).toColourspace('b-w').png().toBuffer();
+}
+/** The pixel size of a PNG data URI's image. */
+const pngSize = (href: string) => {
+  const bytes = Buffer.from(href.split(',')[1], 'base64');
+  return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+};
+
 describe('a letter preview with the saved signature', () => {
+  it('draws it from a small copy, and keeps the stored one for the print (#614)', async () => {
+    const png = await realSignature();
+    vi.mocked(getSignature).mockResolvedValue({ ...saved(true), png });
+    await run('text_only');
+    const draft = drafted();
+    // The draft keeps the signature as saved: the print draws from it.
+    expect(draft.signatureImage).toBe(uri(png));
+    const href = draft.previewHtml!.match(/<image data-role="signature" href="([^"]+)"/)![1];
+    expect(href).not.toBe(uri(png));
+    expect(pngSize(href)).toEqual([480, 120]);
+    expect(href.length).toBeLessThan(uri(png).length);
+  });
+
   it.each(['text_only', 'header_image', 'inline_image'] as const)(
     '%s: is drawn with it under the closing, records pdf-4, and keeps its own copy',
     async layout => {

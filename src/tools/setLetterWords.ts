@@ -8,6 +8,7 @@ import type { SendEligibility } from '../services/commerceService.js';
 import { getGiftBalance } from '../services/giftLetterService.js';
 import { stationeryOf, type Layout, type PageFit } from '../render/index.js';
 import { getDraftForStationery, setDraftWords } from '../services/draftService.js';
+import { withDisplaySignature } from '../services/signatureDisplay.js';
 import {
   layoutLetterForPreview,
   letterPayment,
@@ -210,7 +211,8 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   // the letter's own, a gift letter's card, as they were.
   const previewHtml = redrawLetterPreview(
     { previewHtml: draft.preview_html, pages: pagesBefore },
-    layout,
+    // The signature from its small copy (#614); the print keeps the stored one.
+    await withDisplaySignature(layout),
     { sender, recipient, bodyText, signOff },
     stationery
   );
