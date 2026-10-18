@@ -1028,9 +1028,10 @@ describePostgres('dispute and refund pack revocation', () => {
     }, 60_000);
 
     it('treats an order whose intent was committed while it waited at Checkout like a funded one', async () => {
-      // An unpaid completed event commits the payment intent and leaves the
-      // order at Checkout; the dispute recorded before that commit is recovered
-      // by the next checkout event.
+      // The direct UPDATE stands in for an unpaid completed event that commits
+      // the payment intent and leaves the order at Checkout, running alongside
+      // the dispute's event so that neither sees the other; the next checkout
+      // event recovers the dispute.
       const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
       const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
       await pool.query('UPDATE orders SET stripe_payment_intent_id = $2 WHERE order_id = $1', [orderId, paymentIntentId]);
@@ -1045,6 +1046,24 @@ describePostgres('dispute and refund pack revocation', () => {
         disputeEvent('charge.dispute.funds_withdrawn', disputeFixture({ id: disputeId, payment_intent: paymentIntentId }))
       );
       expect((await readDispute(disputeId)).user_id).toBe(userId);
+    }, 60_000);
+
+    it("takes over a closed dispute even when its intent is the one the order's row carries", async () => {
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      const disputeId = await disputeFirst(paymentIntentId, [
+        ['charge.dispute.created', 'needs_response'],
+        ['charge.dispute.closed', 'lost']
+      ]);
+      await pool.query('UPDATE orders SET stripe_payment_intent_id = $2 WHERE order_id = $1', [orderId, paymentIntentId]);
+
+      await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+
+      // No event of a closed dispute is still to come, so it is owned now.
+      expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
+      expect((await readDispute(disputeId)).user_id).toBe(userId);
+      expect(await readDisputeAlerts(orderId)).toEqual([
+        { alert_type: 'stripe_dispute_closed', severity: 'critical', status: 'open', resolution_code: null }
+      ]);
     }, 60_000);
 
     it("takes over a dispute whose intent is not the one the order's row carries", async () => {

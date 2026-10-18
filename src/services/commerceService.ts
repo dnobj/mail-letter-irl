@@ -3583,23 +3583,26 @@ async function blockAccountSends(
  * checkout ties their money to an order (processCheckoutSessionEvent's
  * recovery): the same rule processDisputeEvent applies to a matched dispute.
  *
- * A dispute whose own payment intent the order's committed row already carries
- * (committedIntent, read before any adoption) is left to its next event: that
- * event matches this order and runs the whole rule, the order's lots and mail
- * included. Its row keeps no account, so that event acts, and no lock is taken
- * for it, as that event may hold its dispute's lock while it waits for the
- * order. Until then the unblock after another dispute's win and an operator's
- * lift do not count it.
+ * An open dispute whose own payment intent the order's committed row already
+ * carries (committedIntent, read before any adoption) is left to its next
+ * event: that event matches this order and runs the whole rule, the order's
+ * lots and mail included. Its row keeps no account, so that event acts, and no
+ * lock is taken for it, as that event may hold its dispute's lock while it
+ * waits for the order. It counts toward the account's standing disputes from
+ * that event.
  *
  * Every other dispute is taken over here: its row takes the order's account,
  * which processDisputeEvent reads as "its effects ran", so its next loss event
- * records only, and unblockAccountSends and countStandingDisputes count it. Its
- * next event cannot match this order, so this order has had no pack granted or
- * mail queued for it, and the block is what is left of the rule. Its lock comes
- * after the order's, the other way round from processDisputeEvent, which
- * cannot deadlock: an event for it searches by a payment intent this order's
- * committed row does not carry, so it never waits on this order. An event
+ * records only, and unblockAccountSends and countStandingDisputes count it.
+ * Either its next event cannot match this order, which has then had no pack
+ * granted or mail queued for it, or it is closed and has no event to come; the
+ * block is what this rule applies, and a closed loss's alert is critical. Its
+ * lock comes after the order's, the other way round from processDisputeEvent,
+ * which cannot deadlock: no event for it waits on this order (one searches by
+ * a payment intent this order's committed row does not carry). An event
  * handled now, holding that lock, finishes before the status it wrote is read.
+ * A dispute's payment intent is read once, unlocked; it changes only from none
+ * to one, which Stripe does not do for a card payment's dispute.
  *
  * Each loss gets the alert the matched path raises, which the dispute's close
  * resolves (an inquiry alerts when it escalates), and the order shows a
@@ -3619,12 +3622,15 @@ async function applyRecoveredDisputes(
     }
   }
   const disputeIds = [...latestEvent.keys()].sort();
-  const intents = await client.query<{ dispute_id: string; payment_intent_id: string | null }>(
-    'SELECT dispute_id, payment_intent_id FROM stripe_disputes WHERE dispute_id = ANY($1::text[])',
+  const intents = await client.query<{
+    dispute_id: string; payment_intent_id: string | null; resolved_at: Date | null;
+  }>(
+    'SELECT dispute_id, payment_intent_id, resolved_at FROM stripe_disputes WHERE dispute_id = ANY($1::text[])',
     [disputeIds]
   );
   const leftToNextEvent = intents.rows
     .filter(row => committedIntent !== null && row.payment_intent_id === committedIntent)
+    .filter(row => row.resolved_at === null)
     .map(row => row.dispute_id);
   const takenOver = disputeIds.filter(disputeId => !leftToNextEvent.includes(disputeId));
 
