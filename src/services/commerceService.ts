@@ -3585,8 +3585,8 @@ async function blockAccountSends(
  *
  * Only a dispute whose own payment intent is the one this order ends up with
  * (committedIntent, read before any adoption, or else this checkout's) is
- * applied here: its later events match this order. Any other is left as it
- * was, as no event of it can reach this order.
+ * applied here: its later events match this order. No other is this order's
+ * to apply, as no event of it can reach this order.
  *
  * Where the order's committed row has no payment intent, no event of these
  * disputes can find the order, so none waits on it: each dispute's lock is
@@ -3595,7 +3595,9 @@ async function blockAccountSends(
  * the committed row carries the intent, every event of these disputes locks
  * this order before it touches the dispute's row, so the order's lock
  * serialises them and no dispute lock is taken: one may be held by an event
- * waiting for the order.
+ * waiting for the order. The disputes' rows are read locked, so a dispute event
+ * still writing one (it found no order, before the intent was committed)
+ * finishes first.
  *
  * Each dispute not already the account's is taken over and its effects run
  * here, as the matched path would run them: its row takes the order's account,
@@ -3646,7 +3648,8 @@ async function applyRecoveredDisputes(
     amount_cents: number; currency: string; charge_id: string; user_id: string | null;
   }>(
     `SELECT dispute_id, status, resolved_at, reason, amount_cents, currency, charge_id, user_id
-     FROM stripe_disputes WHERE dispute_id = ANY($1::text[])`,
+     FROM stripe_disputes WHERE dispute_id = ANY($1::text[])
+     ORDER BY dispute_id FOR UPDATE`,
     [ours]
   );
   const disputes = read.rows
