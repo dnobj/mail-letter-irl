@@ -1996,7 +1996,7 @@ The studio rearranges both preview cards. The letter card becomes a header, the 
 - For step 7: `LETTER_IRL_ROOM_TO_WRITE_ENABLED` on the maintenance service too, and `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` set to the Stripe test prices (as in PAGES-01).
 - `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 9 (without one, `sendAsGift` is refused).
 
-Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v95, steering r54). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
+Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v96, steering r54). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
 
 **Steps:**
 
@@ -2248,7 +2248,7 @@ The tools name sizes the PostGrid way: `6x4` is the 4x6 and `6x11` is the 11x6.
 
 The envelope is drawn on the letter card and on the website's confirmation page (website #77): nothing prints differently, and postcards have none.
 
-**Preconditions:** Development, with `LETTER_IRL_ENVELOPE_REVEAL_ENABLED` on in the API (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf`: the envelope dresses our renderer's page. `LETTER_IRL_STATIONERY_ENABLED` for step 2, `LETTER_IRL_ARRIVE_BY_ENABLED` for steps 4 and 10, `LETTER_IRL_WORDS_EDITOR_ENABLED` (or room to write) for steps 5 and 10, and `LETTER_IRL_STUDIO_CARD_ENABLED`, `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 6. Refresh the ChatGPT (DEV) and Claude connectors (widgets v95). The account needs letters in its balance.
+**Preconditions:** Development, with `LETTER_IRL_ENVELOPE_REVEAL_ENABLED` on in the API (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf`: the envelope dresses our renderer's page. `LETTER_IRL_STATIONERY_ENABLED` for step 2, `LETTER_IRL_ARRIVE_BY_ENABLED` for steps 4 and 10, `LETTER_IRL_WORDS_EDITOR_ENABLED` (or room to write) for steps 5 and 10, and `LETTER_IRL_STUDIO_CARD_ENABLED`, `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 6. Refresh the ChatGPT (DEV) and Claude connectors (widgets v96). The account needs letters in its balance.
 
 **Steps:**
 
@@ -2842,7 +2842,12 @@ ChatGPT (DEV) with "Allow once", then Claude (DEV) for the MCP Apps card.
 2. [ ] Pick a date. Verify the Delivery line and the note ("Mails ... · cancel free until then") change,
    and the button reads **Schedule Letter**. Pick **As soon as possible**; verify both go back.
 3. [ ] Pick a date before the earliest (typed into the field). Verify the card says the earliest on offer
-   and keeps the dates it had.
+   and keeps the dates it had. Then type a date on offer, part by part, and press Enter (or leave the field): verify it
+   is set once, as typed, and the field keeps every part while typing (on widgets v95 the year's first digit was set as
+   the year 0002 and refused, and in ChatGPT the parts typed were wiped as the card was drawn again). Then type a part
+   of a date, open the picker from the keyboard (Alt+Down or F4), and choose a date in it: verify it is set at once.
+   Type a date and click Send straight away: the first click leaves the field, which sets the date (Send waits while
+   it is set), and Send is pressed again once it reads Schedule Letter.
 4. [ ] Pick a date and press **Schedule Letter**. Verify **Scheduled**, the order id and the mail date,
    and that the balance went down by one letter.
 5. [ ] Press **Cancel this letter**, then **Yes, cancel this letter**. Verify **Cancelled** with the message
