@@ -3610,8 +3610,8 @@ async function blockAccountSends(
  * A dispute's payment intent is read once, unlocked; it changes only from none
  * to one, which Stripe does not do for a card payment's dispute.
  *
- * Each gets the alert the matched path raises, which the dispute's close
- * resolves, and the order shows a dispute's status, a loss's first.
+ * Each gets the alert the matched path raises (for an open dispute, one its
+ * close resolves), and the order shows a dispute's status, a loss's first.
  */
 async function applyRecoveredDisputes(
   client: pg.PoolClient,
