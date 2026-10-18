@@ -28,6 +28,8 @@ vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
 import { getDraftForStationery, setDraftWords } from '../../../src/services/draftService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { setLetterWordsTool } from '../../../src/tools/setLetterWords.js';
+import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
+import { clientProfileNamed, type ClientProfile } from '../../../src/auth/clientProfiles.js';
 import { partitionToolResult } from '../../../src/mcp/registerTools.js';
 import { layoutGiftPage, layoutLetter, readImageDataUri, renderPreviewSvg, type Stationery } from '../../../src/render/index.js';
 import { letterPrintText, renderLetterPreviewDocument, signatureParagraph, stampedAddressLines } from '../../../src/services/previewService.js';
@@ -409,6 +411,16 @@ describe('set_letter_words', () => {
     expect(written()).toMatchObject({ bodyText: 'Dear Sam, with a P.S.', replacing: { bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat' } });
   });
 
+  // The model is asked to send the words it last saw to read them (#795 review round 2): logged as no change.
+  it('logs words the letter already had apart from a change of them', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), body_text: 'Dear Sam, with a P.S.', sign_off: 'Pat' } as never);
+    const ctx = context();
+    await handler({ draftId: DRAFT_ID, bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat', wordsVersion: wordsVersionOf('Dear Sam, with a P.S.', 'Pat') }, ctx);
+    const events = vi.mocked(ctx.logger.info).mock.calls.map(([fields]) => (fields as { event?: string }).event);
+    expect(events).toContain('draft.words_unchanged');
+    expect(events).not.toContain('draft.words_changed');
+  });
+
   it('says a new preview can use a gift letter when the words bring it back to a page the balance cannot pay (#593 review round 1)', async () => {
     vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
     vi.mocked(getGiftBalance).mockResolvedValue({ available: 1 } as never);
@@ -507,16 +519,38 @@ describe('set_letter_words', () => {
       expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter' });
     });
 
-    it('keeps the description as it was while room to write is offered', () => {
-      const describe = setLetterWordsTool.description as (client?: unknown) => string;
-      expect(describe()).toBe(
+    // Steering r52: the model never sees the card's changes, and once answered from the preview's words that a word was
+    // not in a letter the person had changed on the card (STUDIO-01, DEV 2026-10-17).
+    it('says, where the app shows the card, that the card changes the words unseen, and how to read them without changing them', () => {
+      const describe = setLetterWordsTool.description as (client?: ClientProfile) => string;
+      const head =
         'Change the words of a previewed letter without previewing it again. Give the draftId from the preview, ' +
-          'bodyText and signOff in full, as the letter previews take them, and the wordsVersion of the words being replaced, ' +
-          'from the preview or the last change of words. The letter card can change the words too: if they changed since you ' +
-          'saw them, nothing is changed, and the answer gives the words as they are now. The letter is laid out again in its ' +
-          'stationery on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter ' +
-          'stays on one page.'
-      );
+        'bodyText and signOff in full, as the letter previews take them, and the wordsVersion of the words being replaced, ' +
+        'from the preview or the last change of words. ';
+      const tail =
+        'The letter is laid out again in its stationery on up to three pages: a longer letter prints on both sides and is ' +
+        'paid with Pay & Send, and a gift letter stays on one page.';
+      for (const app of ['chatgpt', 'claude'] as const) {
+        expect(describe(clientProfileNamed(app)), app).toBe(
+          head +
+            'The person can change the words on the letter card too, and you do not see those changes: a change to words ' +
+            'that changed since you saw them changes nothing, and its answer gives the words as they are now. Before saying ' +
+            'a word is or is not in the letter, call this with the words and wordsVersion you last saw: if they changed ' +
+            'since, the answer gives them as they are now; if not, the letter already has them and nothing changes. ' +
+            tail
+        );
+      }
+      // An app that shows no card keeps the words it had: there is no card for the person to change them on.
+      for (const app of ['claude_code', 'vscode', 'codex', 'generic'] as const) {
+        expect(describe(clientProfileNamed(app)), app).toBe(
+          head +
+            'The letter card can change the words too: if they changed since you saw them, nothing is changed, and the ' +
+            'answer gives the words as they are now. ' +
+            tail
+        );
+      }
+      expect(describe()).toBe(describe(clientProfileNamed('generic')));
+      expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(52);
     });
 
     it('says the page it lays out on in its description, one or up to three', () => {

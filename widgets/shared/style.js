@@ -67,6 +67,8 @@
    *   also says with hold(), nor while a send refused for a change since asks
    *   for the draft as it is now), onSet()
    *   (a style is being set on the draft), onChange({ draftId, stationery }),
+   *   onEdited(draftId, what) (the draft's words, stationery, signature or
+   *   mail service were changed here: the model never sees the card's calls),
    *   onBusy(), and wordsElement(id), which finds the Words tab's editor
    *   (#586) once the studio has drawn it; and signatureRow and
    *   signatureSwitch, the Signature switch (#608), which may be absent
@@ -174,6 +176,11 @@
       if (typeof options.onVersion === "function" && data && typeof data.contentVersion === "string" && data.contentVersion) {
         options.onVersion(draftId, data.contentVersion, data.contentVersionBefore);
       }
+    }
+    // The draft was changed here ("words", "stationery", "signature" or "mail service"), page or no page: the card tells
+    // the model, which never sees the card's own calls.
+    function edited(draftId, what) {
+      if (typeof options.onEdited === "function") options.onEdited(draftId, what);
     }
     // Terms taken from any answer: when they say how the letter travels, the Mail choice follows them.
     function adoptTerms(said) {
@@ -363,6 +370,7 @@
           }
           state.stationery = stationery;
           state.restyled = true;
+          edited(draftId, "stationery");
           keepSlots(stationery);
           // What it costs now, and how full its pages are (#586). An answer
           // that says nothing of it, as an older server's would not, keeps
@@ -447,6 +455,7 @@
           }
           signature.on = data.signature.printed;
           state.restyled = true;
+          edited(draftId, "signature");
           // What it costs now: the band can run the letter on to a page.
           var said = termsOf(data, result && result._meta && result._meta.pageFit);
           if (said) adoptTerms(said);
@@ -554,6 +563,7 @@
           // The terms say how the letter travels now, and with them the service the draft holds, whichever was pressed.
           adoptTerms(said);
           state.restyled = true;
+          edited(draftId, "mail service");
           tellVersion(draftId, data);
         })
         .catch(function (error) {
@@ -629,6 +639,8 @@
       "Update the page to use yours instead, or Put back to take the chat's.";
     // Said when an Update was refused for words changed elsewhere, until the card has the new ones.
     var STALE = "The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.";
+    // Said when the words were set but their page did not come back, until a catch-up brings it.
+    var NO_PAGE = "The words are changed, but the page did not come back here. Make the preview again to see it.";
 
     // The editor's elements live in the studio, which draws them after the
     // card starts: found, and listened to, once they are there.
@@ -671,13 +683,21 @@
       if (base && sameWords(base, current)) return;
       // Box by box: one not typed in (it holds the words it was filled from) takes the draft's words now; one typed in
       // keeps what was typed, and the card says so, unless it is what the draft has now.
+      // Other words than the boxes were filled from, not just their version.
+      var other = Boolean(base) && (base.bodyText !== current.bodyText || base.signOff !== current.signOff);
       var bodyKept = Boolean(base) && body.value !== base.bodyText && body.value !== current.bodyText;
       var signOffKept = Boolean(base) && signOff.value !== base.signOff && signOff.value !== current.signOff;
       if (!bodyKept) body.value = current.bodyText;
       if (!signOffKept) signOff.value = current.signOff;
       words.base = current;
-      if (bodyKept || signOffKept) {
+      if (other && (bodyKept || signOffKept)) {
         words.message = KEPT;
+        words.error = false;
+      } else if ((other && !words.error) || words.message === STALE) {
+        // The boxes took other words: what the last change said ("The letter's words are changed...") is about
+        // words they no longer hold. A copy said to be out of date is the draft's now, words or version, so an
+        // Update would go through (#795 review round 2). Any other refusal stays until the person acts on it.
+        words.message = "";
         words.error = false;
       }
     }
@@ -793,6 +813,7 @@
             throw new Error("The words may have changed. Make the preview again to see them.");
           }
           state.restyled = true;
+          edited(draftId, "words");
           words.set = {
             bodyText: bodyText,
             signOff: signOff,
@@ -811,7 +832,7 @@
             tellVersion(draftId, data);
             words.message = typeof data.message === "string" && data.message ? data.message : "The words are changed. Nothing has been sent.";
           } else {
-            words.message = "The words are changed, but the page did not come back here. Make the preview again to see it.";
+            words.message = NO_PAGE;
           }
           options.onChange({ draftId: draftId, stationery: state.stationery });
         })
@@ -991,7 +1012,11 @@
         if (force) state.restyled = false;
         state.stationery = stationery;
         keepSlots(stationery);
-        if (typeof previewHtml === "string" && previewHtml) state.previewHtml = previewHtml;
+        if (typeof previewHtml === "string" && previewHtml) {
+          state.previewHtml = previewHtml;
+          // The page a change of words did not bring back is here now.
+          if (words.message === NO_PAGE) words.message = "";
+        }
         var terms = termsOf(answer, fit);
         if (terms) adoptTerms(terms);
         // And its words now (#593 review round 1): the chat may have changed

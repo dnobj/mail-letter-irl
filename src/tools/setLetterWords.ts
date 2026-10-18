@@ -1,4 +1,5 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
+import type { ClientProfile } from '../auth/clientProfiles.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
@@ -228,10 +229,17 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   );
   if (refusal) throw refused(...WORDS_REFUSALS[refusal], context);
 
-  // Counts only: the words never reach the log.
+  // Counts only: the words never reach the log. Words the letter already had are told apart: the model is asked to
+  // send them to read the words (#795 review round 2), and that is no change.
   context.logger.info(
-    { correlationId: context.correlationId, event: 'draft.words_changed', pages, pagesBefore, characters: bodyText.length + signOff.length },
-    "A preview's words were changed"
+    {
+      correlationId: context.correlationId,
+      event: already ? 'draft.words_unchanged' : 'draft.words_changed',
+      pages,
+      pagesBefore,
+      characters: bodyText.length + signOff.length
+    },
+    already ? "A preview's words were sent as they are" : "A preview's words were changed"
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them.
@@ -257,11 +265,20 @@ export const setLetterWordsTool: McpToolDefinition<SetLetterWordsInput, SetLette
   name: SET_LETTER_WORDS_TOOL,
   title: "Change the letter's words",
   // The pages it lays out on follow room to write (#586); without it, the words editor alone keeps a letter on one page (#647).
-  description: () =>
+  // Where the app shows our letter card (#795 review round 1), the person may change the words
+  // there unseen: a read is then a call with the words last seen, which changes nothing either way.
+  description: (client?: ClientProfile) =>
     'Change the words of a previewed letter without previewing it again. Give the draftId from the preview, ' +
     'bodyText and signOff in full, as the letter previews take them, and the wordsVersion of the words being replaced, ' +
-    'from the preview or the last change of words. The letter card can change the words too: if they changed since you ' +
-    'saw them, nothing is changed, and the answer gives the words as they are now. The letter is laid out again in its ' +
+    'from the preview or the last change of words. ' +
+    (client?.rendersCards
+      ? 'The person can change the words on the letter card too, and you do not see those changes: a change to words ' +
+        'that changed since you saw them changes nothing, and its answer gives the words as they are now. Before saying ' +
+        'a word is or is not in the letter, call this with the words and wordsVersion you last saw: if they changed ' +
+        'since, the answer gives them as they are now; if not, the letter already has them and nothing changes. '
+      : 'The letter card can change the words too: if they changed since you saw them, nothing is changed, and the ' +
+        'answer gives the words as they are now. ') +
+    'The letter is laid out again in its ' +
     (letterPageLimit() > 1
       ? 'stationery on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter ' +
         'stays on one page.'
