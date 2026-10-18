@@ -243,10 +243,8 @@ describe('the confirmation page API (#470)', () => {
 
     it('says the envelope reveal is on for a letter only while its switch is on (#576)', async () => {
       signedIn();
-      vi.mocked(getDraft).mockResolvedValue(draft() as any);
-      // Off unless set: the default first, then every value that is not a yes.
-      expect((await call('GET')).json()).toMatchObject({ state: 'ready' });
-      expect((await call('GET')).json()).not.toHaveProperty('envelopeReveal');
+      vi.mocked(getDraft).mockResolvedValue(draft({ renderer_version: 'pdf-2' }) as any);
+      // Off unless set: every value that is not a yes.
       for (const flag of ['', 'false', 'ture']) {
         vi.stubEnv('LETTER_IRL_ENVELOPE_REVEAL_ENABLED', flag);
         const off = (await call('GET')).json();
@@ -257,10 +255,18 @@ describe('the confirmation page API (#470)', () => {
       const on = await call('GET');
       expect(on.state.status, on.state.body).toBe(200);
       expect(on.json().envelopeReveal, on.state.body.slice(0, 400)).toBe(true);
-      vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: 'postcard' }) as any);
+      vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: 'postcard', renderer_version: 'pdf-3' }) as any);
       const postcard = (await call('GET')).json();
       expect(postcard.mailType).toBe('postcard');
       expect(postcard).not.toHaveProperty('envelopeReveal');
+      // A letter the legacy HTML drew, or one whose version this code does not print: its addresses are not under
+      // the windows.
+      for (const renderer_version of [null, 'html-1', 'pdf-9']) {
+        vi.mocked(getDraft).mockResolvedValue(draft({ renderer_version }) as any);
+        const legacy = (await call('GET')).json();
+        expect(legacy.state, String(renderer_version)).toBe('ready');
+        expect(legacy, String(renderer_version)).not.toHaveProperty('envelopeReveal');
+      }
     });
 
     it.each([

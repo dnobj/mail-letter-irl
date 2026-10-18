@@ -44,7 +44,7 @@ import { chooseAgainSentence, openArrivalsOf, openArrivalsSentence } from '../se
 import { contentVersionOf } from '../services/contentVersion.js';
 import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { postcardFrontOf } from '../render/postcard.js';
-import { POSTCARD_FRONT_RENDERER_VERSION } from '../render/pdf.js';
+import { POSTCARD_FRONT_RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS } from '../render/pdf.js';
 import { heldPastNow, heldSendFields, waitsInOutbox } from '../tools/heldSend.js';
 import { isDraftIdShape } from '../tools/requestSend.js';
 import { isCertifiedRefusal } from '../tools/draftErrors.js';
@@ -215,9 +215,15 @@ async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string
     // Certified mail (#625), with or without a return receipt: only then, so a
     // standard letter's answer is unchanged.
     ...(option.mailService ? { mailService: option.mailService } : {}),
-    // The envelope reveal (#576): the page opens a letter from its envelope and folds it back in on a send, by the
-    // switch the letter card's preview reads. A postcard travels bare.
-    ...(mailTypeOf(draft) === 'letter' && isEnvelopeRevealEnabled() ? { envelopeReveal: true } : {}),
+    // The envelope reveal (#576): the page opens a letter from its envelope and shows it sealed after a send, by the
+    // switch the letter card's preview reads. Only over our renderer's page, whose addresses sit under its windows;
+    // a postcard travels bare.
+    ...(mailTypeOf(draft) === 'letter' &&
+    typeof draft.renderer_version === 'string' &&
+    PRINTABLE_RENDERER_VERSIONS.has(draft.renderer_version) &&
+    isEnvelopeRevealEnabled()
+      ? { envelopeReveal: true }
+      : {}),
     ...(payment ? { payment } : {})
   });
 }

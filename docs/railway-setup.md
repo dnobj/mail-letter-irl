@@ -153,7 +153,7 @@ LETTER_IRL_CUSTOM_STATIONERY_ENABLED=<true, with stationery offered, to list sav
 # The words editor (#647, docs/deployment.md): a letter's words changed in place on one page, without room to write.
 # Offered only while LETTER_IRL_PRINT_RENDERER is pdf; room to write turns it on by itself. API service only.
 LETTER_IRL_WORDS_EDITOR_ENABLED=<true to change a letter's words in place on one page; unset is off>
-# The letter card's envelope reveal (#576, docs/ui-widgets.md): cards only, nothing prints differently.
+# The envelope reveal (#576, docs/ui-widgets.md): the letter card and the website's confirmation page; nothing prints differently.
 LETTER_IRL_ENVELOPE_REVEAL_ENABLED=<true to open previews from an envelope; unset is off>
 # The studio card (#580, docs/ui-widgets.md): the letter card laid out with Style, Words and Delivery tabs. Cards only.
 LETTER_IRL_STUDIO_CARD_ENABLED=<true to lay letter cards out as a studio; unset is off>
