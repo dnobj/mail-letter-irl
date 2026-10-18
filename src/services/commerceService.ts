@@ -2012,15 +2012,22 @@ async function processCheckoutSessionEvent(
     ]);
 
     const intentId = paymentIntentId(session);
+    // A dispute's events count only when the dispute's own payment intent is
+    // the one this order ends up with: no event of any other can reach the
+    // order, so it stays unmatched, with its alert open, for an operator.
     const unmatchedMoney = await client.query<{
       event_id: string; event_type: string; provider_object_id: string | null;
     }>(
-      `SELECT event_id, event_type, provider_object_id FROM stripe_webhook_events
-       WHERE processing_status = 'unmatched'
-         AND (($1::varchar IS NOT NULL AND provider_payment_intent_id = $1)
-           OR metadata_order_id = $2)
-       ORDER BY processed_at FOR UPDATE`,
-      [intentId, order.order_id]
+      `SELECT e.event_id, e.event_type, e.provider_object_id FROM stripe_webhook_events e
+       WHERE e.processing_status = 'unmatched'
+         AND (($1::varchar IS NOT NULL AND e.provider_payment_intent_id = $1)
+           OR e.metadata_order_id = $2)
+         AND (e.event_type NOT LIKE 'charge.dispute.%'
+           OR EXISTS (SELECT 1 FROM stripe_disputes d
+                       WHERE d.dispute_id = e.provider_object_id
+                         AND d.payment_intent_id = $3::text))
+       ORDER BY e.processed_at FOR UPDATE OF e`,
+      [intentId, order.order_id, committedIntent ?? intentId]
     );
     if (unmatchedMoney.rows[0]) {
       const isDispute = unmatchedMoney.rows.some(row => row.event_type.startsWith('charge.dispute.'));
@@ -3587,8 +3594,8 @@ async function blockAccountSends(
  *
  * Only a dispute whose own payment intent is the one this order ends up with
  * (committedIntent, read before any adoption, or else this checkout's) is
- * applied here: its later events match this order. No other is this order's
- * to apply, as no event of it can reach this order.
+ * applied here: its later events match this order. The recovery recovers no
+ * other's events, and this checks again.
  *
  * Where the order's committed row has no payment intent, no event of these
  * disputes can find the order, so none waits on it: each dispute's lock is
@@ -3623,7 +3630,7 @@ async function applyRecoveredDisputes(
   committedIntent: string | null,
   sessionIntent: string | null,
   events: Array<{ event_id: string; event_type: string; provider_object_id: string | null }>
-): Promise<{ disputesTakenOver: string[]; sendsBlocked: boolean }> {
+): Promise<{ disputesTakenOver: string[]; lossRuleApplied: boolean }> {
   // Each dispute's most recent event: the rows come in the order they were claimed.
   const latestEvent = new Map<string, string>();
   for (const event of events) {
@@ -3641,7 +3648,7 @@ async function applyRecoveredDisputes(
     .filter(row => orderIntent !== null && row.payment_intent_id === orderIntent)
     .map(row => row.dispute_id)
     .sort();
-  if (ours.length === 0) return { disputesTakenOver: [], sendsBlocked: false };
+  if (ours.length === 0) return { disputesTakenOver: [], lossRuleApplied: false };
   for (const disputeId of committedIntent === null ? ours : []) {
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`stripe_dispute:${disputeId}`]);
   }
@@ -3657,7 +3664,7 @@ async function applyRecoveredDisputes(
   const disputes = read.rows
     .filter(row => row.user_id === null)
     .sort((a, b) => a.dispute_id.localeCompare(b.dispute_id));
-  if (disputes.length === 0) return { disputesTakenOver: [], sendsBlocked: false };
+  if (disputes.length === 0) return { disputesTakenOver: [], lossRuleApplied: false };
   await client.query(
     `UPDATE stripe_disputes SET user_id = $2, updated_at = NOW()
      WHERE dispute_id = ANY($1::text[]) AND user_id IS NULL`,
@@ -3709,7 +3716,7 @@ async function applyRecoveredDisputes(
   }
   return {
     disputesTakenOver: disputes.map(row => row.dispute_id),
-    sendsBlocked: losses.length > 0
+    lossRuleApplied: losses.length > 0
   };
 }
 

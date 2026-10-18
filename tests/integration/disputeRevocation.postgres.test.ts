@@ -937,7 +937,7 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(account.sends_blocked_reason).toBe('payment_disputed');
       expect(await readDispute(disputeId)).toEqual({ user_id: userId, status: 'needs_response' });
       expect(await readRecoveredEvent(orderId)).toEqual([
-        { eventCount: 1, disputesTakenOver: [disputeId], sendsBlocked: true }
+        { eventCount: 1, disputesTakenOver: [disputeId], lossRuleApplied: true }
       ]);
       // The recovery never grants the pack, and holds the order as the matched path does.
       expect(await readLedgerStatuses(userId)).toEqual([]);
@@ -1100,7 +1100,7 @@ describePostgres('dispute and refund pack revocation', () => {
       ]);
     }, 60_000);
 
-    it("gives no account to a dispute whose payment intent the order does not carry", async () => {
+    it("leaves a dispute whose payment intent the order does not carry unmatched, for an operator", async () => {
       const { orderId, paymentIntentId } = await seedPendingPackOrder();
       const committed = `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
       await pool.query('UPDATE orders SET stripe_payment_intent_id = $2 WHERE order_id = $1', [orderId, committed]);
@@ -1118,6 +1118,18 @@ describePostgres('dispute and refund pack revocation', () => {
       );
       expect(order.rows[0]).toEqual({ stripe_payment_intent_id: committed, stripe_dispute_status: null });
       expect((await readDispute(disputeId)).user_id).toBeNull();
+      const events = await pool.query<{ processing_status: string; alert_status: string | null }>(
+        `SELECT e.processing_status, a.status AS alert_status
+           FROM stripe_webhook_events e
+           LEFT JOIN commerce_operational_alerts a
+             ON a.source_event_id = e.event_id AND a.alert_type = 'stripe_money_event_unmatched'
+          WHERE e.provider_object_id = $1`,
+        [disputeId]
+      );
+      expect(events.rows).toEqual([
+        { processing_status: 'unmatched', alert_status: 'open' },
+        { processing_status: 'unmatched', alert_status: 'open' }
+      ]);
     }, 60_000);
 
     it('gives the disputes of an order this checkout adopts the account', async () => {
@@ -1155,7 +1167,7 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(account.sends_blocked_reason).toBeNull();
       expect((await readDispute(disputeId)).user_id).toBe(userId);
       expect(await readRecoveredEvent(orderId)).toEqual([
-        { eventCount: 1, disputesTakenOver: [disputeId], sendsBlocked: false }
+        { eventCount: 1, disputesTakenOver: [disputeId], lossRuleApplied: false }
       ]);
       expect(await readDisputeAlerts(orderId)).toEqual([
         { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null }
