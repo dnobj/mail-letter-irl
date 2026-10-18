@@ -241,6 +241,28 @@ describe('the confirmation page API (#470)', () => {
       expect(query).toHaveBeenCalledWith('SELECT credits FROM users WHERE user_id = $1', ['auth0|owner']);
     });
 
+    it('says the envelope reveal is on for a letter only while its switch is on (#576)', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      // Off unless set: the default first, then every value that is not a yes.
+      expect((await call('GET')).json()).toMatchObject({ state: 'ready' });
+      expect((await call('GET')).json()).not.toHaveProperty('envelopeReveal');
+      for (const flag of ['', 'false', 'ture']) {
+        vi.stubEnv('LETTER_IRL_ENVELOPE_REVEAL_ENABLED', flag);
+        const off = (await call('GET')).json();
+        expect(off.state, flag).toBe('ready');
+        expect(off, flag).not.toHaveProperty('envelopeReveal');
+      }
+      vi.stubEnv('LETTER_IRL_ENVELOPE_REVEAL_ENABLED', 'true');
+      const on = await call('GET');
+      expect(on.state.status, on.state.body).toBe(200);
+      expect(on.json().envelopeReveal, on.state.body.slice(0, 400)).toBe(true);
+      vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: 'postcard' }) as any);
+      const postcard = (await call('GET')).json();
+      expect(postcard.mailType).toBe('postcard');
+      expect(postcard).not.toHaveProperty('envelopeReveal');
+    });
+
     it.each([
       ['sent', { status: 'consumed', consumed_letter_id: 'L9' }, 'L9'],
       ['expired', { status: 'expired' }, null],
