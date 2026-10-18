@@ -1996,7 +1996,7 @@ The studio rearranges both preview cards. The letter card becomes a header, the 
 - For step 7: `LETTER_IRL_ROOM_TO_WRITE_ENABLED` on the maintenance service too, and `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` set to the Stripe test prices (as in PAGES-01).
 - `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 9 (without one, `sendAsGift` is refused).
 
-Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v94, steering r53). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
+Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v94, steering r54). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
 
 **Steps:**
 

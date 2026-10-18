@@ -143,6 +143,45 @@ describe('quote summaries', () => {
     expect(canSend).toBe(cannotSend);
   });
 
+  describe('words changed on the card (STUDIO-01, Claude)', () => {
+    // On DEV 2026-10-18, Claude answered from the preview's words that the letter had no "roses" the card had
+    // added: what the card shares never reaches Claude's model. The preview's own text, which the model reads beside
+    // the words, says to ask set_letter_words first, wherever our card shows and its words editor is offered.
+    const letterTools = ['quote_and_preview_letter', 'quote_and_preview_letter_with_header_image', 'quote_and_preview_letter_with_image'];
+    const edited = { ...letterQuote, wordsVersion: 'w-1a2b3c' };
+    const sentence =
+      ' The person can change the words on the card, and you do not see those changes. Before saying a word is or ' +
+      'is not in the letter, or changing one, call set_letter_words with the words you last saw and their wordsVersion ' +
+      '(w-1a2b3c for this preview\'s): if they changed on the card, its answer gives them as they are now.';
+
+    it.each(letterTools.flatMap(tool => CLIENT_PROFILE_NAMES.map(app => [tool, app] as const)))(
+      '%s in %s says it only where the card shows',
+      (tool, app) => {
+        const client = clientProfileNamed(app);
+        const summary = summarizeToolResult(tool, edited, client);
+        if (client.rendersCards) {
+          expect(summary.endsWith(sentence), summary).toBe(true);
+        } else {
+          expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
+        }
+      }
+    );
+
+    it.each(['chatgpt', 'claude'] as const)('says nothing in %s without the words editor (no wordsVersion)', app => {
+      const summary = summarizeToolResult('quote_and_preview_letter', letterQuote, clientProfileNamed(app));
+      expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
+    });
+
+    it('says nothing for a postcard, whose words the card cannot change', () => {
+      const summary = summarizeToolResult('quote_and_preview_postcard', edited, clientProfileNamed('claude'));
+      expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
+    });
+
+    it('is a later steering revision than r53', () => {
+      expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(54);
+    });
+  });
+
   it('still carries the details that do not expire', () => {
     const summary = summarizeToolResult('quote_and_preview_letter', {
       ...letterQuote,

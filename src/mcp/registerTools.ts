@@ -1588,6 +1588,26 @@ function stationerySentence(result: Record<string, unknown>): string {
 }
 
 /**
+ * Where the app shows our letter card and its words editor is offered (the
+ * preview gives a wordsVersion), the person can change the words on the card,
+ * and the model does not see it: said beside the preview it reads, so before
+ * saying a word is or is not in the letter it asks set_letter_words. In
+ * STUDIO-01 (DEV 2026-10-18) Claude answered from the preview's words that the
+ * letter had no "roses" the card had added: what the card shares never reached
+ * Claude's model (HOME-02), and set_letter_words' description alone did not
+ * steer it.
+ */
+function cardWordsSentence(result: Record<string, unknown>, client: Pick<ClientProfile, "rendersCards">): string {
+  const wordsVersion = result.wordsVersion;
+  if (!client.rendersCards || typeof wordsVersion !== "string") return "";
+  return (
+    ` The person can change the words on the card, and you do not see those changes. Before saying a word is or ` +
+    `is not in the letter, or changing one, call set_letter_words with the words you last saw and their wordsVersion ` +
+    `(${wordsVersion} for this preview's): if they changed on the card, its answer gives them as they are now.`
+  );
+}
+
+/**
  * A letter preview's signature (#608 review round 1), for the narration:
  * whether the saved signature prints, and when the account's choice decided
  * it, so the person hears why, and that set_letter_signature changes it in
@@ -1757,6 +1777,7 @@ export function summarizeToolResult(
       summary += signatureSentence(result);
       summary += pagesSentence(result);
       summary += mailServiceSentence(result);
+      summary += cardWordsSentence(result, client);
       return summary;
     }
     case "request_send":
