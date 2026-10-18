@@ -209,7 +209,7 @@ describe('a live Pay & Send order on the send surface (#679)', () => {
     }
     const taken = friendlyDraftError(refusal(true), 'draft-1').message;
     expect(taken).toBe(
-      'A Pay & Send payment was already taken for this draft, so it cannot also be sent from prepaid balance: that payment mails it, unless the payment is being refunded or is under review. Nothing more was charged. Make a new preview only to send the mail as a new letter.'
+      'A Pay & Send payment was already taken for this draft, so it cannot also be sent from prepaid balance, and nothing more was charged. For that payment, the person can write to support@letterirl.com.'
     );
     expect(taken).not.toMatch(/expire|draft-1/);
   });

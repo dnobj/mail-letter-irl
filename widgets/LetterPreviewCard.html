@@ -3135,8 +3135,8 @@
             throw new Error(resultText(raw) || "Checkout URL was not returned");
           }
           const result = toolData(raw);
-          // The draft's Pay & Send order is already paid, or past paying (#679): the card offered Pay & Send from a
-          // draft still pending in the seconds before the payment's webhook sent it, and the server answers with that
+          // The draft's Pay & Send order took a payment that did not send it (#679): a refund under way, or a dispute
+          // that came before the payment's completion, which leaves the draft pending. The server answers with that
           // order, not a checkout. Nothing more is charged; the card follows the order, as after a checkout it opened.
           if (!result.checkoutUrl && typeof result.orderId === "string" && result.orderId && typeof result.status === "string" && result.status !== "checkout_pending") {
             trackedOrderId = result.orderId;

@@ -338,7 +338,7 @@ describe.each(CARDS)('%s: an open checkout whose mail date has passed (#726)', c
 
 describe.each(CARDS)('%s: Pay & Send on a draft whose order is already paid (#679)', card => {
   it('follows the paid order instead of saying the checkout failed, and opens nothing', async () => {
-    for (const status of ['paid', 'fulfillment_pending']) {
+    for (const status of ['paid', 'fulfillment_pending', 'refund_pending', 'disputed']) {
       const harness = mount(card, {
         mailCheckout: { orderId: 'ord_paid_0001', status, reused: true, amountCents: 599, currency: 'usd', message: 'This order is already paid.' }
       });
@@ -353,6 +353,17 @@ describe.each(CARDS)('%s: Pay & Send on a draft whose order is already paid (#67
       expect(harness.calls.some(call => call.name === 'openExternal'), status).toBe(false);
       expect(harness.visible('checkout-link'), status).toBe(false);
     }
+  });
+
+  it('still says a checkout failed for an open checkout that came back with no link', async () => {
+    const harness = mount(card, {
+      mailCheckout: { orderId: 'ord_open_0001', status: 'checkout_pending', reused: true, message: 'Unable to create Pay & Send checkout. Please try again.' }
+    });
+    await checkout(harness);
+    await flush();
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('pay-send-button-text')).toBe('Retry Pay & Send');
+    expect(harness.calls.some(call => call.name === 'get_purchase_status')).toBe(false);
   });
 
   it('still says a checkout failed when the answer names no order', async () => {
