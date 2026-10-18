@@ -18,6 +18,9 @@
   "use strict";
 
   var CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+  // How soon after a key in the date field a change is the key's own (the browser fires it as the key goes in), not a
+  // date chosen in the picker, in milliseconds.
+  var KEY_CHANGE_MS = 50;
   var WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -115,8 +118,10 @@
     // pending: the date being set while the server answers ("" for as soon
     // as possible), so the field keeps what the person chose meanwhile.
     var state = { draftId: null, schedule: null, min: "", max: "", busy: false, pending: null, message: "", error: false, set: false };
-    // Whether a date is being typed into the field: from a key in it until Enter or leaving it.
+    // Whether a date is being typed into the field: from a key in it until Enter or leaving it, or a date chosen in
+    // the picker; and when the last key went in (the event's timeStamp).
     var typing = false;
+    var keyAt = 0;
     // Whether the card may change the draft now (options.idle, where the card gives one): not while it sends or pays,
     // nor while a send refused for a change since asks for the draft as it is now.
     function idle() {
@@ -217,10 +222,12 @@
       set(value);
     }
     // A date typed with keys is set once it is finished: on Enter, or when the field is left. The browser makes a
-    // whole date at each step of typing one, and says so (change): the year's first digit gives the year 0002, the
-    // month's "1" January. Set at each, they were refused or set in turn, and the field, held while the server
-    // answered, lost the next keys (SCHEDULE-01, DEV 2026-10-18). A date chosen in the browser's picker is set at once.
+    // whole date at each step of typing one, and says so (change) as the key goes in: the year's first digit gives the
+    // year 0002, the month's "1" January. Set at each, they were refused or set in turn, and the field, held while the
+    // server answered, lost the next keys (SCHEDULE-01, DEV 2026-10-18). A date chosen in the browser's picker comes
+    // later than any key, even in a picker opened from the keyboard, and is set at once (#810 review round 1).
     options.input.addEventListener("keydown", function (event) {
+      keyAt = event.timeStamp;
       if (event.key === "Enter") {
         if (typing) {
           typing = false;
@@ -235,8 +242,9 @@
       typing = false;
       commit();
     });
-    options.input.addEventListener("change", function () {
-      if (typing) return;
+    options.input.addEventListener("change", function (event) {
+      if (typing && event.timeStamp - keyAt < KEY_CHANGE_MS) return;
+      typing = false;
       commit();
     });
     options.asap.addEventListener("click", function () {
