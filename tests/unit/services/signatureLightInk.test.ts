@@ -30,6 +30,11 @@ const photograph = (width: number, height: number, body: string, quality = 80) =
 const scribble = (transform: string, strokeWidth: number, ink: string) =>
   `<g transform="${transform}"><path d="${STROKE}" fill="none" stroke="${ink}" stroke-width="${strokeWidth}" stroke-linecap="round"/></g>`;
 
+/** A grey noise laid over a sheet at this opacity, as a fibre or a slate's grain. */
+const TEXTURE = (opacity: number) =>
+  `<filter id="t"><feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" seed="3"/>` +
+  `<feColorMatrix type="matrix" values="0 0 0 0 0.5  0 0 0 0 0.5  0 0 0 0 0.5  0 0 0 ${opacity} 0"/></filter>`;
+
 /** What the cleaner says: the refusal's code, or 'found'. */
 async function verdict(picture: Buffer): Promise<string> {
   try {
@@ -65,6 +70,28 @@ describe('light ink on a dark sheet is refused as no signature found (#611)', ()
       });
     }
   }
+
+  it.each([30, 42, 48])('white strokes %i px wide, short of the closing\'s window', async stroke => {
+    const picture = await photograph(1000, 400, `<rect width="100%" height="100%" fill="${grey(100)}"/>` + scribble('', stroke, grey(240)));
+    expect(await verdict(picture)).toBe('NO_SIGNATURE_FOUND');
+  });
+
+  // A textured sheet (a slate, a card's fibre) and a JPEG at low quality: the sheet is not one flat grey.
+  for (const texture of [0.15, 0.3, 0.5]) {
+    it(`white ink on a textured sheet, texture ${texture}`, async () => {
+      const picture = await photograph(
+        1000,
+        400,
+        `<defs>${TEXTURE(texture)}</defs><rect width="100%" height="100%" fill="${grey(90)}"/><rect width="100%" height="100%" filter="url(#t)"/>` +
+          scribble('', 7, grey(240))
+      );
+      expect(await verdict(picture)).toBe('NO_SIGNATURE_FOUND');
+    });
+  }
+  it.each([20, 12])('white ink on a dark sheet, as a JPEG at quality %i', async quality => {
+    const picture = await photograph(1000, 400, `<rect width="100%" height="100%" fill="${grey(100)}"/>` + scribble('', 7, grey(240)), quality);
+    expect(await verdict(picture)).toBe('NO_SIGNATURE_FOUND');
+  });
 
   it.each([
     [1000, 400],
@@ -174,6 +201,45 @@ describe('a signature the cleaner found before #611 is still found', () => {
         400,
         '<rect width="100%" height="100%" fill="#f4f2ec"/>' + scribble('', 7, grey(ink)) +
           `<rect width="${1000 * share}" height="400" fill="#000" fill-opacity="${opacity}"/>`
+      );
+      expect(await verdict(picture)).toBe('found');
+    });
+  }
+
+  // A shadow on the right over half the box, at the grey of the ink's mean: the ink is two greys, light and shaded
+  // (#806 round 1 predicted ink at 100; 120 was the one refused).
+  for (const ink of [60, 80, 100, 120]) {
+    it(`ink at grey ${ink} under a 65% shadow over the right of the sheet`, async () => {
+      const picture = await photograph(
+        1000,
+        400,
+        '<rect width="100%" height="100%" fill="#f4f2ec"/>' + scribble('', 7, grey(ink)) +
+          '<rect x="480" width="520" height="400" fill="#000" fill-opacity="0.65"/>'
+      );
+      expect(await verdict(picture)).toBe('found');
+    });
+  }
+
+  // A strip of paper turned on a desk of the ink's grey: the desk's wedges are inside the box.
+  for (const [desk, ink] of [[40, 40], [55, 55], [70, 70]]) {
+    it(`a strip turned 25 degrees on a desk at grey ${desk}, ink at grey ${ink}`, async () => {
+      const picture = await photograph(
+        1200,
+        900,
+        `<rect width="100%" height="100%" fill="${grey(desk)}"/><g transform="rotate(25 600 450)"><rect x="300" y="375" width="600" height="150" fill="#f2f0ea"/>` +
+          scribble('translate(290,395) scale(0.62)', 10, grey(ink)) + '</g>'
+      );
+      expect(await verdict(picture)).toBe('found');
+    });
+  }
+
+  for (const texture of [0.15, 0.3, 0.5]) {
+    it(`dark ink on textured paper, texture ${texture}`, async () => {
+      const picture = await photograph(
+        1000,
+        400,
+        `<defs>${TEXTURE(texture)}</defs><rect width="100%" height="100%" fill="#f4f2ec"/><rect width="100%" height="100%" filter="url(#t)"/>` +
+          scribble('', 7, grey(60))
       );
       expect(await verdict(picture)).toBe('found');
     });

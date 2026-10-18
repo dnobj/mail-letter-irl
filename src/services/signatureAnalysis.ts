@@ -35,10 +35,12 @@ export const SIGNATURE_CLEANING = {
   sheetStep: 0.07,
   /** ...or by this many levels, whichever is more (a JPEG's noise)... */
   sheetStepFloor: 5,
-  /** ...and a region this many times the kept ink, or more, is the sheet, not ink. */
+  /** ...and a region more than this many times the kept ink is the sheet, not ink... */
   sheetSpread: 3,
-  /** ...when, too, less than this share of the kept box is light: a sheet's light is its thin strokes. */
+  /** ...when, too, less than this share of the kept box is light: a sheet's light is its thin strokes... */
   sheetLightShare: 0.5,
+  /** ...and at least this share of the kept ink is within the step of its mean: a sheet is one grey. */
+  sheetOneGrey: 0.6,
   /** A piece of ink smaller than this, in pixels, is noise. */
   noiseArea: 8,
   /** How far, as a share of the longest edge, a piece may sit from the signature and still be part of it. */
@@ -189,28 +191,6 @@ function signaturePieces(found: Piece[], reach: number): { box: Omit<Piece, 'id'
 }
 
 /**
- * Whether what was kept is light ink on a dark sheet (#611), not a signature.
- * The closing takes light strokes narrower than its window for paper, so the
- * dark sheet in the bends between them reads as ink, and those shapes would be
- * kept. Each is a piece of the sheet: open on a side, it runs on, at the same
- * grey, into the sheet beyond the strokes, where the paper is the sheet's own
- * and nothing reads as ink. Real ink is bounded by paper lighter than it, on a
- * card over a desk and in a lit strip inside a shadow alike.
- *
- * So the region the kept ink grows into, through neighbours whose grey is
- * within sheetStep of the ink's mean grey, is measured against the kept ink.
- * Measured against the mean, not pixel to pixel, a stroke's edge cannot be
- * climbed step by step into its paper: ink stays inside its strokes, a
- * pencil's and a grey pen's too, and a shadow's paper is a different grey.
- * The sheet's region spreads past sheetSpread times the ink. So may real ink's,
- * where its grey is a shadow's paper's or a desk's and a stroke runs into
- * it; but real ink lies on paper, which fills most of its box with light,
- * while light strokes on a sheet fill little of theirs (lightIsThin). Both
- * together are refused as no signature found. A light stroke drawn as a closed
- * loop encloses its sheet, which grows no further; that is left to the person,
- * who sees the saved picture in the letter's preview before anything prints.
- */
-/**
  * Whether the light in the kept box is thin, as light strokes on a dark sheet
  * are: less than sheetLightShare of the box is within 85% of its light level
  * (the 95th percentile of its grey). Paper with a signature on it, a card's
@@ -232,23 +212,52 @@ function lightIsThin(grey: Uint8Array, width: number, box: { minX: number; minY:
   return light < total * SIGNATURE_CLEANING.sheetLightShare;
 }
 
+/**
+ * Whether what was kept is light ink on a dark sheet (#611), not a signature.
+ * The closing takes light strokes narrower than its window for paper, so the
+ * dark sheet in the bends between them reads as ink, and those shapes would be
+ * kept. Each is a piece of the sheet: open on a side, it runs on, at the same
+ * grey, into the sheet beyond the strokes, where the paper is the sheet's own
+ * and nothing reads as ink. Real ink is bounded by paper lighter than it, on a
+ * card over a desk and in a lit strip inside a shadow alike.
+ *
+ * So the region the kept ink grows into, through neighbours whose grey is
+ * within sheetStep of the ink's mean grey, is measured against the kept ink.
+ * Measured against the mean, not pixel to pixel, a stroke's edge cannot be
+ * climbed step by step into its paper: ink stays inside its strokes, a
+ * pencil's and a grey pen's too, and a shadow's paper is a different grey.
+ * The sheet's region spreads past sheetSpread times the ink. So may real ink's,
+ * where its grey is a shadow's paper's or a desk's and a stroke runs into
+ * it; but real ink lies on paper, which fills most of its box with light,
+ * while light strokes on a sheet fill little of theirs (lightIsThin). And the
+ * sheet's pockets are one grey, the sheet's, while ink that runs from the light
+ * into a shadow is two, its mean neither (sheetOneGrey). All three together are
+ * refused as no signature found. Two kinds are left to the person, who sees the
+ * saved picture in the letter's preview before anything prints: a light stroke
+ * drawn as a closed loop, which encloses its sheet so it grows no further, and
+ * light strokes as wide as the closing's window or wider (a broad paint marker),
+ * which are paper to the closing and fill their box with light.
+ */
 function inkIsSheet(
   grey: Uint8Array,
+  cleaned: Uint8Array,
   ink: Uint8Array,
   width: number,
   height: number,
   box: { minX: number; minY: number; maxX: number; maxY: number },
   area: number
 ): boolean {
-  const { sheetStep, sheetStepFloor, sheetSpread } = SIGNATURE_CLEANING;
+  const { sheetStep, sheetStepFloor, sheetSpread, sheetOneGrey, inkBelow } = SIGNATURE_CLEANING;
   const limit = Math.ceil(area * sheetSpread);
+  // The kept ink: every piece found is marked 2 (pieces), and a noise speck's pixels were whitened.
+  const isInk = (i: number) => ink[i] === 2 && cleaned[i] < inkBelow;
   // The ink's own grey, which every pixel grown into must match.
   let inkSum = 0;
   let inkCount = 0;
   for (let y = box.minY; y <= box.maxY; y += 1) {
     for (let x = box.minX; x <= box.maxX; x += 1) {
       const i = y * width + x;
-      if (ink[i] === 2) {
+      if (isInk(i)) {
         inkSum += grey[i];
         inkCount += 1;
       }
@@ -257,15 +266,23 @@ function inkIsSheet(
   if (inkCount === 0) return false;
   const mean = inkSum / inkCount;
   const step = Math.max(sheetStepFloor, mean * sheetStep);
+  // A sheet's pockets are one grey, the sheet's; ink of two (a stroke running from the light into a shadow) is not.
+  let inBand = 0;
+  for (let y = box.minY; y <= box.maxY; y += 1) {
+    for (let x = box.minX; x <= box.maxX; x += 1) {
+      const i = y * width + x;
+      if (isInk(i) && Math.abs(grey[i] - mean) <= step) inBand += 1;
+    }
+  }
+  if (inBand < inkCount * sheetOneGrey) return false;
   const reached = new Uint8Array(width * height);
-  const stack = new Int32Array(limit + 9);
+  const stack = new Int32Array(Math.min(limit, width * height) + 1);
   let grown = 0;
   let top = 0;
   for (let y = box.minY; y <= box.maxY; y += 1) {
     for (let x = box.minX; x <= box.maxX; x += 1) {
       const i = y * width + x;
-      // Every piece found is marked 2 (pieces).
-      if (ink[i] !== 2 || reached[i]) continue;
+      if (!isInk(i) || reached[i]) continue;
       reached[i] = 1;
       grown += 1;
       if (grown > limit) return lightIsThin(grey, width, box);
@@ -311,7 +328,7 @@ export function analyseSignature(grey: Uint8Array, width: number, height: number
   if (real.length === 0) return { ok: false, refusal: 'NO_SIGNATURE_FOUND' };
   const { box, area } = signaturePieces(real, Math.round(longest * SIGNATURE_CLEANING.reachShare));
   if (area < SIGNATURE_CLEANING.minInk) return { ok: false, refusal: 'NO_SIGNATURE_FOUND' };
-  if (inkIsSheet(grey, ink, width, height, box, area)) return { ok: false, refusal: 'NO_SIGNATURE_FOUND' };
+  if (inkIsSheet(grey, cleaned, ink, width, height, box, area)) return { ok: false, refusal: 'NO_SIGNATURE_FOUND' };
   // A piece left out is further than `reach` from what is kept, and the crop's
   // margin is narrower than that, so a stray mark never reaches the crop.
 
