@@ -877,7 +877,8 @@ describePostgres('dispute and refund pack revocation', () => {
         data: { object: {
           id: `cs_${randomUUID().replace(/-/g, '').slice(0, 20)}`, object: 'checkout.session',
           client_reference_id: orderId, metadata: { orderId }, payment_intent: paymentIntentId,
-          payment_status: 'paid', amount_total: 1999, currency: 'usd'
+          payment_status: 'paid', amount_total: 1999, currency: 'usd',
+          expires_at: Math.floor(Date.now() / 1000) + 3600
         } }
       } as unknown as Stripe.Event;
     }
@@ -1051,7 +1052,8 @@ describePostgres('dispute and refund pack revocation', () => {
         data: { object: {
           id: sessionId, object: 'checkout.session', client_reference_id: null,
           metadata: { userId, productId: 'credit-pack-4' }, payment_intent: paymentIntentId,
-          payment_status: 'paid', amount_total: 500, currency: 'usd'
+          payment_status: 'paid', amount_total: 500, currency: 'usd',
+          expires_at: Math.floor(Date.now() / 1000) + 3600
         } }
       } as unknown as Stripe.Event);
 
