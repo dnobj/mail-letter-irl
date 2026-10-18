@@ -280,7 +280,9 @@ describe('renderPurchaseReturnPage', () => {
   it('offers Back to your conversation on Android in intent form, in the same tab', () => {
     const html = renderPurchaseReturnPage({ cancelled: false, userAgent: ANDROID_UA, conversationUrl: CONVERSATION });
 
-    expect(html).toContain('<h1>Payment received</h1>');
+    // The redirect alone proves nothing was paid, so the heading claims neither way (#711).
+    expect(html).toContain('<h1>Checking your payment</h1>');
+    expect(html).not.toContain('Payment received');
     expect(html).toContain('>Back to your conversation</a>');
     expect(html).toContain('href="intent://chatgpt.com/c/');
     expect(html).not.toContain('target=');
