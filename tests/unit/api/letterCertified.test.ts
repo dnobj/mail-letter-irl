@@ -34,7 +34,8 @@ const ROW = {
   status: 'in_transit',
   tracking_id: 'letter_postgrid_123',
   created_at: new Date('2026-09-30T12:00:00Z'),
-  sent_at: new Date('2026-09-30T12:05:00Z'),
+  // Sent a day ago, whenever the test runs: inside the month the status sync looks for a carrier number (#625).
+  sent_at: new Date(Date.now() - 24 * 60 * 60 * 1000),
   provider: 'postgrid',
   arrive_by: null,
   mail_on: null,

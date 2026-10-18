@@ -210,4 +210,7 @@
 // wordsVersion last seen, which changes nothing either way (STUDIO-01, DEV 2026-10-17: ChatGPT answered from the
 // preview's words and called nothing). Apps without our cards keep the words they had. The letter card also tells the
 // model of its own changes in what it shares.
-export const STEERING_COPY_REV = 52;
+// r53: certified mail's follow-ups (#625): get_order_status's certifiedNote says no USPS number came once the status
+// sync has stopped looking a month after the send, list_orders' sentence says the number comes within that month, and
+// the travel fields' descriptions name a sent letter.
+export const STEERING_COPY_REV = 53;

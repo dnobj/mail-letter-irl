@@ -145,11 +145,11 @@ describe("the order tools' certified output (#625)", () => {
     const say = (orders: unknown[]) => summarizeToolResult('list_orders', { orders, total: orders.length });
     expect(say([{ orderId: 'a' }, { orderId: 'b' }])).toBe('Found 2 recent orders (2 total).');
     expect(say([{ orderId: 'a', mailService: 'certified' }, { orderId: 'b' }, { orderId: 'c', mailService: 'certified_return_receipt' }])).toBe(
-      'Found 3 recent orders (3 total). 2 are USPS Certified Mail: their entries carry the USPS tracking number and link once there is one.'
+      'Found 3 recent orders (3 total). 2 are USPS Certified Mail: their entries carry the USPS tracking number and link once the printer has given one, which Letter IRL looks for during the month after the send.'
     );
     // Neutral about whether each went out: some may be scheduled, failed or cancelled.
     expect(say([{ orderId: 'a', mailService: 'certified' }])).toBe(
-      'Found 1 recent orders (1 total). 1 is USPS Certified Mail: its entry carries the USPS tracking number and link once there is one.'
+      'Found 1 recent orders (1 total). 1 is USPS Certified Mail: its entry carries the USPS tracking number and link once the printer has given one, which Letter IRL looks for during the month after the send.'
     );
     expect(say([{ orderId: 'a', mailService: 'certified', status: 'failed' }])).not.toMatch(/went|sent/i);
     // A delivered order in the list: its delivery is said as estimated, once (HOME-01).
