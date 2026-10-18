@@ -1955,7 +1955,7 @@ Not run: step 1 (two photos, with the dev CLI), step 2 (the four-photo case), st
 
 ### CERTIFIED-01 — The important letter: USPS Certified Mail (#625)
 
-**Status:** Not run. The previews take `mailService` (part 4) and the orders show the service and USPS's number (part 5); step 6 reads the card (the cards part), and steps 7 and 11 the website's words (the website part).
+**Status:** Run in part on development on 2026-10-18 (UTC): steps 1, 3, 4, 5 and 16 passed (ChatGPT, a one-page letter: the card read "Pay & Send USD 11.99" and the USPS Certified Mail line with the signed-for disclaimer), and step 13 apart from the sent, paying and gift drafts. With the flag off, `mailService` was refused with "Certified mail is not available right now" and `set_mail_service` was not found. Steps 7 to 11 wait on the Stripe test card. Before that: not run. The previews take `mailService` (part 4) and the orders show the service and USPS's number (part 5); step 6 reads the card (the cards part), and steps 7 and 11 the website's words (the website part).
 
 **Preconditions:** Development. The Stripe test prices of the two certified products (`jit-letter-certified` and `jit-letter-certified-receipt`, made by the owner's script from #624) set on the API **and** the maintenance service. Pay & Send on. `LETTER_IRL_CERTIFIED_MAIL_ENABLED` on in the API and the maintenance service, only once both run the send (an older build prints certified mail as an ordinary letter). A client with the (DEV) connector, or the dev CLI's tools, with its tool list refreshed; a saved return address; the Stripe test card 4242 for Pay & Send (the owner's step unless they have said the loop may pay). `npm run admin:provision-access` re-run on development after migration 053.
 
@@ -1984,7 +1984,12 @@ Not run: step 1 (two photos, with the dev CLI), step 2 (the four-photo case), st
 
 ### STUDIO-01 — The studio card: the letter's Style, Words and Delivery tabs, and the postcard maker (#580)
 
-**Status:** Not run.
+**Status:** Run on development on 2026-10-18 (UTC), through ChatGPT (DEV) as 4dm1n and Claude on the web as testlirl02. Steps 1 to 7 and 9 to 11 passed, and step 8 except its send (testlirl02 had no letters).
+
+- **Steps 1 to 7, 9 and 10** (ChatGPT, widgets v94): passed. ChatGPT called `set_letter_words` for "roses" in step 3, where the 2026-10-17 run called nothing. Found in step 6: after **Cancel this letter** the button still read "Letter Scheduled" (fixed by #809, widgets v95).
+- **Step 3 in Claude:** failed on steering r53: Claude called nothing and said the letter had no roses, and asked with no tools what the card had shared it said "none" (the share does not reach Claude's model, as HOME-02 found). Passed on r54 (#809, the preview's own text): Claude called `set_letter_words` with the words it had seen, was refused with the card's words, then changed roses to sunflowers.
+- **Step 8** (Claude, v94): the card was 694 px tall at 734 px wide with no inner scroll bar, showing "Not enough letters in your balance." and **Buy letters on the website**; reopening the conversation read the resource and called `get_draft_status`. Send waits on a funded testlirl02.
+- **Step 11:** passed: with the flag off a new letter showed the classic rows with the row labelled "Style", and a new postcard Front/Back with no maker; the flag was turned back on.
 
 The studio rearranges both preview cards. The letter card becomes a header, the page beside three tabs, and a footer with the cost and Send. The postcard card becomes a "postcard maker". The studio adds no control of its own: every button is one the card already had, and it calls the same tool a model would. Nothing prints or sends differently.
 
@@ -2050,7 +2055,13 @@ Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v96, s
 
 ### STATIONERY-01 — Stationery themes: choosing, previewing, printing and remembering (#563)
 
-**Status:** Not run. STATIONERY-02 covers saved designs (#649).
+**Status:** Run on development on 2026-10-18 (UTC), through ChatGPT (DEV) as 4dm1n (no saved signature) and the dev CLI as testlirl02. Steps 1 to 5, 7, 10 and 11 passed. STATIONERY-02 covers saved designs (#649).
+
+- **Step 6** was not run as written: room to write is on in development, so PAGES-01 step 7 stands in for it.
+- **Step 8:** the confirmation page showed the Botanical page. Monogram (JMS), Celebration ("Happy Birthday, Sam!") and Handwritten letters were sent in test mode. The PostGrid print checks wait for the owner's PostGrid sign-in.
+- **Step 9:** a dated Celebration letter (order 7cdce209) mails on 2026-10-19; its print's date line is still to read.
+- **Step 11:** with the flag off, botanical was refused with the step's sentence, classic was accepted, a new preview was Classic though Typewriter was remembered, `set_stationery` from an old tool list answered "Tool set_stationery not found", Claude's refreshed list had no "Change the stationery", and a Typewriter letter previewed before the switch sent.
+- **Found:** ChatGPT drew one card for a reply that made two previews; and a letter sealed in the studio collapsed to a dot (fixed by #809, widgets v95; ENVELOPE-01 step 3 then passed).
 
 **Preconditions:** Development, with `LETTER_IRL_STATIONERY_ENABLED` on (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf` in the API: only our renderer draws a theme. `LETTER_IRL_STUDIO_CARD_ENABLED` is optional (the Style row shows either way). Refresh the ChatGPT (DEV) and Claude connectors so `set_stationery` is listed.
 
@@ -2175,7 +2186,11 @@ For lengths, use short numbered lines, one to a line with no blank lines. Page 1
 
 ### POSTCARD-01 — Postcard sizes and fronts: 4x6, 11x6, border and greetings (#594)
 
-**Status:** Not run. COLLAGE-01 covers collages.
+**Status:** Run on development on 2026-10-18 (UTC), through ChatGPT (DEV) as 4dm1n and the dev CLI as testlirl02. Steps 1 to 8 passed. COLLAGE-01 covers collages.
+
+- **Step 7:** every refusal matched. One case cannot be made: no caption fits a 6x9 but not a 4x6, since the front scales with the card (about 24 W fit on both).
+- **Step 9:** the 4x6 gift refusal passed; the gift fronts wait for a gift letter.
+- **Step 10** waits on the Stripe test card, and step 11 follows it.
 
 **Preconditions:** Development.
 - **API and maintenance:** `LETTER_IRL_POSTCARD_SIZES_ENABLED` (off unless set), `JIT_PURCHASE_ENABLED=true`, and `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and `STRIPE_JIT_POSTCARD_11X6_PRICE_ID` set to the Stripe test prices from `scripts/create-option-prices.ts` (USD 3.99 and USD 5.99).
@@ -2244,7 +2259,13 @@ The tools name sizes the PostGrid way: `6x4` is the 4x6 and `6x11` is the 11x6.
 
 ### ENVELOPE-01 — The envelope reveal on the letter card and the confirmation page (#576)
 
-**Status:** Not run.
+**Status:** Run on development on 2026-10-18 (UTC) in ChatGPT (DEV) as 4dm1n on widgets v95. Steps 3 to 6 and 11 passed, and step 9's reopened case is recorded.
+
+- **Steps 1 and 2:** the opening takes under a second and was not caught on screen; the settled card was right.
+- **Step 3:** the sealed card shows a cream envelope with both addresses in its windows, a stamp outline and **Show the letter**. On widgets v94 it collapsed to a dot in the studio (fixed by #809).
+- **Step 9:** a reopened conversation shows the kept-order card ("With the printer", the order, "This letter was sent to the printer from this card."), unsealed.
+- **Step 11:** with the flag off the website's `/api/sends` answer carried no `envelopeReveal` and a sent letter's page stayed unsealed; with it back on, `envelopeReveal: true` returned. The PDF comparison waits for PostGrid.
+- **Steps 8 and 10** wait on a funded testlirl02.
 
 The envelope is drawn on the letter card and on the website's confirmation page (website #77): nothing prints differently, and postcards have none.
 
@@ -2827,7 +2848,13 @@ code and an audit row.
 
 ### SCHEDULE-01 — An arrival date on the card, scheduled, then cancelled (#535)
 
-**Status:** Not run end to end. Each scheduled send uses a letter of the development balance (or a gift
+**Status:** Run on development on 2026-10-18 (UTC) in ChatGPT (DEV) as 4dm1n. Steps 1, 2, 4, 5, 6 and 8 passed; steps 7 and 9 wait on a funded testlirl02.
+
+- **Step 3 failed:** a typed date could not be set. Chrome sent the dates typing makes on the way (0002-11-05, 2026-01-05), which the card set and the server refused, and in ChatGPT the card's redraw at each key wiped the parts typed. Fixed by #810 (widgets v96), whose check is now in step 3. Step 2's date was then set from the chat, and the card caught up when clicked.
+- **Steps 4 and 5:** scheduling took the balance from 38 to 36 credits, and cancelling gave the 2 back.
+- **Step 8:** postcard order d800a9d0 is left scheduled for 2026-10-28.
+
+Before that: not run end to end. Each scheduled send uses a letter of the development balance (or a gift
 letter) and gives it back on cancel; a send left scheduled goes to PostGrid test mode on its mail date.
 Checked on development without a send (2026-10-01): the served letter card carries the Arrives script
 (#559), and `request_send` answers a dated preview with its `schedule` (#561).
@@ -2846,8 +2873,8 @@ ChatGPT (DEV) with "Allow once", then Claude (DEV) for the MCP Apps card.
    is set once, as typed, and the field keeps every part while typing (on widgets v95 the year's first digit was set as
    the year 0002 and refused, and in ChatGPT the parts typed were wiped as the card was drawn again). Then type a part
    of a date, open the picker from the keyboard (Alt+Down or F4), and choose a date in it: verify it is set at once.
-   Type a date and click Send straight away: the first click leaves the field, which sets the date (Send waits while
-   it is set), and Send is pressed again once it reads Schedule Letter.
+   Type a date and click Send, or **As soon as possible**, straight away: the first click leaves the field, which sets
+   the date (the buttons wait while it is set), and the button is pressed again once the date is set.
 4. [ ] Pick a date and press **Schedule Letter**. Verify **Scheduled**, the order id and the mail date,
    and that the balance went down by one letter.
 5. [ ] Press **Cancel this letter**, then **Yes, cancel this letter**. Verify **Cancelled** with the message
