@@ -1959,7 +1959,7 @@ Not run: step 1 (two photos, with the dev CLI), step 2 (the four-photo case), st
 
 - **Passed:** steps 2 to 5. Step 2 by the dev CLI's list: the three letter previews take `mailService` and the postcard preview does not.
 - **Step 1** passed but for its tool-list checks, which wait on a run with the list refreshed: with the flag off, `mailService` was refused with "Certified mail is not available right now" and no draft was made, and `set_mail_service` was not found.
-- **Step 13** passed for a previewed letter (to `certified` and back to `standard`, the step's words) and for a postcard (refused). The sent, paying and gift drafts wait on a certified send, the Stripe test card and a gift letter.
+- **Step 13** passed for a previewed letter (to `certified` and back to `standard`, the step's words) and for a postcard (refused). The sent, paying and gift drafts wait on a certified send, the Stripe test card and a gift letter, and the flag-off tool list with step 1's.
 - **Step 16** passed for a one-page letter in ChatGPT: **Certified** turned the cost to "Pay & Send USD 11.99", the summary to certified mail and the Delivery line to USPS Certified Mail with the signed-for disclaimer, and **First-Class** put it all back. The two-page, gift and flag-off cases and the Claude run wait on a run.
 - **Steps 6 and 14** wait on a run in Claude, **steps 7 to 11** on the Stripe test card, **step 12** on a certified letter sent, and **step 15** on PostGrid's production time.
 
@@ -1992,7 +1992,7 @@ Not run: step 1 (two photos, with the dev CLI), step 2 (the four-photo case), st
 
 **Status:** Run on development on 2026-10-18 (UTC), through ChatGPT (DEV) as 4dm1n and Claude on the web as testlirl02.
 
-- **Passed:** steps 1, 2, 4, 5, 9, 10 and 11 (ChatGPT, widgets v94; step 11's flag off showed the classic rows with the row labelled "Style", and a postcard with Front/Back and no maker); step 3 in ChatGPT (it called `set_letter_words` for "roses", where the 2026-10-17 run called nothing) and in Claude on steering r54 (below).
+- **Passed:** steps 1, 2, 4, 5, 9, 10 and 11 (ChatGPT, widgets v94; step 11's flag off showed the classic rows with the row labelled "Style", and a postcard with Front/Back and no maker); step 3 in ChatGPT (it called `set_letter_words` for "roses", where the 2026-10-17 run called nothing; its no-editor case, "To change the words, ask in the chat.", was seen with stationery off in STATIONERY-01 step 11) and in Claude on steering r54 (below).
 - **Step 3 in Claude** failed on r53: Claude called nothing and said the letter had no roses; asked, with no tool call, what the card had shared, it said "none" (the share does not reach Claude's model, as HOME-02 found). On r54 (#809, the preview's own text) Claude called `set_letter_words` with the words it had seen, was refused with the card's words, then changed roses to sunflowers.
 - **Step 6** passed but for its cancel label: on v94 the button still read "Letter Scheduled" after **Cancel this letter**; fixed by #809 (widgets v95), where it read **Letter Cancelled** (ENVELOPE-01 step 4's cancel).
 - **Step 7** passed on v94 but for Enlarge spreading the page, which came with v95 and waits on a run.
