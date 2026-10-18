@@ -385,7 +385,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t42</p>
+      <p class="rev">letter t43</p>
     </div>
 
     <!-- The studio card (#580): widgets/shared/studio.js lays the card out
@@ -605,6 +605,8 @@
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
           statusPill.textContent = "Cancelled";
+          // The button its send left reading "Letter Scheduled" (STUDIO-01, DEV 2026-10-18).
+          document.getElementById("send-button-text").textContent = "Letter Cancelled";
           refreshStudio();
         },
       });

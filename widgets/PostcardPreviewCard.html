@@ -324,7 +324,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t37</p>
+      <p class="rev">postcard t38</p>
     </div>
 
     <!-- The postcard maker (#580): widgets/shared/studio.js lays the card out
@@ -531,6 +531,8 @@
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
           statusPill.textContent = "Cancelled";
+          // The button its send left reading "Postcard Scheduled" (STUDIO-01, DEV 2026-10-18).
+          document.getElementById("send-button-text").textContent = "Postcard Cancelled";
           refreshStudio();
         },
       });

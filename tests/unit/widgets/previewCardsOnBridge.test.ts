@@ -598,6 +598,8 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     });
 
     expect(card.text('status-pill')).toBe('Cancelled');
+    // Not the send's "Scheduled" any more (STUDIO-01, DEV 2026-10-18).
+    expect(card.text('send-button-text')).toBe(`${Noun} Cancelled`);
     expect(card.text('scheduled-note')).toBe('Cancelled. The letter it cost is back in the balance.');
     expect(card.visible('cancel-scheduled-button')).toBe(false);
   });
