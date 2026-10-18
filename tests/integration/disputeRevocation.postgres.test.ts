@@ -895,6 +895,15 @@ describePostgres('dispute and refund pack revocation', () => {
       return disputeId;
     }
 
+    async function readDisputeAlerts(orderId: string) {
+      const result = await pool.query<{ alert_type: string; severity: string; status: string }>(
+        `SELECT alert_type, severity, status FROM commerce_operational_alerts
+          WHERE order_id = $1 AND alert_type LIKE 'stripe_dispute_%' ORDER BY alert_type`,
+        [orderId]
+      );
+      return result.rows;
+    }
+
     async function readDispute(disputeId: string) {
       const result = await pool.query<{ user_id: string | null; status: string }>(
         'SELECT user_id, status FROM stripe_disputes WHERE dispute_id = $1', [disputeId]
@@ -917,6 +926,9 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(await readDispute(disputeId)).toEqual({ user_id: userId, status: 'needs_response' });
       // The recovery never grants the pack.
       expect(await readLedgerStatuses(userId)).toEqual([]);
+      expect(await readDisputeAlerts(orderId)).toEqual([
+        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open' }
+      ]);
     }, 60_000);
 
     it('blocks the account for a dispute already closed as lost', async () => {
@@ -929,6 +941,71 @@ describePostgres('dispute and refund pack revocation', () => {
       await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
 
       expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
+      expect(await readDisputeAlerts(orderId)).toEqual([
+        { alert_type: 'stripe_dispute_closed', severity: 'critical', status: 'open' }
+      ]);
+    }, 60_000);
+
+    it('lifts the block when a recovered loss is later won, and resolves its alert', async () => {
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+      await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+      expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
+
+      await commerceService.processStripeWebhookEvent(
+        disputeEvent('charge.dispute.closed', disputeFixture({ id: disputeId, payment_intent: paymentIntentId, status: 'won' }))
+      );
+
+      const account = await readAccount(userId);
+      expect(account.sends_blocked_at).toBeNull();
+      expect(account.sends_blocked_reason).toBeNull();
+      // Nothing was granted, so nothing is given back.
+      expect(account.credits).toBe(0);
+      expect(await readLedgerStatuses(userId)).toEqual([]);
+      expect(await readDisputeAlerts(orderId)).toEqual([
+        { alert_type: 'stripe_dispute_closed', severity: 'info', status: 'open' },
+        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'resolved' }
+      ]);
+    }, 60_000);
+
+    it('blocks when one of two recovered disputes is a loss, and alerts for that one', async () => {
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      const inquiry = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'warning_needs_response']]);
+      const loss = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+
+      await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+
+      expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
+      expect((await readDispute(inquiry)).user_id).toBe(userId);
+      expect((await readDispute(loss)).user_id).toBe(userId);
+      expect(await readDisputeAlerts(orderId)).toEqual([
+        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open' }
+      ]);
+    }, 60_000);
+
+    it('leaves a dispute on an order already funded to its next event, which takes the pack', async () => {
+      // The dispute was recorded while the order's payment intent was not yet
+      // committed, and a later checkout event for the funded order recovers it.
+      const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 10 });
+      await pool.query('UPDATE orders SET stripe_payment_intent_id = NULL WHERE order_id = $1', [orderId]);
+      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+      await pool.query('UPDATE orders SET stripe_payment_intent_id = $2 WHERE order_id = $1', [orderId, paymentIntentId]);
+
+      await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+
+      const blocked = await readAccount(userId);
+      expect(blocked.sends_blocked_reason).toBe('payment_disputed');
+      expect(blocked.credits).toBe(10);
+      expect((await readDispute(disputeId)).user_id).toBeNull();
+      expect(await readDisputeAlerts(orderId)).toEqual([]);
+
+      await commerceService.processStripeWebhookEvent(
+        disputeEvent('charge.dispute.funds_withdrawn', disputeFixture({ id: disputeId, payment_intent: paymentIntentId }))
+      );
+
+      expect((await readAccount(userId)).credits).toBe(0);
+      expect(await readLedgerStatuses(userId)).toEqual(['revoked']);
+      expect((await readDispute(disputeId)).user_id).toBe(userId);
     }, 60_000);
 
     it('leaves the account sending for a card-network inquiry', async () => {
@@ -958,6 +1035,8 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(account.sends_blocked_reason).toBeNull();
     }, 60_000);
 
+    // Guards that the recovery's block never clobbers an earlier one, and that
+    // the loss's next event finds its effects ran (one alert, not two).
     it('keeps an earlier block as it was, and the next loss event changes nothing', async () => {
       const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
       await pool.query(
@@ -976,8 +1055,13 @@ describePostgres('dispute and refund pack revocation', () => {
       const after = await readAccount(userId);
       expect(after.sends_blocked_at?.toISOString()).toBe(before.sends_blocked_at?.toISOString());
       expect(after.sends_blocked_reason).toBe('operator_review');
+      expect(await readDisputeAlerts(orderId)).toEqual([
+        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open' }
+      ]);
     }, 60_000);
 
+    // Guards that a recovered inquiry, now with an account, still acts when it
+    // escalates: only a recovered loss counts as one whose effects ran.
     it('an inquiry recovered and then escalated blocks through the matched path', async () => {
       const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
       const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'warning_needs_response']]);
