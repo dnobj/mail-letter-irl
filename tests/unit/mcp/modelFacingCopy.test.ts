@@ -20,7 +20,7 @@
  * coverage whatsoever.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LetterIrlServer } from '../../../src/server.js';
 import { CARD_ONLY_SEND_TOOLS, summarizeToolResult } from '../../../src/mcp/registerTools.js';
 import { buildManifest, servedToolJsonSchemas } from '../../../src/mcp/manifest.js';
@@ -144,6 +144,13 @@ describe('quote summaries', () => {
   });
 
   describe('words changed on the card (STUDIO-01, Claude)', () => {
+    // The editor is on the studio card's Words tab.
+    beforeEach(() => {
+      vi.stubEnv('LETTER_IRL_STUDIO_CARD_ENABLED', 'true');
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
     // On DEV 2026-10-18, Claude answered from the preview's words that the letter had no "roses" the card had
     // added: what the card shares never reaches Claude's model. The preview's own text, which the model reads beside
     // the words, says to ask set_letter_words first, wherever our card shows and its words editor is offered.
@@ -182,6 +189,12 @@ describe('quote summaries', () => {
 
     it('asks only for a read, not a read before every change (#809 review round 1)', () => {
       expect(summarizeToolResult('quote_and_preview_letter', edited, clientProfileNamed('claude'))).not.toMatch(/changing one/);
+    });
+
+    it('says nothing without the studio card, whose Words tab holds the editor (#809 review round 2)', () => {
+      vi.stubEnv('LETTER_IRL_STUDIO_CARD_ENABLED', 'false');
+      const summary = summarizeToolResult('quote_and_preview_letter', edited, clientProfileNamed('claude'));
+      expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
     });
 
     it('says nothing for a postcard, whose words the card cannot change', () => {

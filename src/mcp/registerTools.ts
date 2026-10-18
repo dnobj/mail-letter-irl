@@ -1599,8 +1599,9 @@ function stationerySentence(result: Record<string, unknown>): string {
  */
 function cardWordsSentence(result: Record<string, unknown>, client: Pick<ClientProfile, "rendersCards">): string {
   const wordsVersion = result.wordsVersion;
-  // The card's editor shows only beside its Style row, which a preview without stationery has none of (#809 review round 1).
-  const cardHasEditor = typeof result.stationery === "object" && result.stationery !== null;
+  // The card's editor is on its studio's Words tab (#809 review round 2), shown beside the Style row, which a preview
+  // without stationery has none of (#809 review round 1).
+  const cardHasEditor = isStudioCardEnabled() && typeof result.stationery === "object" && result.stationery !== null;
   if (!client.rendersCards || typeof wordsVersion !== "string" || !cardHasEditor) return "";
   // Only a read is asked for: a change sent with the version last seen is refused the same way (#809 review round 1).
   return (

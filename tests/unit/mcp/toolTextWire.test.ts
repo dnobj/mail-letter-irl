@@ -174,7 +174,9 @@ describe("tool text on the wire (#484)", () => {
   });
 
   it("says beside a letter preview where the card shows that its words may change unseen (STUDIO-01, r54)", async () => {
-    // Claude's model never sees what the card shares (HOME-02), so the preview's own text says it.
+    // Claude's model never sees what the card shares (HOME-02), so the preview's own text says it. The editor is on the
+    // studio card's Words tab.
+    vi.stubEnv("LETTER_IRL_STUDIO_CARD_ENABLED", "true");
     const preview = {
       draftId: "0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0",
       lettersRequired: 1,
