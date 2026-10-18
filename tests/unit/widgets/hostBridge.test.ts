@@ -414,6 +414,62 @@ describe('the bridge in an MCP Apps host', () => {
     dom.window.close();
   });
 
+  it("hides an overflow of a pixel or two in an MCP Apps host's frame too, and keeps a real one scrollable", () => {
+    // Claude on the web drew a letter card 563 px tall with a scroll bar whose thumb filled its track (DEV, 2026-10-18).
+    let observed: (() => void) | undefined;
+    let scrollHeight = 564;
+    const frames: Array<() => void> = [];
+    const dom = new JSDOM(bridgePage('<div></div>'), {
+      runScripts: 'dangerously',
+      beforeParse(window: any) {
+        // Framed by an MCP Apps host, with no window.openai, and no answer to ui/initialize yet.
+        Object.defineProperty(window, 'parent', { value: { postMessage() {} }, configurable: true });
+        (window as any).ResizeObserver = class {
+          constructor(callback: () => void) { observed = callback; }
+          observe() {}
+        };
+        Object.defineProperty((window as any).Element.prototype, 'clientHeight', { configurable: true, get: () => 563 });
+        Object.defineProperty((window as any).Element.prototype, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+        (window as any).requestAnimationFrame = (callback: () => void) => frames.push(callback);
+      }
+    });
+    expect((dom.window as any).letterIrlHost.kind).toBe('mcp-apps');
+    const root = dom.window.document.documentElement;
+    const grown = () => {
+      observed!();
+      frames.splice(0).forEach(frame => frame());
+    };
+    // A pixel over, at once: hidden.
+    expect(root.style.overflowY).toBe('hidden');
+    // A real overflow, as the card grows: scrollable again, on the next frame.
+    scrollHeight = 700;
+    observed!();
+    expect(root.style.overflowY).toBe('hidden');
+    frames.splice(0).forEach(frame => frame());
+    expect(root.style.overflowY).toBe('');
+    // Two pixels over, told by the frame's own resize: hidden.
+    scrollHeight = 565;
+    dom.window.dispatchEvent(new dom.window.Event('resize'));
+    expect(root.style.overflowY).toBe('hidden');
+    // Three pixels is a real overflow.
+    scrollHeight = 566;
+    grown();
+    expect(root.style.overflowY).toBe('');
+    dom.window.close();
+  });
+
+  it("leaves an unframed page's overflow alone", () => {
+    const dom = new JSDOM(bridgePage('<div></div>'), {
+      runScripts: 'dangerously',
+      beforeParse(window: any) {
+        Object.defineProperty((window as any).Element.prototype, 'clientHeight', { configurable: true, get: () => 563 });
+        Object.defineProperty((window as any).Element.prototype, 'scrollHeight', { configurable: true, get: () => 564 });
+      }
+    });
+    expect(dom.window.document.documentElement.style.overflowY).toBe('');
+    dom.window.close();
+  });
+
   it('keeps working when ChatGPT refuses the height', async () => {
     const dom = new JSDOM(bridgePage('<div></div>'), {
       runScripts: 'dangerously',
