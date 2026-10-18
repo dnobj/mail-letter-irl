@@ -2021,6 +2021,12 @@ describe('mail no pack pays for that cannot be paid here either (PAGES-01 step 1
     const off = mount();
     await off.show(unpayable({ ...NOT_SOLD, payAndSend: { available: false, unavailableReason: 'Pay & Send is not enabled.' } }), ON);
     expect(text(off, 'status-pill')).toBe('Pay & Send is not enabled.');
+    // A new preview of the same mail would meet the same answer: no advice to make one.
+    expect(text(off, 'checkout-note')).toBe("This can't be paid for here now.");
+    const brief = mount();
+    await brief.show(unpayable({ ...NOT_SOLD, payAndSend: { available: false, unavailableReason: 'Pay & Send is temporarily unavailable. Please try again shortly.' } }), ON);
+    expect(text(brief, 'status-pill')).toBe('Pay & Send is temporarily unavailable. Please try again shortly.');
+    expect(text(brief, 'checkout-note')).toBe("This can't be paid for here now.");
     const silent = mount();
     await silent.show(unpayable({ ...NOT_SOLD, payAndSend: { available: false } }), ON);
     expect(text(silent, 'status-pill')).toBe("Pay & Send isn't available for this mail.");

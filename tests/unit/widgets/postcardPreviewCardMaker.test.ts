@@ -839,6 +839,7 @@ describe('a postcard no pack pays for that cannot be paid here either (PAGES-01 
     const say = (id: string) => card.byId(id).textContent;
     expect(say('status-pill')).toBe("Pay & Send isn't available for this mail.");
     expect(say('checkout-note')).toBe("This can't be paid for here now. Ask in the chat for a new preview.");
+    expect(card.byId('checkout-note').style.display).toBe('block');
     expect(say('studio-cost')).toBe("Can't be paid now");
     expect(say('cost')).toBe("Can't be paid now");
     for (const id of ['send-button', 'pay-send-button', 'pay-page-button']) {

@@ -2519,7 +2519,7 @@
             checkoutNote.textContent = WEBSITE_PACKS_NOTE;
             checkoutNote.style.display = "block";
           } else if (!effectiveCanSendNow && unpayableReason(state)) {
-            checkoutNote.textContent = UNPAYABLE_NOTE;
+            checkoutNote.textContent = unpayableNote(unpayableReason(state));
             checkoutNote.style.display = "block";
           } else {
             checkoutNote.style.display = "none";
@@ -2953,7 +2953,14 @@
           ? payAndSend.unavailableReason
           : "Pay & Send isn't available for this mail.";
       }
-      const UNPAYABLE_NOTE = "This can't be paid for here now. Ask in the chat for a new preview.";
+      // What to do about it: a new preview only for mail whose option is not sold now (a shorter letter, another size),
+      // since a new preview of the same mail meets the same answer; for any other reason (Pay & Send off, not priced
+      // yet, briefly unavailable, an app with no checkout) the card says only that it can't be paid here.
+      function unpayableNote(reason) {
+        return reason === "Pay & Send isn't available for this mail."
+          ? "This can't be paid for here now. Ask in the chat for a new preview."
+          : "This can't be paid for here now.";
+      }
 
       function showCheckoutLink(href, label) {
         // Only an https link becomes the card's link (#684); the order is still followed.
