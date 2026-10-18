@@ -350,6 +350,8 @@ describe.each(CARDS)('%s: Pay & Send on a draft whose order is already paid (#67
       await flush();
       expect(harness.text('pay-send-button-text'), status).toBe('Already paid');
       expect(harness.text('status-pill'), status).toBe(pill);
+      // Nothing is left to pay, so the note about paying goes.
+      expect(harness.visible('checkout-note'), status).toBe(false);
       const button = harness.document.getElementById('pay-send-button') as HTMLButtonElement;
       expect(button.disabled, status).toBe(true);
       const checkouts = harness.calls.filter(call => call.name === 'create_mail_checkout').length;
