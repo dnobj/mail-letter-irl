@@ -587,6 +587,18 @@ describe('refusalFor (#470)', () => {
     expect(JSON.stringify(refusal.body)).not.toContain('internal');
   });
 
+  it('says a payment already taken needs a new preview, and an open one can finish or lapse (#679)', () => {
+    expect(refusalFor(coded('DRAFT_CHECKOUT_PENDING')).body.message).toBe(
+      'A payment for this preview is still open. Finish it, or wait for it to expire, then try again.'
+    );
+    const taken = refusalFor(Object.assign(coded('DRAFT_CHECKOUT_PENDING'), { paymentTaken: true }));
+    expect(taken.status).toBe(409);
+    expect(taken.body).toEqual({
+      error: 'checkout_open',
+      message: 'A payment was already taken for this preview, so it cannot also be sent from your balance. To send it again, make a new preview.'
+    });
+  });
+
   it('tells the person a missed mail date needs a new preview (#535)', () => {
     expect(refusalFor(coded('SCHEDULE_PASSED')).body.message).toBe(
       'The day this was to go to the printer has passed, so it can no longer arrive by its date. Make a new preview with a new date.'

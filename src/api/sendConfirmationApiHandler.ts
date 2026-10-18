@@ -260,7 +260,10 @@ export function refusalFor(error: unknown): Refusal {
     case 'DRAFT_CHANGED_SINCE_SHOWN':
       return refuse(409, 'changed_since_shown', 'This changed after this page showed it, so nothing was sent. Refresh this page to see it as it is now, then press Send.');
     case 'DRAFT_CHECKOUT_PENDING':
-      return refuse(409, 'checkout_open', 'A payment for this preview is still open. Finish it, or wait for it to expire, then try again.');
+      // A payment already taken has no checkout to finish and will not expire (#679 review).
+      return (error as { paymentTaken?: unknown }).paymentTaken === true
+        ? refuse(409, 'checkout_open', 'A payment was already taken for this preview, so it cannot also be sent from your balance. To send it again, make a new preview.')
+        : refuse(409, 'checkout_open', 'A payment for this preview is still open. Finish it, or wait for it to expire, then try again.');
     case 'GIFT_LETTERS_DISABLED':
     case 'GIFT_LETTER_UNAVAILABLE':
       return refuse(409, 'gift_unavailable', 'The gift letter for this preview is no longer available. Make a new preview.');

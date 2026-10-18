@@ -329,8 +329,8 @@ export async function createMailOrderFromDraftWithClient(
     // idx_orders_active_jit_draft_unique count them (#679): a dispute can arrive before Stripe's completion, leaving
     // the order 'disputed' (or 'held') while its draft still waits, and a pack letter would pay again for mail a Stripe
     // payment was taken for.
-    const activeCheckout = await client.query<{ order_id: string }>(
-      `SELECT order_id FROM orders
+    const activeCheckout = await client.query<{ order_id: string; status: string }>(
+      `SELECT order_id, status FROM orders
        WHERE draft_id = $1
          AND order_type = 'jit_mail'
          AND status = ANY($2::varchar[])
@@ -340,9 +340,11 @@ export async function createMailOrderFromDraftWithClient(
       [params.draftId, [...LIVE_PAY_AND_SEND_STATUSES]]
     );
     if (activeCheckout.rows[0]) {
-      throw draftError(
-        'DRAFT_CHECKOUT_PENDING',
-        `Draft ${params.draftId} has an active Pay & Send checkout`
+      // Past the checkout, the payment was taken and nothing will expire: the refusal says so rather than ask the
+      // person to finish or wait for a checkout there is not (#679 review).
+      throw Object.assign(
+        draftError('DRAFT_CHECKOUT_PENDING', `Draft ${params.draftId} has an active Pay & Send checkout`),
+        { paymentTaken: activeCheckout.rows[0].status !== 'checkout_pending' }
       );
     }
     // Room on its mail date (#700), for a prepaid or gift send, after the open
