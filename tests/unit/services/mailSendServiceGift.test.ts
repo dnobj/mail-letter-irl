@@ -46,7 +46,7 @@ const client = {
     if (sql.startsWith('SELECT * FROM letter_drafts')) return { rows: [{ ...draft }] };
     if (sql.startsWith('SELECT credits FROM users')) return { rows: [{ credits: 0 }] };
     if (sql.includes('SELECT sends_blocked_reason')) return { rows: [{ sends_blocked_reason: null }] };
-    if (sql.includes('SELECT order_id FROM orders')) return { rows: [] };
+    if (sql.includes('SELECT order_id, status FROM orders')) return { rows: [] };
     if (sql.includes('INSERT INTO letters')) {
       calls.push('insert-letter');
       savedLetter = {

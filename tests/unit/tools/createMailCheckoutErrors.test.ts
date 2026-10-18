@@ -135,30 +135,6 @@ describe('friendlyCheckoutError terminality (#278)', () => {
  * surface only; four round-13 angles found the send path still open, and it
  * is the higher-traffic one because Pay & Send ships disabled (#278 r13).
  */
-describe('a live Pay & Send order on the send surface (#679)', () => {
-  const refusal = (paymentTaken?: boolean) =>
-    Object.assign(new Error('Draft draft-1 has an active Pay & Send checkout'), {
-      code: 'DRAFT_CHECKOUT_PENDING',
-      ...(paymentTaken === undefined ? {} : { paymentTaken })
-    });
-
-  it.each([
-    ['send_letter', letterDraftError],
-    ['send_postcard', postcardDraftError]
-  ])('%s asks for the open checkout to finish or lapse, and says a taken payment needs a new preview', (_name, friendlyDraftError) => {
-    for (const open of [refusal(), refusal(false)]) {
-      expect(friendlyDraftError(open, 'draft-1').message).toBe(
-        'This draft has an active Pay & Send checkout. Complete or wait for that checkout to expire before using prepaid balance.'
-      );
-    }
-    const taken = friendlyDraftError(refusal(true), 'draft-1').message;
-    expect(taken).toBe(
-      'A Pay & Send payment was already taken for this draft, so it cannot also be sent from prepaid balance. Its purchase status says what became of it; to send this mail again, make a new preview.'
-    );
-    expect(taken).not.toMatch(/expire|draft-1/);
-  });
-});
-
 describe('account-blocked wording on the send surface (#278)', () => {
   // Round 13 pinned this by GREPPING the two source files, which cannot fail
   // for the defect it exists to catch: a round-14 angle replaced the branch's
@@ -212,5 +188,29 @@ describe('friendlyCheckoutError and the daily limits', () => {
     expect(friendly.message).toBe(sentence);
     expect((friendly as Error & { code?: string }).code).toBe(code);
     expect(friendly.message).not.toBe('Unable to create Pay & Send checkout. Please try again.');
+  });
+});
+
+describe('a live Pay & Send order on the send surface (#679)', () => {
+  const refusal = (paymentTaken?: boolean) =>
+    Object.assign(new Error('Draft draft-1 has an active Pay & Send checkout'), {
+      code: 'DRAFT_CHECKOUT_PENDING',
+      ...(paymentTaken === undefined ? {} : { paymentTaken })
+    });
+
+  it.each([
+    ['send_letter', letterDraftError],
+    ['send_postcard', postcardDraftError]
+  ])('%s asks for the open checkout to finish or lapse, and says a taken payment needs a new preview', (_name, friendlyDraftError) => {
+    for (const open of [refusal(), refusal(false)]) {
+      expect(friendlyDraftError(open, 'draft-1').message).toBe(
+        'This draft has an active Pay & Send checkout. Complete or wait for that checkout to expire before using prepaid balance.'
+      );
+    }
+    const taken = friendlyDraftError(refusal(true), 'draft-1').message;
+    expect(taken).toBe(
+      'A Pay & Send payment was already taken for this draft, so it cannot also be sent from prepaid balance: that payment mails it, unless the payment is being refunded or is under review. Nothing more was charged. Make a new preview only to send the mail as a new letter.'
+    );
+    expect(taken).not.toMatch(/expire|draft-1/);
   });
 });

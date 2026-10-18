@@ -595,7 +595,7 @@ describe('refusalFor (#470)', () => {
     expect(taken.status).toBe(409);
     expect(taken.body).toEqual({
       error: 'checkout_open',
-      message: 'A payment was already taken for this preview, so it cannot also be sent from your balance. To send it again, make a new preview.'
+      message: 'A payment was already taken for this preview, so it is not sent from your balance: that payment mails it, unless it is being refunded or is under review. Nothing more was charged.'
     });
   });
 

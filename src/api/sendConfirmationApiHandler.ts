@@ -262,7 +262,7 @@ export function refusalFor(error: unknown): Refusal {
     case 'DRAFT_CHECKOUT_PENDING':
       // A payment already taken has no checkout to finish and will not expire (#679 review).
       return (error as { paymentTaken?: unknown }).paymentTaken === true
-        ? refuse(409, 'checkout_open', 'A payment was already taken for this preview, so it cannot also be sent from your balance. To send it again, make a new preview.')
+        ? refuse(409, 'checkout_open', 'A payment was already taken for this preview, so it is not sent from your balance: that payment mails it, unless it is being refunded or is under review. Nothing more was charged.')
         : refuse(409, 'checkout_open', 'A payment for this preview is still open. Finish it, or wait for it to expire, then try again.');
     case 'GIFT_LETTERS_DISABLED':
     case 'GIFT_LETTER_UNAVAILABLE':

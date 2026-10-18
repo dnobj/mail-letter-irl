@@ -186,7 +186,7 @@ export function friendlyDraftError(
   if (code === 'DRAFT_CHECKOUT_PENDING') {
     if ((error as { paymentTaken?: unknown }).paymentTaken === true) {
       return new Error(
-        'A Pay & Send payment was already taken for this draft, so it cannot also be sent from prepaid balance. Its purchase status says what became of it; to send this mail again, make a new preview.'
+        'A Pay & Send payment was already taken for this draft, so it cannot also be sent from prepaid balance: that payment mails it, unless the payment is being refunded or is under review. Nothing more was charged. Make a new preview only to send the mail as a new letter.'
       );
     }
     return new Error(

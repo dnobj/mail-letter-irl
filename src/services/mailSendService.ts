@@ -325,8 +325,8 @@ export async function createMailOrderFromDraftWithClient(
 
   let jitOrder: Order | undefined;
   if (funding.type === 'prepaid_balance') {
-    // Any live Pay & Send order on the draft refuses a send from the balance, as the edit lock and
-    // idx_orders_active_jit_draft_unique count them (#679): a dispute can arrive before Stripe's completion, leaving
+    // Any live Pay & Send order on the draft refuses a send from the balance, by the statuses the edit lock and
+    // idx_orders_active_jit_draft_unique count (#679): a dispute can arrive before Stripe's completion, leaving
     // the order 'disputed' (or 'held') while its draft still waits, and a pack letter would pay again for mail a Stripe
     // payment was taken for.
     const activeCheckout = await client.query<{ order_id: string; status: string }>(
@@ -334,6 +334,8 @@ export async function createMailOrderFromDraftWithClient(
        WHERE draft_id = $1
          AND order_type = 'jit_mail'
          AND status = ANY($2::varchar[])
+         -- Unlike the edit lock, a checkout past its window counts as closed here even while its Stripe session is
+         -- open; making the two agree is #721.
          AND (status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW())
        LIMIT 1
        FOR UPDATE`,
