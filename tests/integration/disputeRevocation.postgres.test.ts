@@ -930,10 +930,14 @@ describePostgres('dispute and refund pack revocation', () => {
       // The recovery never grants the pack, and holds the order as the matched path does.
       expect(await readLedgerStatuses(userId)).toEqual([]);
       const held = await pool.query(
-        'SELECT hold_reason, hold_previous_status, held_at IS NOT NULL AS held FROM orders WHERE order_id = $1',
+        `SELECT hold_reason, hold_previous_status, held_at IS NOT NULL AS held, stripe_dispute_status
+           FROM orders WHERE order_id = $1`,
         [orderId]
       );
-      expect(held.rows[0]).toEqual({ hold_reason: 'payment_disputed', hold_previous_status: 'checkout_pending', held: true });
+      expect(held.rows[0]).toEqual({
+        hold_reason: 'payment_disputed', hold_previous_status: 'checkout_pending', held: true,
+        stripe_dispute_status: 'needs_response'
+      });
       expect(await readDisputeAlerts(orderId)).toEqual([
         { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null }
       ]);
@@ -952,6 +956,8 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(await readDisputeAlerts(orderId)).toEqual([
         { alert_type: 'stripe_dispute_closed', severity: 'critical', status: 'open', resolution_code: null }
       ]);
+      const shown = await pool.query('SELECT stripe_dispute_status FROM orders WHERE order_id = $1', [orderId]);
+      expect(shown.rows[0].stripe_dispute_status).toBe('lost');
     }, 60_000);
 
     it('lifts the block when a recovered loss is later won, and resolves its alert', async () => {
@@ -986,6 +992,8 @@ describePostgres('dispute and refund pack revocation', () => {
       expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
       expect((await readDispute(inquiry)).user_id).toBe(userId);
       expect((await readDispute(loss)).user_id).toBe(userId);
+      const shown = await pool.query('SELECT stripe_dispute_status FROM orders WHERE order_id = $1', [orderId]);
+      expect(shown.rows[0].stripe_dispute_status).toBe('needs_response');
       expect(await readDisputeAlerts(orderId)).toEqual([
         { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null }
       ]);
@@ -1036,6 +1044,20 @@ describePostgres('dispute and refund pack revocation', () => {
       await commerceService.processStripeWebhookEvent(
         disputeEvent('charge.dispute.funds_withdrawn', disputeFixture({ id: disputeId, payment_intent: paymentIntentId }))
       );
+      expect((await readDispute(disputeId)).user_id).toBe(userId);
+    }, 60_000);
+
+    it("takes over a dispute whose intent is not the one the order's row carries", async () => {
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      const committed = `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+      await pool.query('UPDATE orders SET stripe_payment_intent_id = $2 WHERE order_id = $1', [orderId, committed]);
+      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+
+      const result = await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+
+      expect(result).toMatchObject({ orderId, status: 'disputed' });
+      expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
+      // Its next event searches by its own intent and can never reach this order.
       expect((await readDispute(disputeId)).user_id).toBe(userId);
     }, 60_000);
 
