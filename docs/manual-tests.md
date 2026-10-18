@@ -1115,7 +1115,7 @@ hasRedirectUrl=false`).
   - At 03:22:31Z `purchase.start` logged `hasRedirectUrl=true redirectHost=chatgpt.com
     returnKept=true`. `checkout.session.completed` arrived at 03:23:31Z. `purchase.return` logged
     `conversationKept=true linkOffered=conversation`.
-  - The page read "Payment received" with **Back to your conversation**, which opened the same
+  - The page read "Payment received" (since #711 it reads "Checking your payment") with **Back to your conversation**, which opened the same
     conversation in a new tab.
   - Its card read **Paid**, "2 of 2 from this pack are still unused", offered only **Check
     status**, and no second checkout.
