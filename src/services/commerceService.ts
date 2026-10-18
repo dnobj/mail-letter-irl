@@ -3570,8 +3570,7 @@ async function blockAccountSends(
 /**
  * The loss rule for disputes recorded while no order matched, run when a later
  * checkout ties their money to an order (processCheckoutSessionEvent's
- * recovery). Their events returned before processDisputeEvent's loss rule, so
- * without this the account went on sending until the dispute's next event.
+ * recovery): the same rule processDisputeEvent applies to a matched dispute.
  *
  * The recovery returns before the checkout grants a pack or queues mail, so the
  * block is what is left of the rule; the order itself is the recovery's
