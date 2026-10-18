@@ -70,9 +70,9 @@ function pngBytes(width: number, height: number): Buffer {
 const uri = (bytes: Buffer) => `data:image/png;base64,${bytes.toString('base64')}`;
 const FULL = uri(pngBytes(1950, 600));
 const SMALL = uri(pngBytes(390, 120));
-const SAVED_PNG = pngBytes(1200, 300);
+const SAVED_PNG = pngBytes(480, 120);
 const SIGNATURE = uri(SAVED_PNG);
-const SAVED = { png: SAVED_PNG, width: 1200, height: 300, useByDefault: true, createdAt: '2026-10-02T14:00:00.000Z', updatedAt: '2026-10-02T14:00:00.000Z' };
+const SAVED = { png: SAVED_PNG, width: 480, height: 120, useByDefault: true, createdAt: '2026-10-02T14:00:00.000Z', updatedAt: '2026-10-02T14:00:00.000Z' };
 
 /** `count` short lines, each one printed line. */
 const lines = (count: number) => Array.from({ length: count }, (_, index) => `Line ${index + 1}`).join('\n');

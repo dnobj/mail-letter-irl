@@ -16,13 +16,14 @@
  * copy, as before #614.
  */
 
+import { SIGNATURE_MAX_WIDTH } from '../render/geometry.js';
 import { readImage, type RenderImage } from '../render/images.js';
 import type { Layout } from '../render/layout.js';
 import { openImage } from './imageService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
-/** Twice the band's widest CSS width (2.5 in at 96 CSS pixels to the inch), in pixels. */
-export const SIGNATURE_DISPLAY_WIDTH = 480;
+/** Twice the band's widest CSS width, in pixels: its 2.5 in at 96 CSS pixels to the inch (72 points), 480. */
+export const SIGNATURE_DISPLAY_WIDTH = Math.round((SIGNATURE_MAX_WIDTH / 72) * 96 * 2);
 
 /** The signature reduced for the preview, or the stored copy when it is no wider than that. */
 export async function signatureDisplayCopy(image: RenderImage): Promise<RenderImage> {

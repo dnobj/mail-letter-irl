@@ -60,8 +60,8 @@ function png(width: number, height: number): string {
 }
 const FULL = png(1950, 600);
 const SMALL = png(390, 120);
-// A saved signature's copy, as a signed draft keeps it (#608).
-const SIGNATURE = png(1200, 300);
+// A saved signature's copy, as a signed draft keeps it (#608). Narrow enough to draw as stored (#614), so these tests never take the reduction's fallback.
+const SIGNATURE = png(480, 120);
 
 /** A pending letter draft and the Classic preview the preview tools drew for it. */
 function draft(options: { layoutType?: LetterLayoutType; gift?: boolean; bodyText?: string; signed?: boolean } = {}): DraftForStationery {

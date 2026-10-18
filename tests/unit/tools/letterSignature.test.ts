@@ -85,7 +85,7 @@ function pngBytes(width: number, height: number): Buffer {
 const uri = (bytes: Buffer) => `data:image/png;base64,${bytes.toString('base64')}`;
 
 // The signature as the cleaning writes one, and a letter's picture at 300 dpi and as the card shows it.
-const SIGNATURE_PNG = pngBytes(1200, 300);
+const SIGNATURE_PNG = pngBytes(480, 120);
 const SIGNATURE = uri(SIGNATURE_PNG);
 const FULL = uri(pngBytes(1950, 600));
 const SMALL = uri(pngBytes(390, 120));
@@ -93,8 +93,8 @@ const SMALL = uri(pngBytes(390, 120));
 function saved(useByDefault: boolean) {
   return {
     png: SIGNATURE_PNG,
-    width: 1200,
-    height: 300,
+    width: 480,
+    height: 120,
     useByDefault,
     createdAt: '2026-10-02T14:00:00.000Z',
     updatedAt: '2026-10-02T14:00:00.000Z'
@@ -451,7 +451,7 @@ describe('withDisplayImage', () => {
       pages: [{
         items: [
           { kind: 'image', x: 72, top: 72, width: 468, height: 144, image: { bytes: Buffer.from('full'), mime: 'image/png', width: 1950, height: 600 } },
-          { kind: 'image', x: 72, top: 400, width: 180, height: 45, image: { bytes: SIGNATURE_PNG, mime: 'image/png', width: 1200, height: 300 }, role: 'signature' }
+          { kind: 'image', x: 72, top: 400, width: 180, height: 45, image: { bytes: SIGNATURE_PNG, mime: 'image/png', width: 480, height: 120 }, role: 'signature' }
         ]
       }]
     } as unknown as Layout;

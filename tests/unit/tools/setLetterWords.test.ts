@@ -60,8 +60,8 @@ function png(width: number, height: number): string {
 }
 const FULL_INLINE = png(1950, 900);
 const SMALL_INLINE = png(390, 180);
-// A saved signature's copy, as a signed draft keeps it (#608).
-const SIGNATURE = png(1200, 300);
+// A saved signature's copy, as a signed draft keeps it (#608). Narrow enough to draw as stored (#614), so these tests never take the reduction's fallback.
+const SIGNATURE = png(480, 120);
 
 function context(credits = 10): ToolContext {
   return {
