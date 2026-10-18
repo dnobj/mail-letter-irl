@@ -135,6 +135,52 @@ const NEVER_PAID_ORDER_STATUSES: OrderStatus[] = ['cancelled', 'payment_failed']
  */
 const MONEY_BACKED_SOURCE_TYPES = ['purchase', 'adjustment', 'refund'];
 
+/**
+ * The money hold on the lots a letter was paid from, shared by the letter schedule and the cancelled-held one. A lot
+ * holds when it was revoked (its pack refunded), when it is money-backed and its order cannot be found, or when its
+ * order is not settled.
+ *
+ * The lot is judged by the lot that first paid (#729). Credits a failed or cancelled send gave back are a new lot
+ * (source 'adjustment', no order) linked to the lot they restore (related_ledger_id, returnConsumedCreditsForLetter),
+ * so a letter paid from them was judged as money with no order and held back for good. The chain of such returns is
+ * followed to its first lot, and that lot's kind and order decide; a return of a return goes back to the first too.
+ * Only returns are followed (source_metadata reason 'send_failed'): an operator's compensation also links a lot, and
+ * stays money with no order, which holds, as before. A chain that cannot be followed ends at the return, which holds.
+ * Revoked is the lot's own: a refund revokes the returned credits with the pack's (they carry its reference).
+ *
+ * settled: the parameter holding the settled order statuses; money: the one holding the money-backed source types.
+ */
+function fundingHold(settled: string, money: string): string {
+  return `NOT EXISTS (
+                SELECT 1
+                  FROM credit_transactions txn
+                  JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
+                  JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
+                  CROSS JOIN LATERAL (
+                    WITH RECURSIVE chain AS (
+                      SELECT lot.source_type, lot.source_order_id, lot.related_ledger_id, lot.source_metadata, 0 AS depth
+                      UNION ALL
+                      SELECT up.source_type, up.source_order_id, up.related_ledger_id, up.source_metadata, chain.depth + 1
+                        FROM chain
+                        JOIN credit_ledger up ON up.ledger_id = chain.related_ledger_id
+                       WHERE chain.source_type::text = 'adjustment'
+                         AND chain.source_metadata->>'reason' = 'send_failed'
+                         AND chain.depth < 32
+                    )
+                    SELECT chain.source_type, chain.source_order_id FROM chain ORDER BY chain.depth DESC LIMIT 1
+                  ) origin
+                  LEFT JOIN orders o ON o.order_id = origin.source_order_id
+                 WHERE txn.reference_type = 'letter'
+                   AND txn.type = 'deduction'
+                   AND txn.reference_id = l.letter_id
+                   AND (
+                         lot.status = 'revoked'
+                      OR (o.order_id IS NULL AND origin.source_type::text = ANY(${money}::varchar[]))
+                      OR (o.order_id IS NOT NULL AND NOT (o.status = ANY(${settled}::varchar[])))
+                       )
+              )`;
+}
+
 /** The published window for an unsent, never-paid draft. */
 const UNPAID_DRAFT_RETENTION_DAYS = 7;
 
@@ -318,21 +364,7 @@ const LETTER_DUE_PREDICATE = `        WHERE l.redacted_at IS NULL
                  WHERE o.letter_id = l.letter_id
                    AND NOT (o.status = ANY($4::varchar[]))
               )
-          AND NOT EXISTS (
-                SELECT 1
-                  FROM credit_transactions txn
-                  JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
-                  JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
-                  LEFT JOIN orders o ON o.order_id = lot.source_order_id
-                 WHERE txn.reference_type = 'letter'
-                   AND txn.type = 'deduction'
-                   AND txn.reference_id = l.letter_id
-                   AND (
-                         lot.status = 'revoked'
-                      OR (o.order_id IS NULL AND lot.source_type::text = ANY($5::varchar[]))
-                      OR (o.order_id IS NOT NULL AND NOT (o.status = ANY($4::varchar[])))
-                       )
-              )`;
+          AND ${fundingHold('$4', '$5')}`;
 
 const PAID_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
           AND COALESCE(d.consumed_at, d.created_at) < NOW() - make_interval(days => $1::int)
@@ -418,21 +450,7 @@ const CANCELLED_HELD_LETTER_DUE_PREDICATE = `        WHERE l.redacted_at IS NULL
                  WHERE o.letter_id = l.letter_id
                    AND NOT (o.status = ANY($3::varchar[]))
               )
-          AND NOT EXISTS (
-                SELECT 1
-                  FROM credit_transactions txn
-                  JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
-                  JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
-                  LEFT JOIN orders o ON o.order_id = lot.source_order_id
-                 WHERE txn.reference_type = 'letter'
-                   AND txn.type = 'deduction'
-                   AND txn.reference_id = l.letter_id
-                   AND (
-                         lot.status = 'revoked'
-                      OR (o.order_id IS NULL AND lot.source_type::text = ANY($4::varchar[]))
-                      OR (o.order_id IS NOT NULL AND NOT (o.status = ANY($3::varchar[])))
-                       )
-              )`;
+          AND ${fundingHold('$3', '$4')}`;
 
 export interface RetentionPreview {
   /** Rows past the live window, ignoring every hold. */
