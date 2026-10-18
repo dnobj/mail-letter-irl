@@ -821,3 +821,53 @@ describe('the content version the postcard card sends (#695)', () => {
     expect(card.byId('pay-send-button-text').textContent).toMatch(/^Pay & Send/);
   });
 });
+
+describe('a postcard no pack pays for that cannot be paid here either (PAGES-01 step 11)', () => {
+  // An 11x6 postcard previewed while its size was sold, the option turned off since: no Pay & Send, no page to pay on.
+  const NOT_SOLD = {
+    packPays: false,
+    payAndSend: { available: false, unavailableReason: "Pay & Send isn't available for this mail." },
+    letterPack: { available: false }
+  };
+
+  it("says the server's reason, not the pack rule, and offers nothing to press", async () => {
+    const card = mount();
+    await card.show(
+      output({ canSendNow: false, reasonCannotSend: 'Letter packs pay for 6x9 postcards; this one is paid with Pay & Send.', sendEligibility: NOT_SOLD }),
+      ON()
+    );
+    const say = (id: string) => card.byId(id).textContent;
+    expect(say('status-pill')).toBe("Pay & Send isn't available for this mail.");
+    expect(say('checkout-note')).toBe("This can't be paid for here now. Ask in the chat for a new preview.");
+    expect(card.byId('checkout-note').style.display).toBe('block');
+    expect(say('studio-cost')).toBe("Can't be paid now");
+    expect(say('cost')).toBe("Can't be paid now");
+    for (const id of ['send-button', 'pay-send-button', 'pay-page-button']) {
+      expect(card.byId(id).style.display, id).toBe('none');
+    }
+  });
+});
+
+describe('the cards and the server name the option that is not sold in the same words (#798 review round 2)', () => {
+  it("keeps the cards' advice tied to OPTION_NOT_SOLD_REASON", async () => {
+    const { OPTION_NOT_SOLD_REASON } = await import('../../../src/services/commerceService.js');
+    for (const name of ['LetterPreviewCard.html', 'PostcardPreviewCard.html']) {
+      const source = fs.readFileSync(path.join(WIDGET_DIR, name), 'utf-8');
+      expect(source, name).toContain(`return reason === ${JSON.stringify(OPTION_NOT_SOLD_REASON)}`);
+    }
+  });
+
+  it('gives no advice for a reason a new preview would not change', async () => {
+    const card = mount();
+    await card.show(
+      output({
+        canSendNow: false,
+        reasonCannotSend: 'Letter packs pay for 6x9 postcards; this one is paid with Pay & Send.',
+        sendEligibility: { packPays: false, payAndSend: { available: false, unavailableReason: 'Pay & Send is not enabled.' }, letterPack: { available: false } }
+      }),
+      ON()
+    );
+    expect(card.byId('status-pill').textContent).toBe('Pay & Send is not enabled.');
+    expect(card.byId('checkout-note').textContent).toBe("This can't be paid for here now.");
+  });
+});
