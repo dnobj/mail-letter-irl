@@ -365,11 +365,21 @@ describe('the bridge in an MCP Apps host', () => {
    * A page in a 684 px frame whose scroll bar, while there, narrows it to 669 px; the studio's page then lays out
    * shorter, as Claude's letter card did (563 px with the bar, 571 px without; STUDIO-01, DEV 2026-10-18).
    */
-  function barredPage(window: any, state: { bar: boolean }) {
+  function barredPage(window: any, state: { bar: boolean; scrollTop?: number }) {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 684 });
     const barShown = () => state.bar && window.document.documentElement.style.overflowY !== 'hidden';
     Object.defineProperty(window.Element.prototype, 'clientWidth', { configurable: true, get: () => (barShown() ? 669 : 684) });
-    window.Element.prototype.getBoundingClientRect = () => ({ height: barShown() ? 562.53 : 571.27 }) as DOMRect;
+    // A page scrolled down, as a home card capped by its host can be: laid out with the bar hidden, the page is
+    // shorter here, and the browser clamps the scroll position to it.
+    Object.defineProperty(window.Element.prototype, 'scrollTop', {
+      configurable: true,
+      get: () => state.scrollTop ?? 0,
+      set: (value: number) => { state.scrollTop = value; }
+    });
+    window.Element.prototype.getBoundingClientRect = () => {
+      if (!barShown() && state.bar) state.scrollTop = Math.min(state.scrollTop ?? 0, 8);
+      return { height: barShown() ? 562.53 : 571.27 } as DOMRect;
+    };
   }
 
   /** How many times the page's style changed since the last call. */
@@ -387,7 +397,7 @@ describe('the bridge in an MCP Apps host', () => {
 
   it('tells an MCP Apps host the height the page needs with no scroll bar, and puts the overflow back', async () => {
     let observed: (() => void) | undefined;
-    const state = { bar: true };
+    const state = { bar: true, scrollTop: 40 };
     const sent: Message[] = [];
     const parent = { postMessage: (message: Message) => sent.push(JSON.parse(JSON.stringify(message))) };
     const dom = new JSDOM(bridgePage('<div></div>'), {
@@ -412,6 +422,8 @@ describe('the bridge in an MCP Apps host', () => {
     expect(sizes()).toEqual([572]);
     expect(root.style.overflowY).toBe('');
     expect(changes()).toBe(2);
+    // Scrolled down, it stays where it was.
+    expect(state.scrollTop).toBe(40);
     // With no bar, the page is measured as it is, and its style is left alone.
     state.bar = false;
     observed!();

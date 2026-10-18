@@ -73,13 +73,18 @@
   // as it is before the host hears the page's height, gets a scroll bar, which narrows the page. The studio's page is
   // as wide as the card lets it be, so the narrower page is also shorter: measured then, Claude's letter card was
   // 563 px, which fit its frame with the bar but not without it (571 px), so the bar stayed with nothing to scroll
-  // (STUDIO-01, DEV 2026-10-18). The bar is hidden only while measuring, and only when there is one.
+  // (STUDIO-01, DEV 2026-10-18). The bar is hidden only while measuring, and only when there is one; that costs two
+  // layouts, and the page's scroll position, which the shorter page could clamp, is put back with the bar.
   function pageHeight() {
     var before = root.style.overflowY;
     var barred = before !== "hidden" && root.clientWidth < window.innerWidth;
-    if (barred) root.style.overflowY = "hidden";
+    if (!barred) return Math.ceil(root.getBoundingClientRect().height);
+    var scroller = document.scrollingElement || root;
+    var scrolled = scroller.scrollTop;
+    root.style.overflowY = "hidden";
     var height = Math.ceil(root.getBoundingClientRect().height);
-    if (barred) root.style.overflowY = before;
+    root.style.overflowY = before;
+    scroller.scrollTop = scrolled;
     return height;
   }
   // From the observer, a frame later: changing the observed page's width inside its own callback is a loop the
