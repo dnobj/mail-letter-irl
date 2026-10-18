@@ -2155,7 +2155,7 @@ For lengths, use short numbered lines, one to a line with no blank lines. Page 1
     - `set_letter_words` is gone, unless `LETTER_IRL_WORDS_EDITOR_ENABLED` is on;
     - a two-page letter paid before the change still prints on two pages.
 
-    - a two-page draft previewed but not paid shows no Pay & Send once its card hears the draft's terms again: with `LETTER_IRL_CERTIFIED_MAIL_ENABLED` on, as on development, reopen the chat or click the card (its status answer carries the terms; with certified mail off it carries none, and the card keeps the preview's price). Verify the pill reads "Pay & Send isn't available for this mail.", the cost "Can't be paid now", and the note "This can't be paid for here now. Ask in the chat for a new preview." (Before widgets v91 the card said the pack rule and "Paid when you send it", with nothing to press.)
+    - a two-page draft previewed but not paid shows no Pay & Send once its card hears the draft's terms again: with `LETTER_IRL_CERTIFIED_MAIL_ENABLED` and `LETTER_IRL_STATIONERY_ENABLED` on, as on development, reopen the chat, or switch away from it and back (its status answer carries the terms; with certified mail off it carries none, and the card keeps the preview's price). Verify the pill reads "Pay & Send isn't available for this mail.", the cost "Can't be paid now", and the note "This can't be paid for here now. Ask in the chat for a new preview." (Before widgets v91 the card said the pack rule and "Paid when you send it", with nothing to press.)
 
     Turn the flag back on.
 
