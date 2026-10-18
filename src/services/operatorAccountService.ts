@@ -20,11 +20,19 @@ type Client = { query: (text: string, values?: unknown[]) => Promise<{ rows: any
 
 export type LiftSendBlockOutcome = 'lifted' | 'not_blocked' | 'dispute_standing';
 
-/** Disputes that still justify a block: everything not in the non-loss set. */
+/**
+ * Disputes that still justify a block: everything not in the non-loss set,
+ * counted as unblockAccountSends counts them (by account, or by the payment
+ * intent of one of the account's orders).
+ */
 export async function countStandingDisputes(client: Client, userId: string): Promise<number> {
   const result = await client.query(
     `SELECT COUNT(*)::text AS count FROM stripe_disputes
-     WHERE user_id = $1 AND NOT (status = ANY($2::text[]))`,
+     WHERE (user_id = $1
+            OR payment_intent_id IN (
+                 SELECT o.stripe_payment_intent_id FROM orders o
+                  WHERE o.user_id = $1 AND o.stripe_payment_intent_id IS NOT NULL))
+       AND NOT (status = ANY($2::text[]))`,
     [userId, [...NON_LOSS_DISPUTE_STATUSES]]
   );
   const row = result.rows[0] as { count: string } | undefined;

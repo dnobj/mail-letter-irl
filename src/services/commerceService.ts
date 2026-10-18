@@ -3463,6 +3463,10 @@ async function compensateDisputedPacks(
  * let a benign outcome on one order unlock a block a different, still-standing
  * chargeback had set.
  *
+ * A dispute counts as the account's by its account, or by its payment intent
+ * being one of the account's orders' (one whose next event is still to tie it
+ * to the account), as readErasureBlockers counts them.
+ *
  * "Would justify a block" means exactly the statuses that revoke - the inverse
  * of NON_LOSS_DISPUTE_STATUSES. Counting inquiries here was a dead end: an open
  * inquiry never blocks anything, but it would veto the unblock, and when it
@@ -3482,7 +3486,10 @@ async function unblockAccountSends(
        AND sends_blocked_reason = 'payment_disputed'
        AND NOT EXISTS (
          SELECT 1 FROM stripe_disputes other
-          WHERE other.user_id = $1
+          WHERE (other.user_id = $1
+                 OR other.payment_intent_id IN (
+                      SELECT o.stripe_payment_intent_id FROM orders o
+                       WHERE o.user_id = $1 AND o.stripe_payment_intent_id IS NOT NULL))
             AND other.dispute_id <> $2
             AND NOT (other.status = ANY($3::text[]))
        )`,
@@ -3602,9 +3609,9 @@ async function blockAccountSends(
  * order's lock serialises them and no dispute lock is taken: one may be held
  * by an event waiting for the order. An open dispute is left to its next
  * event, which runs the whole rule, the order's lots and mail included: its
- * row keeps no account so that event acts, and it counts toward the account's
- * standing disputes from then. A closed one has no event to come and is taken
- * over.
+ * row keeps no account so that event acts; the account's standing disputes
+ * count it by that intent (unblockAccountSends, countStandingDisputes). A
+ * closed one has no event to come and is taken over.
  *
  * A dispute's payment intent is read once, unlocked; it changes only from none
  * to one, which Stripe does not do for a card payment's dispute.
