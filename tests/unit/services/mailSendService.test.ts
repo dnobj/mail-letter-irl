@@ -664,6 +664,14 @@ describe('createMailOrderFromDraft', () => {
     expect(createOutboxJob).not.toHaveBeenCalled();
   });
 
+  it('counts every live Pay & Send order as blocking, a disputed or held one too (#679)', async () => {
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    const call = client.query.mock.calls.find(([sql]) => String(sql).includes('SELECT order_id FROM orders'));
+    expect(call, 'the send asks for a live order').toBeDefined();
+    expect(String(call![0])).toContain('AND status = ANY($2::varchar[])');
+    expect(call![1]).toEqual(['draft-1', ['checkout_pending', 'paid', 'fulfillment_pending', 'refund_pending', 'disputed', 'held']]);
+  });
+
   /**
    * The beta cohort gate (#179), and the one place it must NOT apply.
    *
