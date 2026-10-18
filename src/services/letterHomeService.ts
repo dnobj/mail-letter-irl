@@ -1,5 +1,5 @@
 import { query } from "../db/index.js";
-import { certifiedFactsOf } from "../config/certifiedMail.js";
+import { carrierNumberLookupEnded, certifiedFactsOf } from "../config/certifiedMail.js";
 import { sendConfirmationUrl, websiteBaseUrl } from "../config/sendConfirmation.js";
 import { certifiedOrderNote } from "../tools/certifiedOrder.js";
 import type { LetterStatus } from "../contracts/types.js";
@@ -23,6 +23,8 @@ interface HomeRow {
   carrier_tracking_number: string | null;
   is_gift_send: boolean;
   funding_type: string | null;
+  /** When the printer accepted it: the sync looks for a certified number for a month after (#625). */
+  sent_at: Date | null;
 }
 
 const homeStatus = (status: string, scheduled: boolean): LetterStatus => {
@@ -59,7 +61,8 @@ export async function readLetterHome(userId: string) {
        SELECT 'draft' AS kind, draft_id::text AS id,
               recipient->>'name' AS name, recipient->>'city' AS city, recipient->>'state' AS state,
               status::text, created_at, expires_at, arrive_by, mail_on, mail_type,
-              mail_service, NULL::text AS carrier_tracking_number, is_gift_send, NULL::text AS funding_type
+              mail_service, NULL::text AS carrier_tracking_number, is_gift_send, NULL::text AS funding_type,
+              NULL::timestamptz AS sent_at
          FROM letter_drafts
         WHERE user_id = $1 AND status = 'pending' AND expires_at > NOW() AND redacted_at IS NULL
         ORDER BY created_at DESC, draft_id DESC LIMIT $2
@@ -69,7 +72,8 @@ export async function readLetterHome(userId: string) {
        SELECT 'order' AS kind, letter_id::text AS id,
               recipient->>'name' AS name, recipient->>'city' AS city, recipient->>'state' AS state,
               status::text, created_at, NULL::timestamptz AS expires_at, arrive_by, mail_on, mail_type,
-              mail_service, carrier_tracking_number, funding_type = 'gift_letter' AS is_gift_send, funding_type::text
+              mail_service, carrier_tracking_number, funding_type = 'gift_letter' AS is_gift_send, funding_type::text,
+              sent_at
          FROM letters
         WHERE user_id = $1 AND redacted_at IS NULL
         ORDER BY created_at DESC, letter_id DESC LIMIT $2
@@ -127,7 +131,11 @@ export async function readLetterHome(userId: string) {
         ...(certified
           ? {
               ...certified,
-              certifiedNote: certifiedOrderNote(certified, status),
+              certifiedNote: certifiedOrderNote(
+                certified,
+                status,
+                !certified.carrierTrackingNumber && carrierNumberLookupEnded(row.sent_at),
+              ),
             }
           : {}),
       };

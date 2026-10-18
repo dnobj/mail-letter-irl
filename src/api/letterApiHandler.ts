@@ -18,7 +18,7 @@ import { cancelScheduledMail, type ScheduledMailRefusal } from '../services/sche
 import type { LetterStatus } from '../services/types.js';
 import { cancelledMessage } from '../tools/cancelScheduledMail.js';
 import { heldSendFields, waitsInOutbox } from '../tools/heldSend.js';
-import { certifiedFactsOf } from '../config/certifiedMail.js';
+import { carrierNumberLookupEnded, certifiedFactsOf } from '../config/certifiedMail.js';
 import { mailServiceOf } from '../config/products.js';
 import { sendInternalError } from './internalError.js';
 
@@ -366,6 +366,8 @@ function formatLetterResponse(row: LetterRow): any {
     mailService: certified?.mailService ?? (mailServiceOf(row.mail_service) === undefined ? 'standard' : null),
     carrierTrackingNumber: certified?.carrierTrackingNumber ?? null,
     carrierTrackingUrl: certified?.carrierTrackingUrl ?? null,
+    // Certified mail with no number a month after the send: the sync has stopped looking, so none is coming (#625).
+    carrierNumberLookupEnded: Boolean(certified && !certified.carrierTrackingNumber && carrierNumberLookupEnded(row.sent_at)),
 
     // Arrival dates, when it was sent with them (#535)
     arriveBy: held?.schedule.arriveBy ?? null,

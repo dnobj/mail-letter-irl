@@ -385,7 +385,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t40</p>
+      <p class="rev">letter t42</p>
     </div>
 
     <!-- The studio card (#580): widgets/shared/studio.js lays the card out
@@ -736,6 +736,28 @@
       // them who pays. Laid over the preview's answer, so the card draws one
       // price everywhere.
       function withTerms(output) {
+        return withSentTravel(withLatestTerms(output));
+      }
+
+      // How a sent letter travelled, as the server said once it was sent (#625): final, so over the preview's and any
+      // terms the card heard before the send. A price heard for another service says nothing true of this one, so the
+      // card names none (pricedOtherwise), rather than a pack beside certified mail or Pay & Send beside First-Class.
+      const pricedOtherwise = new WeakSet();
+      function withSentTravel(state) {
+        const settled = settledDraft();
+        if (!state || !settled?.travel || settled.draftId !== state.draftId) return state;
+        const serviceDiffers = (typeof state.mailService === "string" ? state.mailService : "") !== settled.travel.mailService;
+        const sent = {
+          ...state,
+          mailService: settled.travel.mailService,
+          deliveryClass: settled.travel.deliveryClass,
+          deliveryDisclaimer: settled.travel.deliveryDisclaimer,
+        };
+        if (serviceDiffers) pricedOtherwise.add(sent);
+        return sent;
+      }
+
+      function withLatestTerms(output) {
         const terms = output && typeof output.draftId === "string" ? styleRow.terms(output.draftId) : null;
         if (!terms) return output;
         const latestTerms = { ...output, canSendNow: terms.canSendNow, sendEligibility: terms.sendEligibility };
@@ -863,7 +885,9 @@
         const sendEligibility = state.sendEligibility;
         const payAndSend = sendEligibility?.payAndSend;
         const letters = state.lettersRequired ?? 1;
-        document.getElementById("studio-cost").textContent = state.giftCard
+        document.getElementById("studio-cost").textContent = pricedOtherwise.has(state)
+          ? ""
+          : state.giftCard
           ? "Free: a gift letter"
           : paid
             ? payAndSend?.amountCents
@@ -1504,6 +1528,15 @@
               // Where the order stands (#535), from its letter, not the draft.
               orderStatus: ["scheduled", "cancelled", "sent"].includes(answer.orderStatus) ? answer.orderStatus : null,
               cancellable: answer.cancellable === true,
+              // How it travelled (#625), when the answer says: a sent letter's service is final, and is the letter's.
+              travel:
+                typeof answer.deliveryClass === "string" && answer.deliveryClass
+                  ? {
+                      mailService: typeof answer.mailService === "string" ? answer.mailService : "",
+                      deliveryClass: answer.deliveryClass,
+                      deliveryDisclaimer: typeof answer.deliveryDisclaimer === "string" ? answer.deliveryDisclaimer : "",
+                    }
+                  : null,
             };
             render();
           },
@@ -2409,7 +2442,10 @@
         // Mail no pack pays for (#579), such as a longer letter (#586), says its price.
         const letters = lettersRequired ?? 1;
         const costPayAndSend = sendEligibility?.payAndSend;
-        document.getElementById("cost").textContent = isGiftSend
+        // A sent letter that travelled otherwise than its price was heard for (#625): no price, as on the studio.
+        document.getElementById("cost").textContent = pricedOtherwise.has(state)
+          ? "—"
+          : isGiftSend
           ? "Free (gift letter)"
           : sendEligibility?.packPays === false
             ? unpayableReason(state)

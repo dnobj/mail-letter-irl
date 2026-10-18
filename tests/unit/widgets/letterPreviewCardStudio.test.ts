@@ -2339,6 +2339,67 @@ describe('how the letter travels, as the latest answer with its terms says (#625
     await restyled(card, { canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.', sendEligibility: ON_PAGE });
     agree(card, 'certified', 'older server restyle');
   });
+
+  // A sent draft's answer says how the letter travelled (#625 follow-up): final, so over the preview and any terms before.
+  const sent = (extra: Json) => ({
+    result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'sent', orderId: 'order-1', orderStatus: 'sent', ...extra } }
+  });
+
+  it('names how a sent letter travelled, over a preview the chat changed before the send', async () => {
+    const card = mount();
+    await card.show(ordinaryPreview(), ON);
+    expect(text(card, 'studio-cost')).toBe('1 letter');
+    await card.answerTo(card.requests('tools/call', ASK)[0], sent({ mailService: 'certified', ...CERTIFIED_WORDS }));
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+    expect(text(card, 'delivery')).toContain('signed for at delivery');
+    expect(text(card, 'studio-summary')).toContain('certified mail');
+    // No pack pays for certified mail: the pack price heard for the ordinary preview is not shown beside it.
+    expect(text(card, 'studio-cost')).toBe('');
+  });
+
+  it('names a sent letter ordinary mail over a restyle that said it was certified', async () => {
+    const card = mount();
+    await card.show(ordinaryPreview(), ON);
+    await restyled(card, CERTIFIED_TERMS);
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+    await card.show(ordinaryPreview(), ON);
+    const asks = card.requests('tools/call', ASK);
+    await card.answerTo(asks[asks.length - 1], sent(FIRST_CLASS));
+    expect(text(card, 'delivery')).toContain('USPS First-Class Mail');
+    expect(text(card, 'delivery')).not.toContain('signed for');
+    expect(text(card, 'studio-summary')).not.toContain('certified');
+    // The certified price heard before the send is not shown beside First-Class.
+    expect(text(card, 'studio-cost')).toBe('');
+  });
+
+  it('names no price on the card without the studio either, for a sent letter that travelled otherwise', async () => {
+    const card = mount();
+    await card.show(ordinaryPreview(), { previewHtml: PAGE });
+    expect(text(card, 'cost')).toBe('1 Letter');
+    await card.answerTo(card.requests('tools/call', ASK)[0], sent({ mailService: 'certified', ...CERTIFIED_WORDS }));
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+    expect(text(card, 'cost')).toBe('—');
+  });
+
+  it('keeps the price when a sent letter travelled as the card last heard', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], sent({ mailService: 'certified', ...CERTIFIED_WORDS }));
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+    expect(text(card, 'studio-cost')).not.toBe('');
+    const ordinary = mount();
+    await ordinary.show(ordinaryPreview(), ON);
+    await ordinary.answerTo(ordinary.requests('tools/call', ASK)[0], sent(FIRST_CLASS));
+    expect(text(ordinary, 'studio-cost')).toBe('1 letter');
+  });
+
+  it("keeps the preview's words when a sent answer does not say how the letter travelled", async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], sent({}));
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+    expect(text(card, 'studio-summary')).toContain('certified mail');
+  });
 });
 
 describe('the Mail choice on the Delivery tab (#648)', () => {

@@ -328,8 +328,8 @@ connector refresh) without the stage B rollback, which no longer applies.
 One per deploy, each after its test on DEV and once its owed code is in production, then a
 connector refresh:
 
-1. The card features, with no floor: the studio card, the envelope reveal, the
-   words editor, card upload.
+1. The card features, with no floor: the studio card, the envelope reveal (on the
+   confirmation page too, once website #77 is promoted), the words editor, card upload.
 2. Postcard layouts and stationery (each prints a newer renderer version), then collages.
 3. Saved designs and signatures, once their privacy rows are published on both privacy pages.
 4. The home, after the owner's call on what it shares (#651).

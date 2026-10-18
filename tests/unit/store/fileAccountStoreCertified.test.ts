@@ -30,7 +30,7 @@ function letter(id: string, overrides: Record<string, unknown> = {}) {
     status: 'in_transit',
     preview_html: null,
     created_at: new Date('2026-09-23T12:00:00Z'),
-    sent_at: new Date('2026-09-23T12:05:00Z'),
+    sent_at: new Date(Date.now() - 24 * 60 * 60 * 1000),
     arrive_by: null,
     mail_on: null,
     funding_type: 'jit_order',
@@ -93,5 +93,28 @@ describe('certified mail in the orders a tool call loads (#625)', () => {
       schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' },
       certified: { mailService: 'certified' }
     });
+  });
+});
+
+describe('a certified letter the sync has stopped looking for (#625 follow-up)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getBalance.mockResolvedValue({ credits: 4 });
+    mocks.getGenerationQuota.mockResolvedValue({ used: 0, allowance: 3, remaining: 3 });
+  });
+  const ago = (days: number) => new Date(Date.now() - days * 86400000);
+
+  it('is marked once it was sent more than a month ago with no number, and not otherwise', async () => {
+    const [ended, recent, numbered, ordinary, unsent] = await ordersOf([
+      letter('ended', { mail_service: 'certified', sent_at: ago(31) }),
+      letter('recent', { mail_service: 'certified', sent_at: ago(2) }),
+      letter('numbered', { mail_service: 'certified', sent_at: ago(31), carrier_tracking_number: '9407100000000000000000' }),
+      letter('ordinary', { sent_at: ago(31) }),
+      letter('unsent', { mail_service: 'certified_return_receipt', sent_at: null, status: 'pending' })
+    ]);
+    expect(ended.carrierNumberLookupEnded).toBe(true);
+    for (const order of [recent, numbered, ordinary, unsent]) {
+      expect(order, order.orderId).not.toHaveProperty('carrierNumberLookupEnded');
+    }
   });
 });
