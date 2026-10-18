@@ -89,6 +89,25 @@ describe('the words about a certified order (#625)', () => {
     expect(certifiedOrderNote({ mailService: 'certified', carrierTrackingUrl: URL }, 'in_transit')).toBe(notHere);
   });
 
+  it('says no number is coming once the sync has stopped looking, and asks for no check or receipt by it (#625 follow-up)', () => {
+    const ENDED = 'No USPS tracking number came from the printer for it, and Letter IRL stopped looking for one a month after the printer accepted it.';
+    for (const status of ['accepted', 'printing', 'in_transit', 'delivered'] as LetterStatus[]) {
+      expect(certifiedOrderNote(CERTIFIED, status, true), status).toBe(`Sent as USPS Certified Mail. ${ENDED}`);
+      const receipt = certifiedOrderNote({ mailService: 'certified_return_receipt' }, status, true);
+      expect(receipt, status).toBe(
+        `Sent as USPS Certified Mail with an electronic return receipt. ${ENDED} The electronic return receipt is the record USPS keeps of who signed for the letter. Letter IRL does not send it to you.`
+      );
+      expect(receipt, status).not.toMatch(/check again|with the tracking number/);
+    }
+    // A stored number is the number, whenever it came.
+    expect(certifiedOrderNote(WITH_NUMBER, 'in_transit', true)).toBe(certifiedOrderNote(WITH_NUMBER, 'in_transit'));
+    expect(certifiedOrderNote(RECEIPT_WITH_NUMBER, 'delivered', true)).toBe(certifiedOrderNote(RECEIPT_WITH_NUMBER, 'delivered'));
+    // Mail that did not go out, or has not reached the printer, is worded as before.
+    for (const status of ['failed', 'cancelled', 'returned', 'pending', 'scheduled'] as LetterStatus[]) {
+      expect(certifiedOrderNote(CERTIFIED, status, true), status).toBe(certifiedOrderNote(CERTIFIED, status));
+    }
+  });
+
   it('does not tell a letter that did not go out to check again later, or to ask USPS for a receipt', () => {
     expect(certifiedOrderNote(CERTIFIED, 'failed')).toBe('This letter (USPS Certified Mail) did not go out. It has no USPS tracking number.');
     expect(certifiedOrderNote(CERTIFIED, 'cancelled')).toBe('This letter (USPS Certified Mail) was cancelled and not mailed. It has no USPS tracking number.');
@@ -160,6 +179,14 @@ describe('get_order_status for certified mail (#625)', () => {
       trackingSupport: 'carrier_tracking',
       certifiedNote: certifiedOrderNote(RECEIPT_WITH_NUMBER, 'in_transit')
     });
+  });
+
+  it('says no number is coming for an order the sync has stopped looking for (#625 follow-up)', async () => {
+    const ended = { ...order('c', CERTIFIED), carrierNumberLookupEnded: true } as OrderRecord;
+    const result = await getOrderStatusTool.handler({ orderId: 'c' }, contextWith([ended]));
+    expect(result.certifiedNote).toBe(certifiedOrderNote(CERTIFIED, 'in_transit', true));
+    expect(result.certifiedNote).not.toBe(certifiedOrderNote(CERTIFIED, 'in_transit'));
+    expect(getOrderStatusOutputZ.strict().safeParse(result).success).toBe(true);
   });
 
   it('words the note by where the order stands, not as though every certified order went out', async () => {

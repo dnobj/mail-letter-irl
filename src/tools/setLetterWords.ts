@@ -222,12 +222,14 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   // either changed meanwhile.
   let contentVersion: string | undefined;
   let contentVersionBefore: string | undefined;
+  // How the written row travels, read with its version under the lock (#625 follow-up).
+  let writtenService: string | null | undefined;
   const refusal = await setDraftWords(
     draftId,
     userId,
     // Drawn with the draft's signature (#608), which set_letter_signature changes in place.
     { bodyText, signOff, previewHtml, pages, drawnIn: draft.stationery, replacing, drawnWith: draft.signature_image },
-    context.now(), (version, before) => { contentVersion = version; contentVersionBefore = before; }
+    context.now(), (version, before, written) => { contentVersion = version; contentVersionBefore = before; writtenService = written.mailService; }
   );
   if (refusal) throw refused(...WORDS_REFUSALS[refusal], context);
 
@@ -245,10 +247,12 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them.
-  const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
+  // How the written letter travels, not as read before the lock (#625 follow-up); as read when the version was not.
+  const service = writtenService === undefined ? draft.mail_service : writtenService;
+  const payment = letterPayment(letterOption(layout, service), Number(draft.required_credits ?? 2), gift, context, draftId);
   // Never for certified mail (#625): no gift letter pays for it, and a new preview that used one would drop the service.
   const note =
-    pages === 1 && pagesBefore > 1 && !payment.canSendNow && !gift && mailServiceOf(draft.mail_service) === undefined
+    pages === 1 && pagesBefore > 1 && !payment.canSendNow && !gift && mailServiceOf(service) === undefined
       ? await giftLetterNote(context)
       : '';
   return {
@@ -259,7 +263,7 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
     ...payment,
     pageFit: editorPageFit(layout, stationery),
     wordsVersion: wordsVersionOf(bodyText, signOff),
-    message: messageFor(pages, pagesBefore, note, already, draft.mail_service)
+    message: messageFor(pages, pagesBefore, note, already, service)
   };
 }
 

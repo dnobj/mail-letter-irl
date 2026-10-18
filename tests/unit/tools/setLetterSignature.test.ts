@@ -167,7 +167,7 @@ describe('set_letter_signature', () => {
   it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft());
     vi.mocked(setDraftSignature).mockImplementation(async (...args: unknown[]) => {
-      (args.at(-1) as (version: string, before: string) => void)('0123456789abcdef', 'fedcba9876543210');
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: null });
       return null;
     });
     expect(await run({ signature: true })).toMatchObject({ contentVersion: '0123456789abcdef', contentVersionBefore: 'fedcba9876543210' });
@@ -292,6 +292,22 @@ describe('set_letter_signature', () => {
     expect(output.sendEligibility).toMatchObject({ packPays: false });
     expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
     expect(output.message).not.toContain('letter pack');
+  });
+
+  it('prices by how the letter travels once it is signed, not as read before (#625 follow-up)', async () => {
+    vi.stubEnv('LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(24) }), mail_service: 'standard' });
+    vi.mocked(setDraftSignature).mockImplementationOnce(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: 'certified_return_receipt' });
+      return null;
+    });
+    const output = await run({ signature: true });
+    expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.' });
+    expect(output).toMatchObject({ mailService: 'certified_return_receipt', deliveryClass: 'USPS Certified Mail with an electronic return receipt' });
+    expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
+    // Priced by the row its version describes (#625 follow-up).
+    expect(output).toMatchObject({ contentVersion: '0123456789abcdef' });
   });
 
   it('refuses a draft whose page lost its picture, rather than embed the full image', async () => {

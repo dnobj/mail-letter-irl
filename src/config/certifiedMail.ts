@@ -55,6 +55,20 @@ export function uspsTrackingUrl(carrierNumber: string): string {
 }
 
 /**
+ * How long after the send the provider status sync looks for a letter's carrier number (statusSyncWorker): a
+ * certified letter with none by then will not get one from us, and its readers stop saying it is on the way.
+ */
+export const CARRIER_NUMBER_SYNC_DAYS = 30;
+
+/**
+ * Whether the sync has stopped looking for a sent letter's carrier number: the send (the provider's acceptance,
+ * sent_at, as the sync counts it) is more than CARRIER_NUMBER_SYNC_DAYS ago. False for a letter not sent yet.
+ */
+export function carrierNumberLookupEnded(sentAt: Date | null | undefined, now: Date = new Date()): boolean {
+  return sentAt instanceof Date && now.getTime() - sentAt.getTime() > CARRIER_NUMBER_SYNC_DAYS * 24 * 60 * 60 * 1000;
+}
+
+/**
  * What a sent letter's row says about certified mail (#625), for the readers
  * that show an order: the service, and the carrier's number and its link once
  * there is one (the status sync stores it some time after the printer accepts
