@@ -337,6 +337,28 @@ describe.each(CARDS)('%s: an open checkout whose mail date has passed (#726)', c
 });
 
 describe.each(CARDS)('%s: Pay & Send on a draft whose order is already paid (#679)', card => {
+  it('follows an order being refunded or on hold, with the status the server gives it, and takes no second press', async () => {
+    for (const [status, purchaseStatus, pill] of [
+      ['refund_pending', 'refund_pending', 'The order could not be fulfilled and a refund is being processed.'],
+      ['disputed', 'on_hold', 'This order is on hold. Please contact support.']
+    ]) {
+      const harness = mount(card, {
+        mailCheckout: { orderId: 'ord_taken_0001', status, reused: true, amountCents: 599, currency: 'usd', message: 'This order is already paid.' }
+      });
+      harness.setStatus({ purchaseStatus, message: pill });
+      await checkout(harness);
+      await flush();
+      expect(harness.text('pay-send-button-text'), status).toBe('Already paid');
+      expect(harness.text('status-pill'), status).toBe(pill);
+      const button = harness.document.getElementById('pay-send-button') as HTMLButtonElement;
+      expect(button.disabled, status).toBe(true);
+      const checkouts = harness.calls.filter(call => call.name === 'create_mail_checkout').length;
+      await checkout(harness);
+      await flush();
+      expect(harness.calls.filter(call => call.name === 'create_mail_checkout').length, status).toBe(checkouts);
+    }
+  });
+
   it('follows the paid order instead of saying the checkout failed, and opens nothing', async () => {
     for (const status of ['paid', 'fulfillment_pending', 'refund_pending', 'disputed']) {
       const harness = mount(card, {

@@ -1396,7 +1396,9 @@
         document.getElementById("empty-hint").style.display = "none";
         document.getElementById("empty-message").textContent = kept.sent
           ? "This postcard was sent to the printer from this card. Ask for its status in the chat."
-          : "A checkout for this postcard was started from this card.";
+          : kept.alreadyPaid
+            ? "This card found a Pay & Send payment already taken for this postcard."
+            : "A checkout for this postcard was started from this card.";
         document.getElementById("empty-state").style.display = "block";
         const statusPill = document.getElementById("status-pill");
         const keptSchedule = arrives.scheduleOf(kept.schedule);
@@ -3012,9 +3014,10 @@
             throw new Error(resultText(raw) || "Checkout URL was not returned");
           }
           const result = toolData(raw);
-          // The draft's Pay & Send order took a payment that did not send it (#679): a refund under way, or a dispute
-          // (before the payment's completion, or on an order being refunded), which leaves the draft pending. The server answers with that
-          // order, not a checkout. Nothing more is charged; the card follows the order, as after a checkout it opened.
+          // The draft's Pay & Send order took a payment that did not send it (#679): a refund under way, or a
+          // dispute (before the payment's completion, or on an order being refunded), which leaves the draft
+          // pending. The server answers with that order, not a checkout. Nothing more is charged; the card follows
+          // the order, as after a checkout it opened, and keeps that it found it paid, not that it opened one.
           if (!result.checkoutUrl && typeof result.orderId === "string" && result.orderId && typeof result.status === "string" && result.status !== "checkout_pending") {
             trackedOrderId = result.orderId;
             idLabel.textContent = "Purchase";
@@ -3023,7 +3026,7 @@
             button.disabled = true;
             buttonText.textContent = "Already paid";
             document.getElementById("checkout-note").style.display = "none";
-            keep({ draftId: currentDraftId, checkout: true, orderId: result.orderId });
+            keep({ draftId: currentDraftId, checkout: true, orderId: result.orderId, alreadyPaid: true });
             startStatusPolling("Checking the purchase...");
             void refreshPurchaseStatus();
             return;
