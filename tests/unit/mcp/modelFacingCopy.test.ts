@@ -168,7 +168,9 @@ describe('quote summaries', () => {
     );
 
     it.each(['chatgpt', 'claude'] as const)('says nothing in %s without the words editor (no wordsVersion)', app => {
-      const summary = summarizeToolResult('quote_and_preview_letter', letterQuote, clientProfileNamed(app));
+      // With stationery, so only the missing wordsVersion keeps the sentence out.
+      const { wordsVersion: _none, ...withoutEditor } = edited;
+      const summary = summarizeToolResult('quote_and_preview_letter', withoutEditor, clientProfileNamed(app));
       expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
     });
 
