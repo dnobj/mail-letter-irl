@@ -67,11 +67,8 @@
    *   also says with hold(), nor while a send refused for a change since asks
    *   for the draft as it is now), onSet()
    *   (a style is being set on the draft), onChange({ draftId, stationery }),
-   *   onEdited(draftId, what, wordsVersion) (the draft's words, stationery,
-   *   signature or mail service were changed here: the model never sees the
-   *   card's calls; for the words, the version they were set at),
-   *   onWordsSeen(draftId, wordsVersion) (a catch-up brought other words than
-   *   the boxes were filled from, at this version),
+   *   onEdited(draftId, what) (the draft's words, stationery, signature or
+   *   mail service were changed here: the model never sees the card's calls),
    *   onBusy(), and wordsElement(id), which finds the Words tab's editor
    *   (#586) once the studio has drawn it; and signatureRow and
    *   signatureSwitch, the Signature switch (#608), which may be absent
@@ -181,9 +178,9 @@
       }
     }
     // The draft was changed here ("words", "stationery", "signature" or "mail service"), page or no page: the card tells
-    // the model, which never sees the card's own calls. For the words, the version they now have, when the answer says.
-    function edited(draftId, what, wordsVersion) {
-      if (typeof options.onEdited === "function") options.onEdited(draftId, what, wordsVersion);
+    // the model, which never sees the card's own calls.
+    function edited(draftId, what) {
+      if (typeof options.onEdited === "function") options.onEdited(draftId, what);
     }
     // Terms taken from any answer: when they say how the letter travels, the Mail choice follows them.
     function adoptTerms(said) {
@@ -686,19 +683,8 @@
       if (base && sameWords(base, current)) return;
       // Box by box: one not typed in (it holds the words it was filled from) takes the draft's words now; one typed in
       // keeps what was typed, and the card says so, unless it is what the draft has now.
-      // Other words than the boxes were filled from, whether or not what was typed is kept. The card is told their
-      // version: other than the one its own change gave, the chat changed them since, and so has seen them. A card
-      // drawn again from its preview (ChatGPT remounted it) fills the boxes from the preview's words, and the draft's
-      // are then its own change's, at that change's version (#795 review round 2).
+      // Other words than the boxes were filled from, not just their version.
       var other = Boolean(base) && (base.bodyText !== current.bodyText || base.signOff !== current.signOff);
-      if (other && typeof options.onWordsSeen === "function") {
-        var seen = state.draftId;
-        var version = current.version;
-        // Once this drawing is over: the card keeps it, and shares it.
-        Promise.resolve().then(function () {
-          options.onWordsSeen(seen, version);
-        });
-      }
       var bodyKept = Boolean(base) && body.value !== base.bodyText && body.value !== current.bodyText;
       var signOffKept = Boolean(base) && signOff.value !== base.signOff && signOff.value !== current.signOff;
       if (!bodyKept) body.value = current.bodyText;
@@ -827,7 +813,7 @@
             throw new Error("The words may have changed. Make the preview again to see them.");
           }
           state.restyled = true;
-          edited(draftId, "words", typeof data.wordsVersion === "string" ? data.wordsVersion : undefined);
+          edited(draftId, "words");
           words.set = {
             bodyText: bodyText,
             signOff: signOff,

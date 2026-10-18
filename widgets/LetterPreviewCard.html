@@ -659,11 +659,8 @@
           draftActedOn = true;
           draftChanges += 1;
         },
-        onEdited(draftId, what, wordsVersion) {
-          cardEdited(draftId, what, wordsVersion);
-        },
-        onWordsSeen(draftId, wordsVersion) {
-          cardEditSeen(draftId, wordsVersion);
+        onEdited(draftId, what) {
+          cardEdited(draftId, what);
         },
         onChange() {
           render();
@@ -1144,11 +1141,12 @@
       //
       // The model sees none of the card's own calls. After the person changed the letter's words here, ChatGPT answered
       // from the preview's words that the letter had no "roses" in it, and called nothing (DEV, 2026-10-17). So each
-      // change the card makes is kept as changedOnCard, { draftId, what, at, times, wordsVersion, note }: what was
-      // changed (never the words themselves), when (the latest, and each kind's), the version the card's change of the
-      // words gave them, and in note a sentence for the model, which names how it gets the words as they are now.
-      // It goes in widgetState, which ChatGPT may show the model, and in the draft this card shares (shareSelection).
-      // A reopened card keeps it, as the draft was still changed.
+      // change the card makes is kept as changedOnCard, { draftId, what, at, note }: what was changed (never the words
+      // themselves), when (the latest change), and in note a sentence for the model, which names how it gets the words
+      // as they are now. It goes in widgetState, which ChatGPT may show the model, and in the draft this card shares
+      // (shareSelection). It is kept for the draft's life, a reopened card's too: once the chat has changed the words
+      // since, the model's read of them changes nothing and costs one call. Taking the words out of it then was tried
+      // and taken out again, as each of three review rounds found a way it went wrong (#795).
       const CARD_EDITS = ["words", "stationery", "signature", "mail service", "arrival date"];
       function cardEditNote(draftId, what, at) {
         const named = what.length > 1 ? what.slice(0, -1).join(", ") + " and " + what[what.length - 1] : what[0];
@@ -1165,37 +1163,13 @@
         }
         return note;
       }
-      function cardEdited(draftId, kind, wordsVersion) {
+      function cardEdited(draftId, kind) {
         if (typeof draftId !== "string" || !draftId || !CARD_EDITS.includes(kind)) return;
-        const kept = saved?.changedOnCard?.draftId === draftId ? saved.changedOnCard : null;
-        const before = Array.isArray(kept?.what) ? kept.what : [];
+        const before = saved?.changedOnCard?.draftId === draftId && Array.isArray(saved.changedOnCard.what) ? saved.changedOnCard.what : [];
         // In one order whatever the order of the changes, so the note reads the same for the same changes.
         const what = CARD_EDITS.filter((edit) => edit === kind || before.includes(edit));
         const at = new Date().toISOString();
-        const times = { ...(kept?.times && typeof kept.times === "object" ? kept.times : {}), [kind]: at };
-        const record = { draftId, what, at, times, note: cardEditNote(draftId, what, at) };
-        // The words' version after this change, or (another kind) the one kept: none known, none kept.
-        const version = kind === "words" ? wordsVersion : kept?.wordsVersion;
-        if (typeof version === "string" && version) record.wordsVersion = version;
-        keep({ changedOnCard: record });
-      }
-      // A catch-up brought the words at another version than the card's change gave them: the chat changed them since,
-      // so its model has seen them. The words are no longer said, the rest is said at its own latest time, and a note
-      // with nothing left in it goes (#795 review rounds 1 and 2). Without the card's version (its change's answer
-      // named none) the note stays: the words may still be the card's.
-      function cardEditSeen(draftId, version) {
-        const edit = saved?.changedOnCard;
-        if (!edit || edit.draftId !== draftId || !Array.isArray(edit.what) || !edit.what.includes("words")) return;
-        if (typeof edit.wordsVersion !== "string" || typeof version !== "string" || version === edit.wordsVersion) return;
-        const what = CARD_EDITS.filter((other) => other !== "words" && edit.what.includes(other));
-        if (!what.length) {
-          keep({ changedOnCard: null });
-          return;
-        }
-        const times = edit.times && typeof edit.times === "object" ? edit.times : {};
-        const known = what.map((kind) => times[kind]).filter((time) => typeof time === "string").sort();
-        const at = known.length ? known[known.length - 1] : edit.at;
-        keep({ changedOnCard: { draftId, what, at, times, note: cardEditNote(draftId, what, at) } });
+        keep({ changedOnCard: { draftId, what, at, note: cardEditNote(draftId, what, at) } });
       }
       // The note for this draft, or none: written afresh from what was changed and when, so a reopened card's kept
       // change is said in this card's words.
