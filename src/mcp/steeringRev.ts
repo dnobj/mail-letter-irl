@@ -205,7 +205,9 @@
 // r51: the hints and listing the launch submission names: set_postcard_style is open world (on a new size it fetches the
 // picture again from its link), get_address_request's _meta says idempotentHint false as its annotations do, and
 // upload_photo_chunk is listed only where the card sends the photo itself, never in ChatGPT.
-// r52: set_letter_words' description says the person can change the words on the letter card, unseen by the model, so it
-// is called before saying a word is or is not in the letter (STUDIO-01, DEV 2026-10-17: ChatGPT answered from the
-// preview's words and called nothing). The letter card also tells the model of its own changes in what it shares.
+// r52: where the app shows our cards, set_letter_words' description says the person can change the words on the letter
+// card, unseen by the model, so before saying a word is or is not in the letter it is called with the words and
+// wordsVersion last seen, which changes nothing either way (STUDIO-01, DEV 2026-10-17: ChatGPT answered from the
+// preview's words and called nothing). Apps without our cards keep the words they had. The letter card also tells the
+// model of its own changes in what it shares.
 export const STEERING_COPY_REV = 52;

@@ -1885,7 +1885,7 @@ describe("the Words tab's editor (#586)", () => {
       await type(card, 'studio-words-body', 'Dear Sam,\n\nMine.');
       await card.click(card.byId('studio-words-update'));
       await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'This preview has expired.' }] } }, 'set_letter_words');
-      for (const text of await shared()) expect(text).not.toContain('the person changed');
+      for (const text of await shared()) expect(text).not.toMatch(/the person changed/i);
     });
 
     /** The card in ChatGPT, keeping its state and sharing through window.openai. */
@@ -1960,7 +1960,7 @@ describe("the Words tab's editor (#586)", () => {
       const other = inChatGpt({ v: 1, draftId: 'draft_0001', changedOnCard: { draftId: 'draft_0002', what: ['words'], at, note: 'Anything.' } });
       await flush();
       expect(other.updates.length).toBeGreaterThan(0);
-      for (const text of other.updates) expect(text).not.toContain('the person changed');
+      for (const text of other.updates) expect(text).not.toMatch(/the person changed/i);
     });
   });
 });
