@@ -411,6 +411,16 @@ describe('set_letter_words', () => {
     expect(written()).toMatchObject({ bodyText: 'Dear Sam, with a P.S.', replacing: { bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat' } });
   });
 
+  // The model is asked to send the words it last saw to read them (#795 review round 2): logged as no change.
+  it('logs words the letter already had apart from a change of them', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), body_text: 'Dear Sam, with a P.S.', sign_off: 'Pat' } as never);
+    const ctx = context();
+    await handler({ draftId: DRAFT_ID, bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat', wordsVersion: wordsVersionOf('Dear Sam, with a P.S.', 'Pat') }, ctx);
+    const events = vi.mocked(ctx.logger.info).mock.calls.map(([fields]) => (fields as { event?: string }).event);
+    expect(events).toContain('draft.words_unchanged');
+    expect(events).not.toContain('draft.words_changed');
+  });
+
   it('says a new preview can use a gift letter when the words bring it back to a page the balance cannot pay (#593 review round 1)', async () => {
     vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
     vi.mocked(getGiftBalance).mockResolvedValue({ available: 1 } as never);

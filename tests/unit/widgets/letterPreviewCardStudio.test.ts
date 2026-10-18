@@ -1650,6 +1650,26 @@ describe("the Words tab's editor (#586)", () => {
     expect(card.byId('studio-words-note').classList.contains('alert')).toBe(false);
   });
 
+  // #795 review round 2 (R2-4): a preview without a version refuses the Update; the catch-up brings the same words with
+  // their version, so an Update would now go through, and the chat changed nothing.
+  it('takes back that its copy is out of date once the catch-up brings the version, saying nothing of the chat', async () => {
+    const card = mount();
+    await card.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMy own change.');
+    await card.click(card.byId('studio-words-update'));
+    await card.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'Nothing was changed: give wordsVersion, the version of the words this change replaces.' }] } },
+      'set_letter_words'
+    );
+    expect(text(card, 'studio-words-note')).toBe(STALE);
+    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }), 'get_draft_status');
+    expect(box(card, 'studio-words-body')).toBe('Dear Sam,\n\nMy own change.');
+    expect(card.byId('studio-words-note').hidden).toBe(true);
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe(VERSION);
+  });
+
   // #795 review round 1 (R1-5): the words set, their page not back; a catch-up brings the page for those words.
   it('takes back that the page did not come back once a catch-up brings it', async () => {
     const card = mount();
@@ -1879,6 +1899,65 @@ describe("the Words tab's editor (#586)", () => {
       }
     });
 
+    // #795 review round 2 (R2-1): ChatGPT drew the card again, from its preview, and its opening answer brings the card's
+    // own words, at the version its change gave them; the chat's since come at another.
+    it('keeps saying the words when a card drawn again finds its own change\'s, and stops at another version', async () => {
+      const at = '2026-10-17T14:03:22.000Z';
+      const kept = { v: 1, draftId: 'draft_0001', changedOnCard: { draftId: 'draft_0001', what: ['words'], at, times: { words: at }, wordsVersion: 'card00000000' } };
+      const own = inChatGpt(kept, { bodyText: 'Dear Sam,\n\nThe roses are out.', signOff: ARGS.signOff, wordsVersion: 'card00000000' });
+      await flush();
+      expect((own.document.getElementById('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nThe roses are out.');
+      expect(changes(own.updates)![3]).toBe('words');
+
+      const chat = inChatGpt(kept, CHAT_WORDS);
+      await flush();
+      expect((chat.document.getElementById('studio-words-body') as HTMLTextAreaElement).value).toBe(CHAT_WORDS.bodyText);
+      expect(changes(chat.updates)).toBeNull();
+      expect(chat.kept[chat.kept.length - 1].changedOnCard).toBeNull();
+
+      // A change whose answer named no version: the note stays, as the words may still be the card's.
+      const { wordsVersion, ...unversioned } = kept.changedOnCard;
+      expect(wordsVersion).toBe('card00000000');
+      const unknown = inChatGpt({ ...kept, changedOnCard: unversioned }, CHAT_WORDS);
+      await flush();
+      expect(changes(unknown.updates)![3]).toBe('words');
+    });
+
+    // A change of style after the words keeps the version the words were set at.
+    it("stops saying the words at the chat's version though the style was changed after them", async () => {
+      const { card, shared } = await shownAndReady();
+      await card.click(card.tab('words'));
+      await type(card, 'studio-words-body', 'Dear Sam,\n\nLonger now.');
+      await card.click(card.byId('studio-words-update'));
+      await card.answer(ranOn, 'set_letter_words');
+      await card.click(card.document.querySelector('#style-row [data-theme="botanical"]')!);
+      await card.answer(restyled, 'set_stationery');
+      expect(changes(await shared())![3]).toBe('words and stationery');
+      await comeBack(card);
+      await card.answer(status(CHAT_WORDS), 'get_draft_status');
+      expect(changes(await shared())![3]).toBe('stationery');
+    });
+
+    // #795 review round 2 (R2-2): what is left is said at its own time, not the words'.
+    it('says what is left at its own latest time once the words are no longer said', async () => {
+      const kept = {
+        v: 1,
+        draftId: 'draft_0001',
+        changedOnCard: {
+          draftId: 'draft_0001',
+          what: ['words', 'stationery'],
+          at: '2026-10-17T14:05:00.000Z',
+          times: { stationery: '2026-10-17T14:01:00.000Z', words: '2026-10-17T14:05:00.000Z' },
+          wordsVersion: 'card00000000'
+        }
+      };
+      const card = inChatGpt(kept, CHAT_WORDS);
+      await flush();
+      const said = changes(card.updates)!;
+      expect(said.slice(1, 4)).toEqual(['2026-10-17', '14:01:00', 'stationery']);
+      expect(card.kept[card.kept.length - 1].changedOnCard).toMatchObject({ what: ['stationery'], at: '2026-10-17T14:01:00.000Z' });
+    });
+
     it('says nothing of a change the server refused', async () => {
       const { card, shared } = await shownAndReady();
       await card.click(card.tab('words'));
@@ -1889,7 +1968,7 @@ describe("the Words tab's editor (#586)", () => {
     });
 
     /** The card in ChatGPT, keeping its state and sharing through window.openai. */
-    function inChatGpt(widgetState: Json | null = null) {
+    function inChatGpt(widgetState: Json | null = null, words: Json = { bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }) {
       const kept: Json[] = [];
       const updates: string[] = [];
       const document = mountInChatGpt(
@@ -1912,9 +1991,7 @@ describe("the Words tab's editor (#586)", () => {
                   status: 'ready',
                   stationery: { theme: 'classic' },
                   ...canSend,
-                  bodyText: ARGS.bodyText,
-                  signOff: ARGS.signOff,
-                  wordsVersion: VERSION
+                  ...words
                 },
                 _meta: { previewHtml: PAGE }
               };
@@ -1943,7 +2020,15 @@ describe("the Words tab's editor (#586)", () => {
       const last = card.kept[card.kept.length - 1];
       // What a reopened card reads (#389) is as it was.
       expect(last).toMatchObject({ v: 1, draftId: 'draft_0001' });
-      expect(last.changedOnCard).toEqual({ draftId: 'draft_0001', what: ['words'], at: expect.any(String), note: expect.stringMatching(CHANGED) });
+      expect(last.changedOnCard).toEqual({
+        draftId: 'draft_0001',
+        what: ['words'],
+        at: expect.any(String),
+        times: { words: last.changedOnCard.at },
+        // The version the change gave the words, an opaque hash of them.
+        wordsVersion: 'fedcba654321',
+        note: expect.stringMatching(CHANGED)
+      });
       expect(JSON.stringify(last)).not.toContain('roses');
       expect(card.updates[card.updates.length - 1]).toContain(last.changedOnCard.note);
     });

@@ -67,10 +67,11 @@
    *   also says with hold(), nor while a send refused for a change since asks
    *   for the draft as it is now), onSet()
    *   (a style is being set on the draft), onChange({ draftId, stationery }),
-   *   onEdited(draftId, what) (the draft's words, stationery, signature or
-   *   mail service were changed here: the model never sees the card's calls),
-   *   onWordsSeen(draftId) (a catch-up brought other words than the boxes
-   *   were filled from: the chat changed them, so its model has seen them),
+   *   onEdited(draftId, what, wordsVersion) (the draft's words, stationery,
+   *   signature or mail service were changed here: the model never sees the
+   *   card's calls; for the words, the version they were set at),
+   *   onWordsSeen(draftId, wordsVersion) (a catch-up brought other words than
+   *   the boxes were filled from, at this version),
    *   onBusy(), and wordsElement(id), which finds the Words tab's editor
    *   (#586) once the studio has drawn it; and signatureRow and
    *   signatureSwitch, the Signature switch (#608), which may be absent
@@ -180,9 +181,9 @@
       }
     }
     // The draft was changed here ("words", "stationery", "signature" or "mail service"), page or no page: the card tells
-    // the model, which never sees the card's own calls.
-    function edited(draftId, what) {
-      if (typeof options.onEdited === "function") options.onEdited(draftId, what);
+    // the model, which never sees the card's own calls. For the words, the version they now have, when the answer says.
+    function edited(draftId, what, wordsVersion) {
+      if (typeof options.onEdited === "function") options.onEdited(draftId, what, wordsVersion);
     }
     // Terms taken from any answer: when they say how the letter travels, the Mail choice follows them.
     function adoptTerms(said) {
@@ -685,14 +686,17 @@
       if (base && sameWords(base, current)) return;
       // Box by box: one not typed in (it holds the words it was filled from) takes the draft's words now; one typed in
       // keeps what was typed, and the card says so, unless it is what the draft has now.
-      // Other words than the boxes were filled from: the chat changed them since, and so has seen them (the card's
-      // own change of them is no longer news to it), whether or not what was typed is kept.
+      // Other words than the boxes were filled from, whether or not what was typed is kept. The card is told their
+      // version: other than the one its own change gave, the chat changed them since, and so has seen them. A card
+      // drawn again from its preview (ChatGPT remounted it) fills the boxes from the preview's words, and the draft's
+      // are then its own change's, at that change's version (#795 review round 2).
       var other = Boolean(base) && (base.bodyText !== current.bodyText || base.signOff !== current.signOff);
       if (other && typeof options.onWordsSeen === "function") {
         var seen = state.draftId;
+        var version = current.version;
         // Once this drawing is over: the card keeps it, and shares it.
         Promise.resolve().then(function () {
-          options.onWordsSeen(seen);
+          options.onWordsSeen(seen, version);
         });
       }
       var bodyKept = Boolean(base) && body.value !== base.bodyText && body.value !== current.bodyText;
@@ -700,13 +704,13 @@
       if (!bodyKept) body.value = current.bodyText;
       if (!signOffKept) signOff.value = current.signOff;
       words.base = current;
-      if (bodyKept || signOffKept) {
+      if (other && (bodyKept || signOffKept)) {
         words.message = KEPT;
         words.error = false;
-      } else if (other && (!words.error || words.message === STALE)) {
+      } else if ((other && !words.error) || words.message === STALE) {
         // The boxes took other words: what the last change said ("The letter's words are changed...") is about
-        // words they no longer hold, and a copy said to be out of date is now the draft's. Any other refusal stays
-        // until the person acts on it.
+        // words they no longer hold. A copy said to be out of date is the draft's now, words or version, so an
+        // Update would go through (#795 review round 2). Any other refusal stays until the person acts on it.
         words.message = "";
         words.error = false;
       }
@@ -823,7 +827,7 @@
             throw new Error("The words may have changed. Make the preview again to see them.");
           }
           state.restyled = true;
-          edited(draftId, "words");
+          edited(draftId, "words", typeof data.wordsVersion === "string" ? data.wordsVersion : undefined);
           words.set = {
             bodyText: bodyText,
             signOff: signOff,
