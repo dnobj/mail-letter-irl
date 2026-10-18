@@ -389,7 +389,8 @@ describe.each(CARDS)('%s: Pay & Send on a draft whose order is already paid (#67
   });
 
   it('still says a checkout failed when the answer names no order', async () => {
-    const harness = mount(card, { mailCheckout: { message: 'Unable to create Pay & Send checkout. Please try again.' } });
+    // A status past the checkout, but no order to follow.
+    const harness = mount(card, { mailCheckout: { status: 'refund_pending', message: 'Unable to create Pay & Send checkout. Please try again.' } });
     await checkout(harness);
     await flush();
     expect(harness.visible('error-message')).toBe(true);
