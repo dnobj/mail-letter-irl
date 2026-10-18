@@ -372,6 +372,7 @@ describe.each(CARDS)('%s: Pay & Send on a draft whose order is already paid (#67
       await flush();
       expect(harness.visible('error-message'), status).toBe(false);
       expect(harness.text('pay-send-button-text'), status).toBe('Already paid');
+      expect(harness.text('id-label'), status).toBe('Purchase');
       expect(harness.text('id-value'), status).toBe('ord_paid_0001');
       expect(harness.calls.filter(call => call.name === 'get_purchase_status').at(-1)?.args, status).toEqual({ orderId: 'ord_paid_0001' });
       expect(harness.text('status-pill'), status).toBe('Paid - preparing mail');
