@@ -1046,8 +1046,8 @@ describe('the postcard draft and its changes, told to the model (#650, #795)', (
             if (name === 'get_draft_status') return { structuredContent: { draftId: args.draftId, status: 'ready' } };
             if (name === 'set_postcard_style') {
               return {
-                structuredContent: { draftId: args.draftId, size: '6x9', layout: 'border', caption: args.caption, canSendNow: true, sendEligibility: PACK, message: 'Captioned.' },
-                _meta: { previewHtml: drawn('6x9', { layout: 'border', caption: args.caption }) }
+                structuredContent: { draftId: args.draftId, size: args.size ?? '6x9', layout: 'border', caption: args.caption, canSendNow: true, sendEligibility: PACK, message: 'Restyled.' },
+                _meta: { previewHtml: drawn(args.size ?? '6x9', { layout: 'border', caption: args.caption }) }
               };
             }
             return {};
@@ -1079,6 +1079,13 @@ describe('the postcard draft and its changes, told to the model (#650, #795)', (
     expect(last.changedOnCard).toEqual({ draftId: 'draft_0001', what: ['front'], at: expect.any(String), note: expect.stringMatching(CHANGED) });
     for (const words of ['Rye Harbor', 'Cape Cod', 'Wish you were here', 'Fifth']) expect(JSON.stringify(last)).not.toContain(words);
     expect(card.updates[card.updates.length - 1]).toContain(last.changedOnCard.note);
+
+    // A size after the front: kept in one order, whatever the order of the changes.
+    await card.click(card.document.querySelector('[data-size="6x4"]')!);
+    const both = card.kept[card.kept.length - 1].changedOnCard;
+    expect(both.what).toEqual(['size', 'front']);
+    expect(both.note).toMatch(/^The person changed this postcard's size and front on its Letter IRL card/);
+    expect(card.updates[card.updates.length - 1]).toContain(both.note);
   });
 
   // As on a reopen: the card finds its kept state beside its result, which it draws.
