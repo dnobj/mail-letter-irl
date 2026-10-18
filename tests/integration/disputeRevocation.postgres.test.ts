@@ -896,8 +896,10 @@ describePostgres('dispute and refund pack revocation', () => {
     }
 
     async function readDisputeAlerts(orderId: string) {
-      const result = await pool.query<{ alert_type: string; severity: string; status: string }>(
-        `SELECT alert_type, severity, status FROM commerce_operational_alerts
+      const result = await pool.query<{
+        alert_type: string; severity: string; status: string; resolution_code: string | null;
+      }>(
+        `SELECT alert_type, severity, status, resolution_code FROM commerce_operational_alerts
           WHERE order_id = $1 AND alert_type LIKE 'stripe_dispute_%' ORDER BY alert_type`,
         [orderId]
       );
@@ -927,7 +929,7 @@ describePostgres('dispute and refund pack revocation', () => {
       // The recovery never grants the pack.
       expect(await readLedgerStatuses(userId)).toEqual([]);
       expect(await readDisputeAlerts(orderId)).toEqual([
-        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open' }
+        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null }
       ]);
     }, 60_000);
 
@@ -942,7 +944,7 @@ describePostgres('dispute and refund pack revocation', () => {
 
       expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
       expect(await readDisputeAlerts(orderId)).toEqual([
-        { alert_type: 'stripe_dispute_closed', severity: 'critical', status: 'open' }
+        { alert_type: 'stripe_dispute_closed', severity: 'critical', status: 'open', resolution_code: null }
       ]);
     }, 60_000);
 
@@ -963,8 +965,8 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(account.credits).toBe(0);
       expect(await readLedgerStatuses(userId)).toEqual([]);
       expect(await readDisputeAlerts(orderId)).toEqual([
-        { alert_type: 'stripe_dispute_closed', severity: 'info', status: 'open' },
-        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'resolved' }
+        { alert_type: 'stripe_dispute_closed', severity: 'info', status: 'open', resolution_code: null },
+        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'resolved', resolution_code: 'stripe_dispute_won' }
       ]);
     }, 60_000);
 
@@ -979,7 +981,7 @@ describePostgres('dispute and refund pack revocation', () => {
       expect((await readDispute(inquiry)).user_id).toBe(userId);
       expect((await readDispute(loss)).user_id).toBe(userId);
       expect(await readDisputeAlerts(orderId)).toEqual([
-        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open' }
+        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null }
       ]);
     }, 60_000);
 
@@ -997,7 +999,8 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(blocked.sends_blocked_reason).toBe('payment_disputed');
       expect(blocked.credits).toBe(10);
       expect((await readDispute(disputeId)).user_id).toBeNull();
-      expect(await readDisputeAlerts(orderId)).toEqual([]);
+      const recoveredAlert = { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null };
+      expect(await readDisputeAlerts(orderId)).toEqual([recoveredAlert]);
 
       await commerceService.processStripeWebhookEvent(
         disputeEvent('charge.dispute.funds_withdrawn', disputeFixture({ id: disputeId, payment_intent: paymentIntentId }))
@@ -1006,6 +1009,8 @@ describePostgres('dispute and refund pack revocation', () => {
       expect((await readAccount(userId)).credits).toBe(0);
       expect(await readLedgerStatuses(userId)).toEqual(['revoked']);
       expect((await readDispute(disputeId)).user_id).toBe(userId);
+      // The matched path raises its own alert for that event, beside the recovery's.
+      expect(await readDisputeAlerts(orderId)).toEqual([recoveredAlert, recoveredAlert]);
     }, 60_000);
 
     it('leaves the account sending for a card-network inquiry', async () => {
@@ -1056,7 +1061,7 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(after.sends_blocked_at?.toISOString()).toBe(before.sends_blocked_at?.toISOString());
       expect(after.sends_blocked_reason).toBe('operator_review');
       expect(await readDisputeAlerts(orderId)).toEqual([
-        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open' }
+        { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null }
       ]);
     }, 60_000);
 

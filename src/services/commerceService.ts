@@ -2044,7 +2044,6 @@ async function processCheckoutSessionEvent(
          WHERE order_id = $1`,
         [order.order_id, session.id, intentId, blockedStatus]
       );
-      if (isDispute) await applyRecoveredDisputes(client, order, unmatchedMoney.rows);
       await client.query(
         `UPDATE stripe_webhook_events SET order_id = $2, processing_status = 'processed',
            resolved_at = NOW() WHERE event_id = ANY($1::varchar[])`,
@@ -2056,6 +2055,9 @@ async function processCheckoutSessionEvent(
          WHERE source_event_id = ANY($1::varchar[]) AND status <> 'resolved'`,
         [unmatchedMoney.rows.map(row => row.event_id)]
       );
+      // After the resolution above: the alerts this raises are keyed on the
+      // same events, and stay open.
+      if (isDispute) await applyRecoveredDisputes(client, order, unmatchedMoney.rows);
       await recordOrderEvent(client, order.order_id, 'stripe.money_event_recovered',
         order.status, blockedStatus, { eventCount: unmatchedMoney.rows.length });
       return { duplicate: false, orderId: order.order_id, status: blockedStatus };
@@ -3577,19 +3579,25 @@ async function blockAccountSends(
  * order's account, which processDisputeEvent reads as "its effects ran": the
  * next event of a loss records only, as for a matched loss, and the unblock
  * after another dispute's win (unblockAccountSends) and an operator's lift
- * (countStandingDisputes) see this one standing. Each loss gets the alert the
- * matched path would have raised, which the dispute's close resolves.
+ * (countStandingDisputes) see this one standing.
+ *
+ * Its dispute locks come after the order's, the other way round from
+ * processDisputeEvent. That cannot deadlock: the order's payment intent is
+ * committed only with this transaction, so until then an event for these
+ * disputes finds no order to wait on. An event handled now, holding its
+ * dispute's lock, finishes before the status it wrote is read here.
  *
  * An order already acted on (a dispute recorded while its payment intent was
  * not yet committed) may hold lots and mail that only the matched path takes.
- * Its disputes stay without an account, so their next event matches the order
- * by that payment intent and runs the whole rule; the block stands meanwhile.
+ * Its disputes are only read: they stay without an account, so their next
+ * event matches the order by that payment intent and runs the whole rule; the
+ * block stands meanwhile. No locks here: that payment intent is committed, so
+ * an event for these disputes may hold its lock while it waits for the order,
+ * and it runs the whole rule itself.
  *
- * The dispute locks come after the order's, the other way round from
- * processDisputeEvent. That cannot deadlock: an event for these disputes finds
- * no order to wait on until this transaction commits the payment intent. An
- * event handled now, holding its dispute's lock, finishes before the status it
- * wrote is read here.
+ * Each loss gets the alert the matched path raises, which the dispute's close
+ * resolves; an inquiry alerts when it escalates. A dispute already closed, or
+ * one whose next event matches no order, has no later event to raise it.
  */
 async function applyRecoveredDisputes(
   client: Pick<pg.PoolClient, 'query'>,
@@ -3604,24 +3612,32 @@ async function applyRecoveredDisputes(
     }
   }
   const disputeIds = [...latestEvent.keys()].sort();
-  for (const disputeId of disputeIds) {
-    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`stripe_dispute:${disputeId}`]);
-  }
   const actedOn = order.status === 'paid' || FUNDED_OR_REVERSED_ORDER_STATUSES.includes(order.status);
-  const disputes = await client.query<{
+  const columns = 'dispute_id, status, resolved_at, reason, amount_cents, currency, charge_id';
+  type RecoveredDispute = {
     dispute_id: string; status: string; resolved_at: Date | null; reason: string | null;
     amount_cents: number; currency: string; charge_id: string;
-  }>(
-    `UPDATE stripe_disputes
-     SET user_id = CASE WHEN $3::boolean THEN user_id ELSE COALESCE(user_id, $2) END, updated_at = NOW()
-     WHERE dispute_id = ANY($1::text[])
-     RETURNING dispute_id, status, resolved_at, reason, amount_cents, currency, charge_id`,
-    [disputeIds, order.user_id, actedOn]
-  );
+  };
+  let disputes: { rows: RecoveredDispute[] };
+  if (actedOn) {
+    disputes = await client.query<RecoveredDispute>(
+      `SELECT ${columns} FROM stripe_disputes WHERE dispute_id = ANY($1::text[])`,
+      [disputeIds]
+    );
+  } else {
+    for (const disputeId of disputeIds) {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`stripe_dispute:${disputeId}`]);
+    }
+    disputes = await client.query<RecoveredDispute>(
+      `UPDATE stripe_disputes SET user_id = COALESCE(user_id, $2), updated_at = NOW()
+       WHERE dispute_id = ANY($1::text[])
+       RETURNING ${columns}`,
+      [disputeIds, order.user_id]
+    );
+  }
   const losses = disputes.rows.filter(row => !NON_LOSS_DISPUTE_STATUSES.has(row.status));
   if (losses.length === 0) return;
   await blockAccountSends(client, order.user_id, 'payment_disputed');
-  if (actedOn) return;
   for (const dispute of losses) {
     const closed = dispute.resolved_at !== null;
     await client.query(
