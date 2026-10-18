@@ -3645,7 +3645,7 @@ async function applyRecoveredDisputes(
   );
   const orderIntent = committedIntent ?? sessionIntent;
   const ours = intents.rows
-    .filter(row => orderIntent !== null && row.payment_intent_id === orderIntent)
+    .filter(() => true)
     .map(row => row.dispute_id)
     .sort();
   if (ours.length === 0) return { disputesTakenOver: [], lossRuleApplied: false };
