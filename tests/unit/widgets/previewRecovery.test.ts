@@ -2220,6 +2220,7 @@ describe.each([LETTER, POSTCARD])('$file keeps what it did for a reopened conver
     expect(harness.text('empty-message')).toBe(`This card found a Pay & Send payment already taken for this ${spec.noun}.`);
     expect(harness.text('id-value')).toBe('ord_taken_0001');
     expect(harness.visible('checkout-link')).toBe(false);
+    expect(harness.visible('checkout-note')).toBe(false);
   });
 
   it('offers the kept checkout link while a reopened order is unpaid', async () => {

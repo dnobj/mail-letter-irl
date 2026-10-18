@@ -1399,6 +1399,8 @@
           : kept.alreadyPaid
             ? "This card found a Pay & Send payment already taken for this postcard."
             : "A checkout for this postcard was started from this card.";
+        // Nothing is left to pay for a payment it found taken, so the note about paying goes, as on the live card (#679).
+        if (kept.alreadyPaid) document.getElementById("checkout-note").style.display = "none";
         document.getElementById("empty-state").style.display = "block";
         const statusPill = document.getElementById("status-pill");
         const keptSchedule = arrives.scheduleOf(kept.schedule);
