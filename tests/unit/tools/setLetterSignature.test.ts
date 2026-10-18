@@ -70,9 +70,9 @@ function pngBytes(width: number, height: number): Buffer {
 const uri = (bytes: Buffer) => `data:image/png;base64,${bytes.toString('base64')}`;
 const FULL = uri(pngBytes(1950, 600));
 const SMALL = uri(pngBytes(390, 120));
-const SAVED_PNG = pngBytes(1200, 300);
+const SAVED_PNG = pngBytes(480, 120);
 const SIGNATURE = uri(SAVED_PNG);
-const SAVED = { png: SAVED_PNG, width: 1200, height: 300, useByDefault: true, createdAt: '2026-10-02T14:00:00.000Z', updatedAt: '2026-10-02T14:00:00.000Z' };
+const SAVED = { png: SAVED_PNG, width: 480, height: 120, useByDefault: true, createdAt: '2026-10-02T14:00:00.000Z', updatedAt: '2026-10-02T14:00:00.000Z' };
 
 /** `count` short lines, each one printed line. */
 const lines = (count: number) => Array.from({ length: count }, (_, index) => `Line ${index + 1}`).join('\n');
@@ -138,7 +138,32 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+/** A signature as the cleaner stores one, decodable: 1200 x 300, grey ink on white. */
+async function realSignature(): Promise<Buffer> {
+  const strokes = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300"><rect width="100%" height="100%" fill="#fff"/>' +
+      '<path d="M20 220 C 300 0, 700 300, 1180 80" stroke="#000" stroke-width="8" fill="none"/></svg>'
+  );
+  return (await import('sharp')).default(strokes).toColourspace('b-w').png().toBuffer();
+}
+/** The pixel size of a PNG data URI's image. */
+const pngSize = (href: string) => {
+  const bytes = Buffer.from(href.split(',')[1], 'base64');
+  return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+};
+
 describe('set_letter_signature', () => {
+  it('draws the page from a small copy of the signature, and writes the stored one for the print (#614)', async () => {
+    const png = await realSignature();
+    vi.mocked(getSignature).mockResolvedValue({ ...SAVED, png });
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft());
+    await run({ signature: true });
+    const change = written();
+    expect(change.signatureImage).toBe(uri(png));
+    const href = change.previewHtml!.match(/<image data-role="signature" href="([^"]+)"/)![1];
+    expect(pngSize(href)).toEqual([480, 120]);
+  });
+
   it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft());
     vi.mocked(setDraftSignature).mockImplementation(async (...args: unknown[]) => {

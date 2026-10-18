@@ -8,6 +8,7 @@ import { CUSTOM_THEME, type PageFit } from '../render/index.js';
 import { getDesign } from '../services/stationeryDesignService.js';
 import type { PreviewStationery } from './stationeryInput.js';
 import { getDraftForStationery, setDraftStationery } from '../services/draftService.js';
+import { withDisplaySignature } from '../services/signatureDisplay.js';
 import { editorPageFit, layoutLetterForPreview, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter, type LetterTravel } from './letterHelpers.js';
 import { letterOption } from '../services/mailOptions.js';
 import { draftLetter, draftRefusals, draftRefuser, editableDraft, type DraftRefusal } from './draftEdit.js';
@@ -149,7 +150,8 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   // the letter's own, a gift letter's card, as they were.
   const previewHtml = redrawLetterPreview(
     { previewHtml: draft.preview_html, pages: pagesBefore },
-    layout,
+    // The signature from its small copy (#614); the print keeps the stored one.
+    await withDisplaySignature(layout),
     { sender, recipient, bodyText, signOff },
     stationery
   );
