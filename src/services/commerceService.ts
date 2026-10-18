@@ -2066,7 +2066,7 @@ async function processCheckoutSessionEvent(
       );
       // After the resolution above: the alerts this raises are keyed on the
       // same events, and stay open.
-      if (isDispute) await applyRecoveredDisputes(client, order, committedIntent, unmatchedMoney.rows);
+      if (isDispute) await applyRecoveredDisputes(client, order, committedIntent, intentId ?? null, unmatchedMoney.rows);
       await recordOrderEvent(client, order.order_id, 'stripe.money_event_recovered',
         order.status, blockedStatus, { eventCount: unmatchedMoney.rows.length });
       return { duplicate: false, orderId: order.order_id, status: blockedStatus };
@@ -3583,24 +3583,29 @@ async function blockAccountSends(
  * checkout ties their money to an order (processCheckoutSessionEvent's
  * recovery): the same rule processDisputeEvent applies to a matched dispute.
  *
- * An open dispute whose own payment intent the order's committed row already
- * carries (committedIntent, read before any adoption) is left to its next
- * event: that event matches this order and runs the whole rule, the order's
- * lots and mail included. Its row keeps no account, so that event acts, and no
- * lock is taken for it, as that event may hold its dispute's lock while it
- * waits for the order. It counts toward the account's standing disputes from
- * that event.
+ * Only a dispute whose own payment intent is the one this order ends up with
+ * (committedIntent, read before any adoption, or else this checkout's) is
+ * applied here: its later events match this order. Any other is left as it
+ * was, as no event of it can reach this order.
  *
- * Every other dispute is taken over here: its row takes the order's account,
- * which processDisputeEvent reads as "its effects ran", so its next loss event
- * records only, and unblockAccountSends and countStandingDisputes count it.
- * Either its next event cannot match this order, which has then had no pack
- * granted or mail queued for it, or it is closed and has no event to come; the
- * block is what this rule applies, and a closed loss's alert is critical. Its
- * lock comes after the order's, the other way round from processDisputeEvent,
- * which cannot deadlock: no event for it waits on this order (one searches by
- * a payment intent this order's committed row does not carry). An event
- * handled now, holding that lock, finishes before the status it wrote is read.
+ * Where the order's committed row has no payment intent, no pack has been
+ * granted and no mail queued, and no event of these disputes can find the
+ * order, so none waits on it: each is taken over under its own lock, taken
+ * after the order's (the other way round from processDisputeEvent). Its row
+ * takes the order's account, which processDisputeEvent reads as "its effects
+ * ran": its next loss event records only, and unblockAccountSends and
+ * countStandingDisputes count it. An event handled now, holding that lock,
+ * finishes before the status it wrote is read.
+ *
+ * Where the committed row already carries that intent, every event of these
+ * disputes locks this order before it touches the dispute's row, so the
+ * order's lock serialises them and no dispute lock is taken: one may be held
+ * by an event waiting for the order. An open dispute is left to its next
+ * event, which runs the whole rule, the order's lots and mail included: its
+ * row keeps no account so that event acts, and it counts toward the account's
+ * standing disputes from then. A closed one has no event to come and is taken
+ * over.
+ *
  * A dispute's payment intent is read once, unlocked; it changes only from none
  * to one, which Stripe does not do for a card payment's dispute.
  *
@@ -3612,6 +3617,7 @@ async function applyRecoveredDisputes(
   client: Pick<pg.PoolClient, 'query'>,
   order: Order,
   committedIntent: string | null,
+  sessionIntent: string | null,
   events: Array<{ event_id: string; event_type: string; provider_object_id: string | null }>
 ): Promise<void> {
   // Each dispute's most recent event: the rows come in the order they were claimed.
@@ -3628,11 +3634,15 @@ async function applyRecoveredDisputes(
     'SELECT dispute_id, payment_intent_id, resolved_at FROM stripe_disputes WHERE dispute_id = ANY($1::text[])',
     [disputeIds]
   );
-  const leftToNextEvent = intents.rows
-    .filter(row => committedIntent !== null && row.payment_intent_id === committedIntent)
-    .filter(row => row.resolved_at === null)
+  const orderIntent = committedIntent ?? sessionIntent;
+  const ours = intents.rows.filter(row => orderIntent !== null && row.payment_intent_id === orderIntent);
+  const leftToNextEvent = ours
+    .filter(row => committedIntent !== null && row.resolved_at === null)
     .map(row => row.dispute_id);
-  const takenOver = disputeIds.filter(disputeId => !leftToNextEvent.includes(disputeId));
+  const takenOver = ours
+    .map(row => row.dispute_id)
+    .filter(disputeId => !leftToNextEvent.includes(disputeId))
+    .sort();
 
   const columns = 'dispute_id, status, resolved_at, reason, amount_cents, currency, charge_id';
   type RecoveredDispute = {
@@ -3648,7 +3658,7 @@ async function applyRecoveredDisputes(
     disputes.push(...left.rows);
   }
   if (takenOver.length > 0) {
-    for (const disputeId of takenOver) {
+    for (const disputeId of committedIntent === null ? takenOver : []) {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`stripe_dispute:${disputeId}`]);
     }
     const taken = await client.query<RecoveredDispute>(

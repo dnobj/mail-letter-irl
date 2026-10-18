@@ -1066,18 +1066,18 @@ describePostgres('dispute and refund pack revocation', () => {
       ]);
     }, 60_000);
 
-    it("takes over a dispute whose intent is not the one the order's row carries", async () => {
-      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+    it("gives no account to a dispute whose payment intent the order does not carry", async () => {
+      const { orderId, paymentIntentId } = await seedPendingPackOrder();
       const committed = `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
       await pool.query('UPDATE orders SET stripe_payment_intent_id = $2 WHERE order_id = $1', [orderId, committed]);
-      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'warning_needs_response']]);
 
-      const result = await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+      await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
 
-      expect(result).toMatchObject({ orderId, status: 'disputed' });
-      expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
-      // Its next event searches by its own intent and can never reach this order.
-      expect((await readDispute(disputeId)).user_id).toBe(userId);
+      // The order keeps its committed intent, so no event of this dispute reaches it.
+      const order = await pool.query('SELECT stripe_payment_intent_id FROM orders WHERE order_id = $1', [orderId]);
+      expect(order.rows[0].stripe_payment_intent_id).toBe(committed);
+      expect((await readDispute(disputeId)).user_id).toBeNull();
     }, 60_000);
 
     it('gives the disputes of an order this checkout adopts the account', async () => {
