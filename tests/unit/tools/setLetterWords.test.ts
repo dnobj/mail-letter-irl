@@ -233,7 +233,7 @@ describe('set_letter_words', () => {
   it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(10) }) as never);
     vi.mocked(setDraftWords).mockImplementation(async (...args: unknown[]) => {
-      (args.at(-1) as (version: string, before: string) => void)('0123456789abcdef', 'fedcba9876543210');
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: null });
       return null;
     });
     expect(await change('Dear Sam,\n\nThe garden is in.')).toMatchObject({ contentVersion: '0123456789abcdef', contentVersionBefore: 'fedcba9876543210' });
@@ -297,6 +297,35 @@ describe('set_letter_words', () => {
     expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
     expect(output.message).not.toContain('Pay & Send.');
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2, mailService: 'certified' });
+  });
+
+  it('prices by how the letter travels once the words are written, not as read before (#625 follow-up)', async () => {
+    // set_mail_service landed between the read and the lock: the letter now goes certified.
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), mail_service: 'standard' } as never);
+    vi.mocked(setDraftWords).mockImplementationOnce(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: 'certified' });
+      return null;
+    });
+
+    const output = await change(lines(40));
+
+    expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.' });
+    expect(output).toMatchObject({ mailService: 'certified', deliveryClass: 'USPS Certified Mail' });
+    expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
+    expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2, mailService: 'certified' });
+    // Priced by the row its version describes (#625 follow-up).
+    expect(output).toMatchObject({ contentVersion: '0123456789abcdef' });
+
+    // Turned ordinary under the lock: the written row says so.
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), mail_service: 'certified' } as never);
+    vi.mocked(setDraftWords).mockImplementationOnce(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: null });
+      return null;
+    });
+    expect(await change(lines(40))).not.toHaveProperty('mailService');
+    // No version told: priced as it was read.
+    vi.mocked(setDraftWords).mockResolvedValueOnce(null);
+    expect(await change(lines(40))).toMatchObject({ mailService: 'certified' });
   });
 
   it('says nothing of a pack when a certified letter fits back on one page (#625)', async () => {

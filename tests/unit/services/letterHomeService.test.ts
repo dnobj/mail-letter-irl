@@ -66,6 +66,23 @@ describe('readLetterHome', () => {
     }
   });
 
+  it('says no number is coming for certified mail sent more than a month ago without one (#625 follow-up)', async () => {
+    const ago = (days: number) => new Date(Date.now() - days * 86400000);
+    vi.mocked(query).mockResolvedValueOnce({ rows: [
+      row({ id: 'ended', status: 'in_transit', mail_service: 'certified', sent_at: ago(31) }),
+      row({ id: 'recent', status: 'in_transit', mail_service: 'certified', sent_at: ago(3) }),
+      row({ id: 'numbered', status: 'in_transit', mail_service: 'certified', sent_at: ago(31), carrier_tracking_number: '9400111899223856928499' })
+    ] } as any);
+    const [ended, recent, numbered] = (await readLetterHome('owner')).orders;
+    expect(ended.certifiedNote).toContain('stopped looking for one a month after the printer accepted it');
+    expect(ended.certifiedNote).not.toContain('check again later');
+    expect(recent.certifiedNote).toContain('check again later');
+    expect(numbered.certifiedNote).toContain('USPS tracking number 9400111899223856928499');
+    const [sql] = vi.mocked(query).mock.calls[0];
+    expect(sql).toMatch(/NULL::timestamptz AS sent_at/);
+    expect(sql).toMatch(/funding_type::text,\s+sent_at\s/);
+  });
+
   it('drops invalid carrier numbers and fails instead of claiming empty lists', async () => {
     vi.mocked(query).mockResolvedValueOnce({ rows: [row({ mail_service: 'certified', carrier_tracking_number: '<script>' })] } as any);
     expect((await readLetterHome('owner')).orders[0]).not.toHaveProperty('carrierTrackingUrl');

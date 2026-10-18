@@ -155,6 +155,8 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
   // With what it was drawn from, refused if any of it changed meanwhile.
   let contentVersion: string | undefined;
   let contentVersionBefore: string | undefined;
+  // How the written row travels, read with its version under the lock (#625 follow-up).
+  let writtenService: string | null | undefined;
   const refusal = await setDraftSignature(
     draftId,
     userId,
@@ -168,7 +170,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
         signature: draft.signature_image
       }
     },
-    context.now(), (version, before) => { contentVersion = version; contentVersionBefore = before; }
+    context.now(), (version, before, written) => { contentVersion = version; contentVersionBefore = before; writtenService = written.mailService; }
   );
   if (refusal) throw refused(...SIGNATURE_REFUSALS[refusal], context);
 
@@ -178,7 +180,9 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them (#586).
-  const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
+  // How the written letter travels, not as read before the lock (#625 follow-up); as read when the version was not.
+  const service = writtenService === undefined ? draft.mail_service : writtenService;
+  const payment = letterPayment(letterOption(layout, service), Number(draft.required_credits ?? 2), gift, context, draftId);
   return {
     ...(contentVersion ? { contentVersion, contentVersionBefore } : {}),
     draftId,
@@ -187,7 +191,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
     ...(pages > 1 ? { pages } : {}),
     ...payment,
     ...(isWordsEditorOffered() ? { pageFit: editorPageFit(layout, stationery) } : {}),
-    message: messageFor(signatureImage !== null, pages, pagesBefore, draft.mail_service)
+    message: messageFor(signatureImage !== null, pages, pagesBefore, service)
   };
 }
 

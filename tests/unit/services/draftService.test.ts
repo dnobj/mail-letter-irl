@@ -1001,7 +1001,8 @@ describe('draftService', () => {
 
       await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW, onWritten)).resolves.toBeNull();
 
-      expect(onWritten).toHaveBeenCalledWith(contentVersionOf(written), contentVersionOf(before));
+      // With how the written row travels, read under the same lock (#625 follow-up).
+      expect(onWritten).toHaveBeenCalledWith(contentVersionOf(written), contentVersionOf(before), { mailService: null });
       const calls = client.query.mock.calls as Array<[string, unknown[]]>;
       const READ = [`SELECT ${CONTENT_VERSION_COLUMNS} FROM letter_drafts WHERE draft_id = $1`, ['draft-1']];
       // After the lock and the order check, before the write; and again after it.
@@ -1009,6 +1010,15 @@ describe('draftService', () => {
       expect(calls[3][0]).toMatch(/UPDATE letter_drafts/);
       expect(calls[4]).toEqual(READ);
       expect(client.query).toHaveBeenCalledTimes(5);
+    });
+
+    it("tells the service of the row as written, read after the change, not the row before it (#625 follow-up)", async () => {
+      const before = { mail_type: 'letter', body_text: 'Hello', mail_service: 'standard', arrive_by: null, mail_on: null };
+      const written = { ...before, mail_service: 'certified', arrive_by: '2026-10-16', mail_on: '2026-10-06' };
+      inTransaction({ rows: [pending] }, { rows: [] }, { rows: [before] }, { rows: [] }, { rows: [written] });
+      const onWritten = vi.fn();
+      await setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW, onWritten);
+      expect(onWritten).toHaveBeenCalledWith(contentVersionOf(written), contentVersionOf(before), { mailService: 'certified' });
     });
 
     it('tells nothing, and reads nothing more, when it changed nothing (#695)', async () => {
