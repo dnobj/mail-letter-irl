@@ -51,7 +51,7 @@ export function certifiedOrderNote(facts: CertifiedFacts, status: LetterStatus, 
     tracking
       ? `Sent as ${name}. ${tracking}${receipt}`
       : lookupEnded
-        ? `Sent as ${name}. No USPS tracking number came from the printer for it, and Letter IRL stopped looking for one a month after the send.${receiptWithoutNumber}`
+        ? `Sent as ${name}. No USPS tracking number came from the printer for it, and Letter IRL stopped looking for one a month after the printer accepted it.${receiptWithoutNumber}`
         : `Sent as ${name}. The USPS tracking number is not here yet: the printer adds it some time after it accepts the letter, so check again later.${receipt}`;
   switch (status) {
     case 'failed':

@@ -30,7 +30,7 @@ function letter(id: string, overrides: Record<string, unknown> = {}) {
     status: 'in_transit',
     preview_html: null,
     created_at: new Date('2026-09-23T12:00:00Z'),
-    sent_at: new Date('2026-09-23T12:05:00Z'),
+    sent_at: new Date(Date.now() - 24 * 60 * 60 * 1000),
     arrive_by: null,
     mail_on: null,
     funding_type: 'jit_order',

@@ -746,14 +746,14 @@
       function withSentTravel(state) {
         const settled = settledDraft();
         if (!state || !settled?.travel || settled.draftId !== state.draftId) return state;
-        const changed = (typeof state.mailService === "string" ? state.mailService : "") !== settled.travel.mailService;
+        const serviceDiffers = (typeof state.mailService === "string" ? state.mailService : "") !== settled.travel.mailService;
         const sent = {
           ...state,
           mailService: settled.travel.mailService,
           deliveryClass: settled.travel.deliveryClass,
           deliveryDisclaimer: settled.travel.deliveryDisclaimer,
         };
-        if (changed) pricedOtherwise.add(sent);
+        if (serviceDiffers) pricedOtherwise.add(sent);
         return sent;
       }
 

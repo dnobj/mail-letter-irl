@@ -74,7 +74,7 @@ describe('readLetterHome', () => {
       row({ id: 'numbered', status: 'in_transit', mail_service: 'certified', sent_at: ago(31), carrier_tracking_number: '9400111899223856928499' })
     ] } as any);
     const [ended, recent, numbered] = (await readLetterHome('owner')).orders;
-    expect(ended.certifiedNote).toContain('stopped looking for one a month after the send');
+    expect(ended.certifiedNote).toContain('stopped looking for one a month after the printer accepted it');
     expect(ended.certifiedNote).not.toContain('check again later');
     expect(recent.certifiedNote).toContain('check again later');
     expect(numbered.certifiedNote).toContain('USPS tracking number 9400111899223856928499');

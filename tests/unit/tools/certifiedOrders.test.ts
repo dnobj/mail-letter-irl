@@ -90,7 +90,7 @@ describe('the words about a certified order (#625)', () => {
   });
 
   it('says no number is coming once the sync has stopped looking, and asks for no check or receipt by it (#625 follow-up)', () => {
-    const ENDED = 'No USPS tracking number came from the printer for it, and Letter IRL stopped looking for one a month after the send.';
+    const ENDED = 'No USPS tracking number came from the printer for it, and Letter IRL stopped looking for one a month after the printer accepted it.';
     for (const status of ['accepted', 'printing', 'in_transit', 'delivered'] as LetterStatus[]) {
       expect(certifiedOrderNote(CERTIFIED, status, true), status).toBe(`Sent as USPS Certified Mail. ${ENDED}`);
       const receipt = certifiedOrderNote({ mailService: 'certified_return_receipt' }, status, true);

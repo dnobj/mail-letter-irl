@@ -1831,7 +1831,7 @@ export function summarizeToolResult(
         `Found ${orders?.length ?? 0} recent orders (${total} total).` +
         deliveredSentence(orders) +
         (certified > 0
-          ? ` ${certified} ${certified === 1 ? "is" : "are"} USPS Certified Mail: ${certified === 1 ? "its entry carries" : "their entries carry"} the USPS tracking number and link once the printer has given one, which Letter IRL looks for during the month after the send.`
+          ? ` ${certified} ${certified === 1 ? "is" : "are"} USPS Certified Mail: ${certified === 1 ? "its entry carries" : "their entries carry"} the USPS tracking number and link once the printer has given one, which Letter IRL looks for during the month after the printer accepts the letter.`
           : "")
       );
     }
