@@ -144,7 +144,7 @@ pass (see [owner-checklist.md](./owner-checklist.md)). Reviewers may run the one
 
 ## Launch Feature Cases
 
-Every studio feature is on at launch (#680, decision D1). Most are tools above; some are inputs of the previews (collages, letters of more pages) or the cards alone (the studio card, the envelope).
+Every studio feature is on at launch (#680, decision D1). Most are tools above; some are inputs of the previews (collages, letters of more pages) or the cards alone (the studio card, and the envelope, which the website's confirmation page draws too).
 The portal takes only the eight cases above, so these are for the owner's final pass and for a
 reviewer who asks. Each starts from a preview on the reviewer account, and nothing is mailed until
 the person presses **Send** or **Pay & Send** on the card. The full checks are the manual tests named

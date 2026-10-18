@@ -115,7 +115,8 @@ preview, the addresses, the cost and the balance; a letter's `stationery`
 the 4x6) and its front (`layout`, with its `caption` or `place`) as the print
 reads them: only for a postcard drawn as `pdf-3`, the photo alone otherwise
 (#594). For a front the print cannot read, `postcard` is left out, size and
-all. A letter our renderer drew carries `envelopeReveal: true` while the envelope reveal is on (#576, [ui-widgets.md](ui-widgets.md)). The `POST`:
+all. A letter our renderer drew carries `envelopeReveal: true` while the
+envelope reveal is on (#576, [ui-widgets.md](ui-widgets.md)). The `POST`:
 - runs the same service as the tools, below, so every check applies, the content version the `GET` gave included ([What the Person Saw](#what-the-person-saw-695));
 - rewords the service's refusals for the page.
 
