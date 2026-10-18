@@ -28,10 +28,7 @@ export type LiftSendBlockOutcome = 'lifted' | 'not_blocked' | 'dispute_standing'
 export async function countStandingDisputes(client: Client, userId: string): Promise<number> {
   const result = await client.query(
     `SELECT COUNT(*)::text AS count FROM stripe_disputes
-     WHERE (user_id = $1
-            OR payment_intent_id IN (
-                 SELECT o.stripe_payment_intent_id FROM orders o
-                  WHERE o.user_id = $1 AND o.stripe_payment_intent_id IS NOT NULL))
+     WHERE (user_id = $1)
        AND NOT (status = ANY($2::text[]))`,
     [userId, [...NON_LOSS_DISPUTE_STATUSES]]
   );
