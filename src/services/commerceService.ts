@@ -1978,8 +1978,8 @@ async function processCheckoutSessionEvent(
     }
     let order = await findCheckoutOrder(client, session);
     // Read from the committed row, as locked: an order adopted below has none.
-    const committedIntent = order?.stripe_payment_intent_id || null;
     if (!order) order = await createLegacyPackOrder(client, session);
+    const committedIntent = order?.stripe_payment_intent_id || null;
     if (!order) {
       // A paid session we cannot bind to an order is unmatched money. Consuming
       // the event here without a durable record would charge the customer,
