@@ -390,6 +390,14 @@ describe.each(CARDS)('%s: Pay & Send on a draft whose order is already paid (#67
     expect(harness.calls.some(call => call.name === 'get_purchase_status')).toBe(false);
   });
 
+  it('still says a checkout failed when the answer names an order but no status', async () => {
+    const harness = mount(card, { mailCheckout: { orderId: 'ord_unknown_0001', message: 'Unable to create Pay & Send checkout. Please try again.' } });
+    await checkout(harness);
+    await flush();
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('pay-send-button-text')).toBe('Retry Pay & Send');
+  });
+
   it('still says a checkout failed when the answer names no order', async () => {
     // A status past the checkout, but no order to follow.
     const harness = mount(card, { mailCheckout: { status: 'refund_pending', message: 'Unable to create Pay & Send checkout. Please try again.' } });
