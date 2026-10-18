@@ -324,7 +324,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t36</p>
+      <p class="rev">postcard t37</p>
     </div>
 
     <!-- The postcard maker (#580): widgets/shared/studio.js lays the card out
@@ -3012,6 +3012,22 @@
             throw new Error(resultText(raw) || "Checkout URL was not returned");
           }
           const result = toolData(raw);
+          // The draft's Pay & Send order is already paid, or past paying (#679): the card offered Pay & Send from a
+          // draft still pending in the seconds before the payment's webhook sent it, and the server answers with that
+          // order, not a checkout. Nothing more is charged; the card follows the order, as after a checkout it opened.
+          if (!result.checkoutUrl && typeof result.orderId === "string" && result.orderId && typeof result.status === "string" && result.status !== "checkout_pending") {
+            trackedOrderId = result.orderId;
+            idLabel.textContent = "Purchase";
+            idValue.textContent = result.orderId;
+            button.classList.remove("loading");
+            button.disabled = true;
+            buttonText.textContent = "Already paid";
+            document.getElementById("checkout-note").style.display = "none";
+            keep({ draftId: currentDraftId, checkout: true, orderId: result.orderId });
+            startStatusPolling("Checking the purchase...");
+            void refreshPurchaseStatus();
+            return;
+          }
           if (!result.checkoutUrl) {
             throw new Error(result.message || "Checkout URL was not returned");
           }

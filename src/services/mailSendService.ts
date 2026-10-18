@@ -15,6 +15,7 @@ import { consumeGiftLetterForSendWithClient } from './giftLetterService.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
 import { jitProductMatching } from '../config/products.js';
 import { draftMailOption, isPackPayable } from './mailOptions.js';
+import { LIVE_PAY_AND_SEND_STATUSES } from './draftService.js';
 import type { GiftCardContent } from './giftCardRenderer.js';
 import { dispatchAt, earliestMailOn } from './deliverySchedule.js';
 import { draftScheduleOf } from './draftSchedule.js';
@@ -324,15 +325,19 @@ export async function createMailOrderFromDraftWithClient(
 
   let jitOrder: Order | undefined;
   if (funding.type === 'prepaid_balance') {
+    // Any live Pay & Send order on the draft refuses a send from the balance, as the edit lock and
+    // idx_orders_active_jit_draft_unique count them (#679): a dispute can arrive before Stripe's completion, leaving
+    // the order 'disputed' (or 'held') while its draft still waits, and a pack letter would pay again for mail a Stripe
+    // payment was taken for.
     const activeCheckout = await client.query<{ order_id: string }>(
       `SELECT order_id FROM orders
        WHERE draft_id = $1
          AND order_type = 'jit_mail'
-         AND status IN ('checkout_pending', 'paid', 'fulfillment_pending', 'refund_pending')
+         AND status = ANY($2::varchar[])
          AND (status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW())
        LIMIT 1
        FOR UPDATE`,
-      [params.draftId]
+      [params.draftId, [...LIVE_PAY_AND_SEND_STATUSES]]
     );
     if (activeCheckout.rows[0]) {
       throw draftError(
