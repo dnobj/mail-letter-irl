@@ -2066,9 +2066,11 @@ async function processCheckoutSessionEvent(
       );
       // After the resolution above: the alerts this raises are keyed on the
       // same events, and stay open.
-      if (isDispute) await applyRecoveredDisputes(client, order, committedIntent, intentId ?? null, unmatchedMoney.rows);
+      const applied = isDispute
+        ? await applyRecoveredDisputes(client, order, committedIntent, intentId ?? null, unmatchedMoney.rows)
+        : undefined;
       await recordOrderEvent(client, order.order_id, 'stripe.money_event_recovered',
-        order.status, blockedStatus, { eventCount: unmatchedMoney.rows.length });
+        order.status, blockedStatus, { eventCount: unmatchedMoney.rows.length, ...applied });
       return { duplicate: false, orderId: order.order_id, status: blockedStatus };
     }
 
@@ -3621,7 +3623,7 @@ async function applyRecoveredDisputes(
   committedIntent: string | null,
   sessionIntent: string | null,
   events: Array<{ event_id: string; event_type: string; provider_object_id: string | null }>
-): Promise<void> {
+): Promise<{ disputesTakenOver: string[]; sendsBlocked: boolean }> {
   // Each dispute's most recent event: the rows come in the order they were claimed.
   const latestEvent = new Map<string, string>();
   for (const event of events) {
@@ -3639,7 +3641,7 @@ async function applyRecoveredDisputes(
     .filter(row => orderIntent !== null && row.payment_intent_id === orderIntent)
     .map(row => row.dispute_id)
     .sort();
-  if (ours.length === 0) return;
+  if (ours.length === 0) return { disputesTakenOver: [], sendsBlocked: false };
   for (const disputeId of committedIntent === null ? ours : []) {
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`stripe_dispute:${disputeId}`]);
   }
@@ -3655,7 +3657,7 @@ async function applyRecoveredDisputes(
   const disputes = read.rows
     .filter(row => row.user_id === null)
     .sort((a, b) => a.dispute_id.localeCompare(b.dispute_id));
-  if (disputes.length === 0) return;
+  if (disputes.length === 0) return { disputesTakenOver: [], sendsBlocked: false };
   await client.query(
     `UPDATE stripe_disputes SET user_id = $2, updated_at = NOW()
      WHERE dispute_id = ANY($1::text[]) AND user_id IS NULL`,
@@ -3705,6 +3707,10 @@ async function applyRecoveredDisputes(
       ]
     );
   }
+  return {
+    disputesTakenOver: disputes.map(row => row.dispute_id),
+    sendsBlocked: losses.length > 0
+  };
 }
 
 /**

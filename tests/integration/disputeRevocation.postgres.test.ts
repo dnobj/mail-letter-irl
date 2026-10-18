@@ -907,6 +907,15 @@ describePostgres('dispute and refund pack revocation', () => {
       return result.rows;
     }
 
+    async function readRecoveredEvent(orderId: string) {
+      const result = await pool.query<{ metadata: Record<string, unknown> }>(
+        `SELECT metadata FROM commerce_order_events
+          WHERE order_id = $1 AND event_type = 'stripe.money_event_recovered'`,
+        [orderId]
+      );
+      return result.rows.map(row => row.metadata);
+    }
+
     async function readDispute(disputeId: string) {
       const result = await pool.query<{ user_id: string | null; status: string }>(
         'SELECT user_id, status FROM stripe_disputes WHERE dispute_id = $1', [disputeId]
@@ -927,6 +936,9 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(account.sends_blocked_at).not.toBeNull();
       expect(account.sends_blocked_reason).toBe('payment_disputed');
       expect(await readDispute(disputeId)).toEqual({ user_id: userId, status: 'needs_response' });
+      expect(await readRecoveredEvent(orderId)).toEqual([
+        { eventCount: 1, disputesTakenOver: [disputeId], sendsBlocked: true }
+      ]);
       // The recovery never grants the pack, and holds the order as the matched path does.
       expect(await readLedgerStatuses(userId)).toEqual([]);
       const held = await pool.query(
@@ -1142,6 +1154,9 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(account.sends_blocked_at).toBeNull();
       expect(account.sends_blocked_reason).toBeNull();
       expect((await readDispute(disputeId)).user_id).toBe(userId);
+      expect(await readRecoveredEvent(orderId)).toEqual([
+        { eventCount: 1, disputesTakenOver: [disputeId], sendsBlocked: false }
+      ]);
       expect(await readDisputeAlerts(orderId)).toEqual([
         { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null }
       ]);
