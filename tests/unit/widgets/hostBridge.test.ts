@@ -287,6 +287,7 @@ describe('the bridge in an MCP Apps host', () => {
 
   it('reports its height only after the handshake, and only when it changes', async () => {
     let observed: (() => void) | undefined;
+    let measured = 120;
     const sent: Message[] = [];
     const parent = { postMessage: (message: Message) => sent.push(JSON.parse(JSON.stringify(message))) };
     const dom = new JSDOM(bridgePage('<div style="height:120px"></div>'), {
@@ -297,8 +298,8 @@ describe('the bridge in an MCP Apps host', () => {
           constructor(callback: () => void) { observed = callback; }
           observe() {}
         };
-        // jsdom does no layout, so every element measures 120px tall here.
-        (window as any).Element.prototype.getBoundingClientRect = () => ({ height: 120 }) as DOMRect;
+        // jsdom does no layout, so every element measures as the test says.
+        (window as any).Element.prototype.getBoundingClientRect = () => ({ height: measured }) as DOMRect;
       }
     });
     const window = dom.window as any;
@@ -317,6 +318,11 @@ describe('the bridge in an MCP Apps host', () => {
 
     observed!();
     expect(sizes()).toHaveLength(1);
+
+    // Grown, the observer tells the host, rounded up.
+    measured = 563.2;
+    observed!();
+    expect(sizes().map(message => message.params.height)).toEqual([120, 564]);
   });
 
   it('tells ChatGPT its height in whole pixels rounded up, only when it changes, and not where ChatGPT cannot take it', () => {
