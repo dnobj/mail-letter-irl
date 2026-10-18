@@ -3595,23 +3595,23 @@ async function blockAccountSends(
  * applied here: its later events match this order. Any other is left as it
  * was, as no event of it can reach this order.
  *
- * Where the order's committed row has no payment intent, no pack has been
- * granted and no mail queued, and no event of these disputes can find the
- * order, so none waits on it: each is taken over under its own lock, taken
- * after the order's (the other way round from processDisputeEvent). Its row
- * takes the order's account, which processDisputeEvent reads as "its effects
- * ran": its next loss event records only, and unblockAccountSends and
- * countStandingDisputes count it. An event handled now, holding that lock,
- * finishes before the status it wrote is read.
+ * Where the order's committed row has no payment intent, no event of these
+ * disputes can find the order, so none waits on it: each dispute's lock is
+ * taken, after the order's (the other way round from processDisputeEvent), and
+ * an event handled now, holding it, finishes before the dispute is read. Where
+ * the committed row carries the intent, every event of these disputes locks
+ * this order before it touches the dispute's row, so the order's lock
+ * serialises them and no dispute lock is taken: one may be held by an event
+ * waiting for the order.
  *
- * Where the committed row already carries that intent, every event of these
- * disputes locks this order before it touches the dispute's row, so the
- * order's lock serialises them and no dispute lock is taken: one may be held
- * by an event waiting for the order. An open dispute is left to its next
- * event, which runs the whole rule, the order's lots and mail included: its
- * row keeps no account so that event acts; the account's standing disputes
- * count it by that intent (unblockAccountSends, countStandingDisputes). A
- * closed one has no event to come and is taken over.
+ * A dispute is taken over when the order is still at Checkout with no intent
+ * committed, so nothing has been granted or queued for it, or when the dispute
+ * is closed and has no event to come: its row takes the order's account, which
+ * processDisputeEvent reads as "its effects ran", so its next loss event
+ * records only. Any other is left to its next event, which matches this order
+ * and runs the whole rule, the order's lots and mail included; its row keeps
+ * no account so that event acts. unblockAccountSends and countStandingDisputes
+ * count both, by account or by the order's intent.
  *
  * A dispute's payment intent is read once, unlocked; it changes only from none
  * to one, which Stripe does not do for a card payment's dispute.
@@ -3635,48 +3635,39 @@ async function applyRecoveredDisputes(
     }
   }
   const disputeIds = [...latestEvent.keys()].sort();
-  const intents = await client.query<{
-    dispute_id: string; payment_intent_id: string | null; resolved_at: Date | null;
-  }>(
-    'SELECT dispute_id, payment_intent_id, resolved_at FROM stripe_disputes WHERE dispute_id = ANY($1::text[])',
+  const intents = await client.query<{ dispute_id: string; payment_intent_id: string | null }>(
+    'SELECT dispute_id, payment_intent_id FROM stripe_disputes WHERE dispute_id = ANY($1::text[])',
     [disputeIds]
   );
   const orderIntent = committedIntent ?? sessionIntent;
-  const ours = intents.rows.filter(row => orderIntent !== null && row.payment_intent_id === orderIntent);
-  const leftToNextEvent = ours
-    .filter(row => committedIntent !== null && row.resolved_at === null)
-    .map(row => row.dispute_id);
-  const takenOver = ours
+  const ours = intents.rows
+    .filter(row => orderIntent !== null && row.payment_intent_id === orderIntent)
     .map(row => row.dispute_id)
-    .filter(disputeId => !leftToNextEvent.includes(disputeId))
     .sort();
-
-  const columns = 'dispute_id, status, resolved_at, reason, amount_cents, currency, charge_id';
-  type RecoveredDispute = {
+  if (ours.length === 0) return;
+  for (const disputeId of committedIntent === null ? ours : []) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`stripe_dispute:${disputeId}`]);
+  }
+  const read = await client.query<{
     dispute_id: string; status: string; resolved_at: Date | null; reason: string | null;
     amount_cents: number; currency: string; charge_id: string;
-  };
-  const disputes: RecoveredDispute[] = [];
-  if (leftToNextEvent.length > 0) {
-    const left = await client.query<RecoveredDispute>(
-      `SELECT ${columns} FROM stripe_disputes WHERE dispute_id = ANY($1::text[])`,
-      [leftToNextEvent]
-    );
-    disputes.push(...left.rows);
-  }
+  }>(
+    `SELECT dispute_id, status, resolved_at, reason, amount_cents, currency, charge_id
+     FROM stripe_disputes WHERE dispute_id = ANY($1::text[])`,
+    [ours]
+  );
+  const disputes = [...read.rows].sort((a, b) => a.dispute_id.localeCompare(b.dispute_id));
+  const nothingFunded = committedIntent === null && order.status === 'checkout_pending';
+  const takenOver = disputes
+    .filter(row => nothingFunded || row.resolved_at !== null)
+    .map(row => row.dispute_id);
   if (takenOver.length > 0) {
-    for (const disputeId of committedIntent === null ? takenOver : []) {
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`stripe_dispute:${disputeId}`]);
-    }
-    const taken = await client.query<RecoveredDispute>(
+    await client.query(
       `UPDATE stripe_disputes SET user_id = COALESCE(user_id, $2), updated_at = NOW()
-       WHERE dispute_id = ANY($1::text[])
-       RETURNING ${columns}`,
+       WHERE dispute_id = ANY($1::text[])`,
       [takenOver, order.user_id]
     );
-    disputes.push(...taken.rows);
   }
-  disputes.sort((a, b) => a.dispute_id.localeCompare(b.dispute_id));
   const losses = disputes.filter(row => !NON_LOSS_DISPUTE_STATUSES.has(row.status));
   const shown = losses[0] ?? disputes[0];
   if (shown) {
