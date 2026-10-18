@@ -74,6 +74,7 @@ import {
 } from "./arriveByInput.js";
 import type { GiftCardContent, GiftCardState } from "../services/giftCardRenderer.js";
 import { DELIVERY_ESTIMATE, deliveryWordsOf } from "../content/delivery.js";
+import { withDisplaySignature } from "../services/signatureDisplay.js";
 
 // ============================================================================
 // Types
@@ -1325,10 +1326,12 @@ export async function createLetterDraftAndBuildOutput(
   // Generate preview HTML
   // Use preview images (compressed) for the HTML to reduce payload size
   // Full-quality images are stored separately in the draft for PostGrid
-  const previewHtml = layout
+  // The signature from its small copy (#614); the print keeps the stored one.
+  const shown = layout ? await withDisplaySignature(layout) : layout;
+  const previewHtml = shown
     ? renderLetterPreviewDocument(
         renderPreviewSvg(
-          withDisplayImage(layout, layoutType === "header_image" ? headerImagePreview : inlineImagePreview),
+          withDisplayImage(shown, layoutType === "header_image" ? headerImagePreview : inlineImagePreview),
           // Where PostGrid stamps them, so the page shows what prints. These
           // are the addresses as sent: after any correction above.
           { addresses: { from: stampedAddressLines(sender), to: stampedAddressLines(recipient) } }

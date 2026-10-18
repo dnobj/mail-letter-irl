@@ -60,8 +60,8 @@ function png(width: number, height: number): string {
 }
 const FULL = png(1950, 600);
 const SMALL = png(390, 120);
-// A saved signature's copy, as a signed draft keeps it (#608).
-const SIGNATURE = png(1200, 300);
+// A saved signature's copy, as a signed draft keeps it (#608). Narrow enough to draw as stored (#614), so these tests never take the reduction's fallback.
+const SIGNATURE = png(480, 120);
 
 /** A pending letter draft and the Classic preview the preview tools drew for it. */
 function draft(options: { layoutType?: LetterLayoutType; gift?: boolean; bodyText?: string; signed?: boolean } = {}): DraftForStationery {
@@ -126,11 +126,26 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+/** A signature as the cleaner stores one, decodable: 1200 x 300, grey ink on white (#614). */
+async function realSignature(): Promise<string> {
+  const strokes = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300"><rect width="100%" height="100%" fill="#fff"/>' +
+      '<path d="M20 220 C 300 0, 700 300, 1180 80" stroke="#000" stroke-width="8" fill="none"/></svg>'
+  );
+  const png = await (await import('sharp')).default(strokes).toColourspace('b-w').png().toBuffer();
+  return `data:image/png;base64,${png.toString('base64')}`;
+}
+/** The pixel size of the preview's signature. */
+const drawnSignatureSize = (html: string) => {
+  const bytes = Buffer.from(html.match(/<image data-role="signature" href="([^"]+)"/)![1].split(',')[1], 'base64');
+  return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+};
+
 describe('set_stationery', () => {
   it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft());
     vi.mocked(setDraftStationery).mockImplementation(async (...args: unknown[]) => {
-      (args.at(-1) as (version: string, before: string) => void)('0123456789abcdef', 'fedcba9876543210');
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: null });
       return null;
     });
     expect(await run({ stationery: 'Botanical' })).toMatchObject({ contentVersion: '0123456789abcdef', contentVersionBefore: 'fedcba9876543210' });
@@ -337,6 +352,15 @@ describe('set_stationery', () => {
     );
   });
 
+  it('draws the restyled page from a small copy of the signature, the draft keeping its own (#614)', async () => {
+    const stored = await realSignature();
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ signed: true }), signature_image: stored });
+    await run({ stationery: 'botanical' });
+    const change = written();
+    expect(drawnSignatureSize(change.previewHtml)).toEqual([480, 120]);
+    expect(change.previewHtml).not.toContain(stored);
+  });
+
   it.each(['text_only', 'header_image', 'inline_image'] as const)(
     'draws a signed %s letter again with its own signature, records pdf-4 in the page, and keeps its picture (#608)',
     async layoutType => {
@@ -401,6 +425,21 @@ describe('set_stationery says how the letter travels, with its price (#625)', ()
       expect(output, String(offered)).toMatchObject({ mailService: service, deliveryClass, canSendNow: false });
       expect(output.deliveryDisclaimer, String(offered)).toContain('signed for at delivery');
     }
+  });
+
+  it('names how the letter travels once it is restyled, not as read before (#625 follow-up)', async () => {
+    offer();
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft(), mail_service: 'certified' } as never);
+    vi.mocked(setDraftStationery).mockImplementationOnce(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: 'standard' });
+      return null;
+    });
+    const output = await run({ stationery: 'Botanical' });
+    // Turned back to ordinary mail between the read and the lock: First-Class, and payable from a pack again.
+    expect(output).toMatchObject({ deliveryClass: 'USPS First-Class Mail', canSendNow: true });
+    expect(output).not.toHaveProperty('mailService');
+    // Priced by the row its version describes (#625 follow-up).
+    expect(output).toMatchObject({ contentVersion: '0123456789abcdef' });
   });
 
   it('says nothing of how text that is not a service would travel', async () => {

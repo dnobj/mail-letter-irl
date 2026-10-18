@@ -227,6 +227,74 @@ describePostgres('content retention sweep', () => {
   }
 
   /**
+   * A letter paid from credits a failed or cancelled send gave back (#729): the first lot (a pack's, or a promo's),
+   * then `returns` returned lots, each linked to the one before as returnConsumedCreditsForLetter writes it ('adjustment',
+   * no order, related_ledger_id, source_metadata.reason 'send_failed'), and the letter's deduction drawn from the last.
+   * `link: 'none'` writes the last return without its link; `reason` writes it as another kind of adjustment.
+   */
+  async function seedLetterPaidFromReturnedCredits(options: {
+    daysAgo: number;
+    orderStatus?: string;
+    origin?: 'purchase' | 'promo';
+    returns?: number;
+    link?: 'none';
+    reason?: string;
+    userId?: string;
+  }): Promise<{ letterId: string; orderId: string | null; userId: string }> {
+    const userId = options.userId ?? (await seedUser());
+    const { letterId } = await seedSentLetter({ daysAgo: options.daysAgo, userId });
+    let orderId: string | null = null;
+    if ((options.origin ?? 'purchase') === 'purchase') {
+      orderId = `order_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (
+           order_id, user_id, credits, amount_cents, currency, status,
+           order_type, product_code, idempotency_key
+         ) VALUES ($1, $2, 10, 1000, 'USD', $3, 'letter_pack', 'credit-pack-10', $4)`,
+        [orderId, userId, options.orderStatus ?? 'fulfilled', `idem_${orderId}`]
+      );
+    }
+    let previous = await pool.query<{ ledger_id: string }>(
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, source_order_id, expiration_policy, status
+       ) VALUES ($1, 10, 8, $2, $3, $4, 'never', 'active')
+       RETURNING ledger_id`,
+      [userId, options.origin ?? 'purchase', orderId ?? `promo_${randomUUID()}`, orderId]
+    );
+    const returns = options.returns ?? 1;
+    for (let i = 0; i < returns; i++) {
+      const last = i === returns - 1;
+      previous = await pool.query<{ ledger_id: string }>(
+        `INSERT INTO credit_ledger (
+           user_id, initial_amount, remaining_amount, source_type,
+           source_reference_id, source_metadata, activated_at, expiration_policy, status, description, related_ledger_id
+         ) VALUES ($1, 2, 2, 'adjustment', $2, $3::jsonb, NOW(), 'never', 'active', 'Returned after cancelled send', $4)
+         RETURNING ledger_id`,
+        [
+          userId,
+          orderId,
+          JSON.stringify({ reason: last && options.reason ? options.reason : 'send_failed', letter_id: `letter_${randomUUID()}`, restores_ledger_id: previous.rows[0].ledger_id }),
+          last && options.link === 'none' ? null : previous.rows[0].ledger_id
+        ]
+      );
+    }
+    const txn = await pool.query<{ transaction_id: number }>(
+      `INSERT INTO credit_transactions (
+         user_id, amount, balance_after, type, reference_type, reference_id
+       ) VALUES ($1, -2, 8, 'deduction', 'letter', $2)
+       RETURNING transaction_id`,
+      [userId, letterId]
+    );
+    await pool.query(
+      `INSERT INTO credit_consumption (transaction_id, ledger_id, amount, ledger_remaining_after)
+       VALUES ($1, $2, 2, 0)`,
+      [txn.rows[0].transaction_id, previous.rows[0].ledger_id]
+    );
+    return { letterId, orderId, userId };
+  }
+
+  /**
    * letter_jobs couples status to provider_outcome, and 'held' additionally
    * requires held_at and hold_reason (valid_letter_job_outcome_state and
    * valid_letter_job_hold, migration 023). A fixture that ignores the state
@@ -632,6 +700,33 @@ describePostgres('content retention sweep', () => {
       }
     });
 
+    it('anonymizes one paid from credits an earlier cancel gave back, judged by the pack that first paid (#729)', async () => {
+      // The common case #729 names: a customer cancels to change a date, then sends again with the credits that came back.
+      const seedCancelledFromReturn = async (orderStatus: string) => {
+        const { letterId } = await seedLetterPaidFromReturnedCredits({ daysAgo: 1, orderStatus });
+        await pool.query(
+          `UPDATE letters SET status = 'cancelled', sent_at = NULL, arrive_by = CURRENT_DATE + 30, mail_on = CURRENT_DATE + 20
+            WHERE letter_id = $1`,
+          [letterId]
+        );
+        await seedJob(letterId, 'cancelled');
+        await pool.query("UPDATE letter_jobs SET mail_hold_until = NOW() + INTERVAL '20 days' WHERE letter_id = $1", [letterId]);
+        await pool.query(
+          `INSERT INTO letter_status_history (letter_id, old_status, new_status, source, changed_at)
+           VALUES ($1, 'queued', 'cancelled', 'customer', NOW() - INTERVAL '30 days')`,
+          [letterId]
+        );
+        return letterId;
+      };
+      const settled = await seedCancelledFromReturn('fulfilled');
+      const disputed = await seedCancelledFromReturn('disputed');
+
+      await expect(retention.previewCancelledHeldLetterContent()).resolves.toMatchObject({ due: 1, heldBack: 1 });
+      expect(await retention.purgeCancelledHeldLetterContent()).toBe(1);
+      expect((await readLetter(settled)).redacted_at).not.toBeNull();
+      expect((await readLetter(disputed)).redacted_at).toBeNull();
+    });
+
     it('holds one whose job is not settled', async () => {
       const letterId = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
       await pool.query("UPDATE letter_jobs SET status = 'pending' WHERE letter_id = $1", [letterId]);
@@ -768,6 +863,50 @@ describePostgres('content retention sweep', () => {
       expect(await retention.purgeExpiredLetterContent()).toBe(1);
 
       expect((await readLetter(letterId)).content).toEqual({});
+    });
+
+    it('judges a letter paid from returned credits by the pack that first paid, through returns of returns (#729)', async () => {
+      // Before #729 a returned lot was money with no order, so each of these was held back for good.
+      const once = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled' });
+      const twice = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled', returns: 2 });
+      const promo = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, origin: 'promo' });
+      // Held: the first pack is disputed, through one return and through two.
+      const disputed = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'disputed' });
+      const disputedTwice = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'disputed', returns: 2 });
+
+      await expect(retention.previewExpiredLetterContent()).resolves.toMatchObject({ due: 3, heldBack: 2 });
+      expect(await retention.purgeExpiredLetterContent()).toBe(3);
+      for (const seeded of [once, twice, promo]) {
+        expect((await readLetter(seeded.letterId)).content, seeded.letterId).toEqual({});
+      }
+      for (const seeded of [disputed, disputedTwice]) {
+        expect((await readLetter(seeded.letterId)).content.bodyText, seeded.letterId).toBe(SECRET_BODY);
+      }
+
+      // Their orders settle (the order-status arm alone: a refund or a lost dispute also revokes the returned lot, which holds): those go too.
+      await pool.query("UPDATE orders SET status = 'refunded' WHERE order_id = ANY($1)", [[disputed.orderId, disputedTwice.orderId]]);
+      expect(await retention.purgeExpiredLetterContent()).toBe(2);
+    });
+
+    it('holds a letter paid from a return it cannot follow, or from an operator adjustment, as before (#729)', async () => {
+      const unlinked = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled', link: 'none' });
+      const compensation = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled', reason: 'operator_compensation' });
+      const revoked = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled' });
+      await pool.query(
+        `UPDATE credit_ledger SET status = 'revoked'
+          WHERE ledger_id = (SELECT cc.ledger_id FROM credit_consumption cc
+                               JOIN credit_transactions t ON t.transaction_id = cc.transaction_id
+                              WHERE t.reference_id = $1)`,
+        [revoked.letterId]
+      );
+      // The control, seeded the same way: the seed itself selects.
+      const control = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled' });
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+      expect((await readLetter(control.letterId)).content).toEqual({});
+      for (const seeded of [unlinked, compensation, revoked]) {
+        expect((await readLetter(seeded.letterId)).content.bodyText, seeded.letterId).toBe(SECRET_BODY);
+      }
     });
 
     it('releases the hold once a dispute resolves', async () => {

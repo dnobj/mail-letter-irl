@@ -98,7 +98,7 @@ describe('retention sweep guards (#153)', () => {
       expect(sql).toContain('AND NOT EXISTS ( SELECT 1 FROM letter_jobs j WHERE j.letter_id = l.letter_id AND NOT (j.status = ANY($2::varchar[])) )');
       expect(sql).toContain('AND NOT EXISTS ( SELECT 1 FROM orders o WHERE o.letter_id = l.letter_id AND NOT (o.status = ANY($3::varchar[])) )');
       expect(sql).toContain("lot.status = 'revoked'");
-      expect(sql).toContain('OR (o.order_id IS NULL AND lot.source_type::text = ANY($4::varchar[]))');
+      expect(sql).toContain('OR (o.order_id IS NULL AND origin.source_type::text = ANY($4::varchar[]))');
       expect(params.slice(1, 4)).toEqual([SETTLED_JOB_STATUSES, SETTLED_ORDER_STATUSES, ['purchase', 'adjustment', 'refund']]);
     });
 
@@ -224,11 +224,17 @@ describe('retention sweep guards (#153)', () => {
       await purgeExpiredLetterContent();
       const sql = sqlFrom(mocks.query.mock.calls[0]);
 
-      expect(sql).toContain('LEFT JOIN orders o ON o.order_id = lot.source_order_id');
+      expect(sql).toContain('LEFT JOIN orders o ON o.order_id = origin.source_order_id');
       expect(sql).toContain('AND txn.reference_id = l.letter_id');
+      // Judged by the lot that first paid (#729): the chain of a letter's returned credits is followed, and only that.
+      expect(sql).toContain(
+        "JOIN credit_ledger up ON up.ledger_id = chain.related_ledger_id WHERE chain.source_type::text = 'adjustment' " +
+          "AND chain.source_metadata->>'reason' = 'send_failed' AND chain.depth < 32"
+      );
+      expect(sql).toContain('SELECT chain.source_type, chain.source_order_id FROM chain ORDER BY chain.depth DESC LIMIT 1');
       expect(sql).toContain(
         "( lot.status = 'revoked' " +
-          'OR (o.order_id IS NULL AND lot.source_type::text = ANY($5::varchar[])) ' +
+          'OR (o.order_id IS NULL AND origin.source_type::text = ANY($5::varchar[])) ' +
           'OR (o.order_id IS NOT NULL AND NOT (o.status = ANY($4::varchar[]))) )'
       );
     });
@@ -685,7 +691,7 @@ describe('retention sweep guards (#153)', () => {
           'AND NOT (j.status = ANY($3::varchar[])) ' +
           // A letter that failed for good is not held by its failed job (#730).
           "AND NOT (j.status = 'failed' AND NOT (j.provider_outcome = 'not_dispatched' AND j.attempts < j.max_attempts) AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = j.letter_id AND fl.status = 'failed')) )",
-        'LEFT JOIN orders o ON o.order_id = lot.source_order_id'
+        'LEFT JOIN orders o ON o.order_id = origin.source_order_id'
       ]) {
         expect(previewSql).toContain(clause);
         expect(enforceSql).toContain(clause);

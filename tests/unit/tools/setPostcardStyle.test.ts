@@ -521,7 +521,7 @@ describe('the set_postcard_style tool', () => {
     expect(described()).not.toMatch(/size|Pay & Send/);
   });
 
-  // Steering r53: the model never sees the card's changes (#795), and a size or front it gives again as last seen would
+  // Steering r55: the model never sees the card's changes (#795), and a size or front it gives again as last seen would
   // undo the person's change on the postcard card.
   it('says, where the app shows the card, that the card changes the style unseen, in the words of what is offered', () => {
     const described = (client?: ClientProfile) => (setPostcardStyleTool.description as (client?: ClientProfile) => string)(client);
@@ -541,7 +541,7 @@ describe('the set_postcard_style tool', () => {
       }
       expect(plain).not.toContain('postcard card');
     }
-    expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(53);
+    expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(55);
   });
 
   it('is a card-callable, idempotent drafting tool', () => {

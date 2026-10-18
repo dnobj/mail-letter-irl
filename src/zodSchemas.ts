@@ -201,9 +201,9 @@ export const ORDER_CARRIER_TRACKING_URL_DESCRIPTION =
 // How a letter travels (#625), declared once on every answer that carries a letter's terms: get_draft_status,
 // set_stationery, set_letter_words, set_letter_signature and set_mail_service.
 export const LETTER_TRAVEL_MAIL_SERVICE_DESCRIPTION =
-  "With the terms, for a letter that is certified mail now: which service. Absent beside the delivery words: ordinary mail";
+  "With the terms, for a letter that is certified mail now, and for a sent letter that went by it: which service. Absent beside the delivery words: ordinary mail";
 export const LETTER_TRAVEL_DELIVERY_CLASS_DESCRIPTION =
-  "With the terms, for a letter that is certified mail or while certified mail is offered: how it is delivered now, as a new preview would say it. A card draws it on its Delivery line";
+  "With the terms, for a letter that is certified mail or while certified mail is offered, and for a sent letter: how it is delivered, as a new preview would say it. A card draws it on its Delivery line";
 export const LETTER_TRAVEL_DELIVERY_DISCLAIMER_DESCRIPTION = "With it, the words that qualify the delivery";
 export const ORDER_CERTIFIED_NOTE_DESCRIPTION =
   "Certified mail only: what to tell the person about the tracking number and the return receipt. It promises nothing about delivery or legal effect.";

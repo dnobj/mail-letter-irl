@@ -319,7 +319,7 @@ export const setPostcardStyleTool: McpToolDefinition<SetPostcardStyleInput, SetP
   // In the words of what is offered, read as the tools are listed, so a model
   // is never steered to an argument this deployment withholds (#601 review round 1).
   // Where the app shows our postcard card, the person may change the size and
-  // front there unseen (steering r53), as the letter card's words (#795).
+  // front there unseen (steering r55), as the letter card's words (#795).
   description: (client?: ClientProfile) => {
     const sizes = isPostcardSizesOffered();
     const layouts = isPostcardLayoutsOffered();

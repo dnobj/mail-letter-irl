@@ -223,7 +223,9 @@ export function renderPurchaseReturnPage(params: {
 }): string {
   const { cancelled } = params;
   const action = chatgptReturnAction(params.userAgent, params.conversationUrl ?? null);
-  const heading = cancelled ? 'Checkout cancelled' : 'Payment received';
+  // Stripe's redirect says only where it sent the browser, not that the payment went through (#711): the heading
+  // claims neither way, and the card's own purchase status is what the person acts on.
+  const heading = cancelled ? 'Checkout cancelled' : 'Checking your payment';
   const body = cancelled
     ? 'Nothing was charged and your draft was not sent. Go back to ChatGPT to try again or choose a letter pack.'
     : 'Letter IRL updates the purchase status in ChatGPT as soon as Stripe confirms the payment.';

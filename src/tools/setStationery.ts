@@ -8,6 +8,7 @@ import { CUSTOM_THEME, type PageFit } from '../render/index.js';
 import { getDesign } from '../services/stationeryDesignService.js';
 import type { PreviewStationery } from './stationeryInput.js';
 import { getDraftForStationery, setDraftStationery } from '../services/draftService.js';
+import { withDisplaySignature } from '../services/signatureDisplay.js';
 import { editorPageFit, layoutLetterForPreview, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter, type LetterTravel } from './letterHelpers.js';
 import { letterOption } from '../services/mailOptions.js';
 import { draftLetter, draftRefusals, draftRefuser, editableDraft, type DraftRefusal } from './draftEdit.js';
@@ -149,7 +150,8 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   // the letter's own, a gift letter's card, as they were.
   const previewHtml = redrawLetterPreview(
     { previewHtml: draft.preview_html, pages: pagesBefore },
-    layout,
+    // The signature from its small copy (#614); the print keeps the stored one.
+    await withDisplaySignature(layout),
     { sender, recipient, bodyText, signOff },
     stationery
   );
@@ -159,12 +161,14 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   // With the words it was drawn from, refused if they changed meanwhile (#586).
   let contentVersion: string | undefined;
   let contentVersionBefore: string | undefined;
+  // How the written row travels, read with its version under the lock (#625 follow-up).
+  let writtenService: string | null | undefined;
   const refusal = await setDraftStationery(
     draftId,
     userId,
     // And with the signature it was drawn with (#608), which set_letter_signature changes in place.
     { stationery, previewHtml, pages, drawnFrom: { bodyText: draft.body_text, signOff: draft.sign_off, signature: draft.signature_image } },
-    context.now(), (version, before) => { contentVersion = version; contentVersionBefore = before; }
+    context.now(), (version, before, written) => { contentVersion = version; contentVersionBefore = before; writtenService = written.mailService; }
   );
   if (refusal) throw refused(...STATIONERY_REFUSALS[refusal], context);
 
@@ -174,7 +178,9 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them (#586).
-  const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
+  // How the written letter travels, not as read before the lock (#625 follow-up); as read when the version was not.
+  const service = writtenService === undefined ? draft.mail_service : writtenService;
+  const payment = letterPayment(letterOption(layout, service), Number(draft.required_credits ?? 2), gift, context, draftId);
   return {
     ...(contentVersion ? { contentVersion, contentVersionBefore } : {}),
     draftId,
@@ -183,7 +189,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     ...(pages > 1 ? { pages } : {}),
     ...payment,
     ...(isWordsEditorOffered() ? { pageFit: editorPageFit(layout, stationery) } : {}),
-    message: messageFor(stationery, pages, pagesBefore, draft.mail_service)
+    message: messageFor(stationery, pages, pagesBefore, service)
   };
 }
 

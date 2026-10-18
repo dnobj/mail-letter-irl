@@ -34,7 +34,8 @@ const ROW = {
   status: 'in_transit',
   tracking_id: 'letter_postgrid_123',
   created_at: new Date('2026-09-30T12:00:00Z'),
-  sent_at: new Date('2026-09-30T12:05:00Z'),
+  // Sent a day ago, whenever the test runs: inside the month the status sync looks for a carrier number (#625).
+  sent_at: new Date(Date.now() - 24 * 60 * 60 * 1000),
   provider: 'postgrid',
   arrive_by: null,
   mail_on: null,
@@ -66,6 +67,7 @@ async function listed(row: Record<string, unknown>) {
     .mockResolvedValueOnce({ rows: [{ count: '1' }] } as never);
   const { body } = await call('/api/letters');
   const { mailService, carrierTrackingNumber, carrierTrackingUrl, trackingNumber } = body.letters[0];
+  expect(body.letters[0].carrierNumberLookupEnded).toBe(false);
   return { mailService, carrierTrackingNumber, carrierTrackingUrl, trackingNumber };
 }
 
@@ -141,6 +143,23 @@ describe('certified mail on the letters routes (#625)', () => {
   it('shows no number beside an ordinary letter, whatever the column holds', async () => {
     const letter = await listed({ mail_service: 'standard', carrier_tracking_number: '9407100000000000000000' });
     expect(letter).toMatchObject({ mailService: 'standard', carrierTrackingNumber: null, carrierTrackingUrl: null });
+  });
+
+  it('says when the sync has stopped looking for a certified letter\'s number (#625 follow-up)', async () => {
+    const ago = (days: number) => new Date(Date.now() - days * 86400000);
+    const ended = async (row: Record<string, unknown>) => {
+      vi.mocked(query).mockReset();
+      vi.mocked(query)
+        .mockResolvedValueOnce({ rows: [{ ...ROW, ...row }] } as never)
+        .mockResolvedValueOnce({ rows: [{ count: '1' }] } as never);
+      return (await call('/api/letters')).body.letters[0].carrierNumberLookupEnded;
+    };
+    expect(await ended({ mail_service: 'certified', sent_at: ago(31) })).toBe(true);
+    expect(await ended({ mail_service: 'certified_return_receipt', sent_at: ago(31) })).toBe(true);
+    expect(await ended({ mail_service: 'certified', sent_at: ago(5) })).toBe(false);
+    expect(await ended({ mail_service: 'certified', sent_at: null })).toBe(false);
+    expect(await ended({ mail_service: 'certified', sent_at: ago(31), carrier_tracking_number: '9407100000000000000000' })).toBe(false);
+    expect(await ended({ mail_service: 'standard', sent_at: ago(31) })).toBe(false);
   });
 
   it('says the same on the single-letter route', async () => {

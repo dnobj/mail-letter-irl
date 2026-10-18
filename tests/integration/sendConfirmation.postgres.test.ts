@@ -324,6 +324,28 @@ describePostgres('the confirmation page API against PostgreSQL (#470)', () => {
     expect((await draftRow(draftId)).status).toBe('pending');
   });
 
+  it('refuses to send from the balance while a Pay & Send order on the draft is disputed or held, and changes nothing (#679)', async () => {
+    for (const status of ['disputed', 'held']) {
+      const userId = await seedUser();
+      const draftId = await seedDraft(userId);
+      const orderId = `order_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (
+           order_id, user_id, order_type, draft_id, product_code, product_snapshot,
+           amount_cents, currency, stripe_payment_intent_id, idempotency_key, status
+         ) VALUES ($1, $2, 'jit_mail', $3, 'jit-letter', '{}', 499, 'usd', $4, $5, $6)`,
+        [orderId, userId, draftId, `pi_${orderId}`, `jit-checkout:${orderId}`, status]
+      );
+
+      const { status: code, body } = await call(userId, 'POST', draftId);
+
+      expect(code, status).toBe(409);
+      expect(body.error, status).toBe('checkout_open');
+      expect(await accountState(userId), status).toEqual({ credits: 10, letters: '0', jobs: '0' });
+      expect((await draftRow(draftId)).status, status).toBe('pending');
+    }
+  });
+
   it('shows an expired draft as expired, and refuses to send it', async () => {
     const userId = await seedUser();
     const draftId = await seedDraft(userId, { expired: true });
