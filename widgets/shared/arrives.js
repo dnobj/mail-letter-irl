@@ -19,8 +19,10 @@
 
   var CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
   // How soon after a key in the date field a change is the key's own (the browser fires it as the key goes in), not a
-  // date chosen in the picker, in milliseconds.
-  var KEY_CHANGE_MS = 50;
+  // date chosen in the picker, in milliseconds: room for a key queued behind a redraw (ChatGPT draws the card again at
+  // each key) and for a browser that rounds timestamps to 100 ms, while opening the picker and choosing in it take
+  // longer (#810 review round 2).
+  var KEY_CHANGE_MS = 200;
   var WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 

@@ -547,13 +547,13 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     expect(setCalls(card).map(request => request.params.arguments)).toEqual([{ draftId: 'draft_0001', arriveBy: '2026-11-05' }]);
   });
 
-  it('sets a date chosen in the picker after a key in the field at once: the picker is no key (#810 review round 1)', async () => {
+  it('sets a date chosen in the picker after a key in the field at once: the picker is no key (#810 review rounds 1 and 2)', async () => {
     const card = await offering();
     const input = dateInput(card);
 
     // A key (the month, or the keys that open the picker), then a choice in the picker a moment later.
     input.dispatchEvent(new card.window.KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }));
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await new Promise(resolve => setTimeout(resolve, 300));
     input.value = '2026-11-05';
     input.dispatchEvent(new card.window.Event('change'));
     await flush();
@@ -570,7 +570,7 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     const input = dateInput(card);
 
     input.dispatchEvent(new card.window.KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }));
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await new Promise(resolve => setTimeout(resolve, 300));
     input.value = '2026-10-13';
     input.dispatchEvent(new card.window.Event('change'));
     await flush();

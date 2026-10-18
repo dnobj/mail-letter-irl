@@ -2844,7 +2844,8 @@ ChatGPT (DEV) with "Allow once", then Claude (DEV) for the MCP Apps card.
 3. [ ] Pick a date before the earliest (typed into the field). Verify the card says the earliest on offer
    and keeps the dates it had. Then type a date on offer, part by part, and press Enter (or leave the field): verify it
    is set once, as typed, and the field keeps every part while typing (on widgets v95 the year's first digit was set as
-   the year 0002 and refused, and in ChatGPT the parts typed were wiped as the card was drawn again).
+   the year 0002 and refused, and in ChatGPT the parts typed were wiped as the card was drawn again). Then type a part
+   of a date, open the picker from the keyboard (Alt+Down or F4), and choose a date in it: verify it is set at once.
 4. [ ] Pick a date and press **Schedule Letter**. Verify **Scheduled**, the order id and the mail date,
    and that the balance went down by one letter.
 5. [ ] Press **Cancel this letter**, then **Yes, cancel this letter**. Verify **Cancelled** with the message
