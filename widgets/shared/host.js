@@ -74,7 +74,8 @@
   // as wide as the card lets it be, so the narrower page is also shorter: measured then, Claude's letter card was
   // 563 px, which fit its frame with the bar but not without it (571 px), so the bar stayed with nothing to scroll
   // (STUDIO-01, DEV 2026-10-18). The bar is hidden only while measuring, and only when there is one; that costs two
-  // layouts, and the page's scroll position, which the shorter page could clamp, is put back with the bar.
+  // layouts, and the page's scroll position, which the shorter page could clamp, is put back once the bar is (an
+  // html scroll-behavior of smooth would make that a scroll the reader sees: no card sets one).
   function pageHeight() {
     var before = root.style.overflowY;
     var barred = before !== "hidden" && root.clientWidth < window.innerWidth;

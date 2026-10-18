@@ -374,7 +374,8 @@ describe('the bridge in an MCP Apps host', () => {
     Object.defineProperty(window.Element.prototype, 'scrollTop', {
       configurable: true,
       get: () => state.scrollTop ?? 0,
-      set: (value: number) => { state.scrollTop = value; }
+      // A position set while the bar is hidden is clamped to the shorter page too.
+      set: (value: number) => { state.scrollTop = !barShown() && state.bar ? Math.min(value, 8) : value; }
     });
     window.Element.prototype.getBoundingClientRect = () => {
       if (!barShown() && state.bar) state.scrollTop = Math.min(state.scrollTop ?? 0, 8);
