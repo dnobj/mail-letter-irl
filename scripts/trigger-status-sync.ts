@@ -1,11 +1,12 @@
 import { syncLetterStatuses } from '../src/services/statusSyncService.js';
+import { CARRIER_NUMBER_SYNC_DAYS } from '../src/config/certifiedMail.js';
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
 
   console.log(`Running status sync (dryRun: ${dryRun})...`);
 
-  const result = await syncLetterStatuses(dryRun, 30);
+  const result = await syncLetterStatuses(dryRun, CARRIER_NUMBER_SYNC_DAYS);
 
   console.log('\nResults:');
   console.log(`  Checked: ${result.checked}`);

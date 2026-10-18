@@ -12,7 +12,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/services/draftService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/services/draftService.js')>()),
   getDraftForStationery: vi.fn(),
-  readDraftMailService: vi.fn(),
   setDraftWords: vi.fn()
 }));
 
@@ -26,7 +25,7 @@ vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
   getSendEligibility: vi.fn()
 }));
 
-import { getDraftForStationery, readDraftMailService, setDraftWords } from '../../../src/services/draftService.js';
+import { getDraftForStationery, setDraftWords } from '../../../src/services/draftService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { setLetterWordsTool } from '../../../src/tools/setLetterWords.js';
 import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
@@ -234,7 +233,7 @@ describe('set_letter_words', () => {
   it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(10) }) as never);
     vi.mocked(setDraftWords).mockImplementation(async (...args: unknown[]) => {
-      (args.at(-1) as (version: string, before: string) => void)('0123456789abcdef', 'fedcba9876543210');
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: null });
       return null;
     });
     expect(await change('Dear Sam,\n\nThe garden is in.')).toMatchObject({ contentVersion: '0123456789abcdef', contentVersionBefore: 'fedcba9876543210' });
@@ -303,7 +302,10 @@ describe('set_letter_words', () => {
   it('prices by how the letter travels once the words are written, not as read before (#625 follow-up)', async () => {
     // set_mail_service landed between the read and the lock: the letter now goes certified.
     vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), mail_service: 'standard' } as never);
-    vi.mocked(readDraftMailService).mockResolvedValueOnce('certified');
+    vi.mocked(setDraftWords).mockImplementationOnce(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: 'certified' });
+      return null;
+    });
 
     const output = await change(lines(40));
 
@@ -311,13 +313,18 @@ describe('set_letter_words', () => {
     expect(output).toMatchObject({ mailService: 'certified', deliveryClass: 'USPS Certified Mail' });
     expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2, mailService: 'certified' });
-    // Read once the change is written, not before its lock (#625 follow-up).
-    expect(readDraftMailService).toHaveBeenCalledWith(vi.mocked(setDraftWords).mock.calls[0][0]);
-    expect(vi.mocked(readDraftMailService).mock.invocationCallOrder[0]).toBeGreaterThan(vi.mocked(setDraftWords).mock.invocationCallOrder[0]);
+    // Priced by the row its version describes (#625 follow-up).
+    expect(output).toMatchObject({ contentVersion: '0123456789abcdef' });
 
-    // Gone by then: priced as it was read.
+    // Turned ordinary under the lock: the written row says so.
     vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), mail_service: 'certified' } as never);
-    vi.mocked(readDraftMailService).mockResolvedValueOnce(null);
+    vi.mocked(setDraftWords).mockImplementationOnce(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: null });
+      return null;
+    });
+    expect(await change(lines(40))).not.toHaveProperty('mailService');
+    // No version told: priced as it was read.
+    vi.mocked(setDraftWords).mockResolvedValueOnce(null);
     expect(await change(lines(40))).toMatchObject({ mailService: 'certified' });
   });
 

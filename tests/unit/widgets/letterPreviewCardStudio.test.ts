@@ -2348,10 +2348,13 @@ describe('how the letter travels, as the latest answer with its terms says (#625
   it('names how a sent letter travelled, over a preview the chat changed before the send', async () => {
     const card = mount();
     await card.show(ordinaryPreview(), ON);
+    expect(text(card, 'studio-cost')).toBe('1 letter');
     await card.answerTo(card.requests('tools/call', ASK)[0], sent({ mailService: 'certified', ...CERTIFIED_WORDS }));
     expect(text(card, 'delivery')).toContain('USPS Certified Mail');
     expect(text(card, 'delivery')).toContain('signed for at delivery');
     expect(text(card, 'studio-summary')).toContain('certified mail');
+    // No pack pays for certified mail: the pack price heard for the ordinary preview is not shown beside it.
+    expect(text(card, 'studio-cost')).toBe('');
   });
 
   it('names a sent letter ordinary mail over a restyle that said it was certified', async () => {
@@ -2365,6 +2368,20 @@ describe('how the letter travels, as the latest answer with its terms says (#625
     expect(text(card, 'delivery')).toContain('USPS First-Class Mail');
     expect(text(card, 'delivery')).not.toContain('signed for');
     expect(text(card, 'studio-summary')).not.toContain('certified');
+    // The certified price heard before the send is not shown beside First-Class.
+    expect(text(card, 'studio-cost')).toBe('');
+  });
+
+  it('keeps the price when a sent letter travelled as the card last heard', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], sent({ mailService: 'certified', ...CERTIFIED_WORDS }));
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+    expect(text(card, 'studio-cost')).not.toBe('');
+    const ordinary = mount();
+    await ordinary.show(ordinaryPreview(), ON);
+    await ordinary.answerTo(ordinary.requests('tools/call', ASK)[0], sent(FIRST_CLASS));
+    expect(text(ordinary, 'studio-cost')).toBe('1 letter');
   });
 
   it("keeps the preview's words when a sent answer does not say how the letter travelled", async () => {

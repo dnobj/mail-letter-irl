@@ -12,7 +12,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/services/draftService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/services/draftService.js')>()),
   getDraftForStationery: vi.fn(),
-  readDraftMailService: vi.fn(),
   setDraftStationery: vi.fn()
 }));
 
@@ -21,7 +20,7 @@ vi.mock('../../../src/services/stationeryDesignService.js', async importOriginal
   getDesign: vi.fn()
 }));
 
-import { getDraftForStationery, readDraftMailService, setDraftStationery, type DraftForStationery } from '../../../src/services/draftService.js';
+import { getDraftForStationery, setDraftStationery, type DraftForStationery } from '../../../src/services/draftService.js';
 import { getDesign } from '../../../src/services/stationeryDesignService.js';
 import { setStationeryTool } from '../../../src/tools/setStationery.js';
 import { layoutLetterForPreview, withDisplayImage } from '../../../src/tools/letterHelpers.js';
@@ -131,7 +130,7 @@ describe('set_stationery', () => {
   it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft());
     vi.mocked(setDraftStationery).mockImplementation(async (...args: unknown[]) => {
-      (args.at(-1) as (version: string, before: string) => void)('0123456789abcdef', 'fedcba9876543210');
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: null });
       return null;
     });
     expect(await run({ stationery: 'Botanical' })).toMatchObject({ contentVersion: '0123456789abcdef', contentVersionBefore: 'fedcba9876543210' });
@@ -407,14 +406,16 @@ describe('set_stationery says how the letter travels, with its price (#625)', ()
   it('names how the letter travels once it is restyled, not as read before (#625 follow-up)', async () => {
     offer();
     vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft(), mail_service: 'certified' } as never);
-    vi.mocked(readDraftMailService).mockResolvedValueOnce('standard');
+    vi.mocked(setDraftStationery).mockImplementationOnce(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: 'standard' });
+      return null;
+    });
     const output = await run({ stationery: 'Botanical' });
     // Turned back to ordinary mail between the read and the lock: First-Class, and payable from a pack again.
     expect(output).toMatchObject({ deliveryClass: 'USPS First-Class Mail', canSendNow: true });
     expect(output).not.toHaveProperty('mailService');
-    // Read once the change is written, not before its lock (#625 follow-up).
-    expect(readDraftMailService).toHaveBeenCalledWith(vi.mocked(setDraftStationery).mock.calls[0][0]);
-    expect(vi.mocked(readDraftMailService).mock.invocationCallOrder[0]).toBeGreaterThan(vi.mocked(setDraftStationery).mock.invocationCallOrder[0]);
+    // Priced by the row its version describes (#625 follow-up).
+    expect(output).toMatchObject({ contentVersion: '0123456789abcdef' });
   });
 
   it('says nothing of how text that is not a service would travel', async () => {

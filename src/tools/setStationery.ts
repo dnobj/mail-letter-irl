@@ -7,7 +7,7 @@ import type { SendEligibility } from '../services/commerceService.js';
 import { CUSTOM_THEME, type PageFit } from '../render/index.js';
 import { getDesign } from '../services/stationeryDesignService.js';
 import type { PreviewStationery } from './stationeryInput.js';
-import { getDraftForStationery, readDraftMailService, setDraftStationery } from '../services/draftService.js';
+import { getDraftForStationery, setDraftStationery } from '../services/draftService.js';
 import { editorPageFit, layoutLetterForPreview, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter, type LetterTravel } from './letterHelpers.js';
 import { letterOption } from '../services/mailOptions.js';
 import { draftLetter, draftRefusals, draftRefuser, editableDraft, type DraftRefusal } from './draftEdit.js';
@@ -159,12 +159,14 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   // With the words it was drawn from, refused if they changed meanwhile (#586).
   let contentVersion: string | undefined;
   let contentVersionBefore: string | undefined;
+  // How the written row travels, read with its version under the lock (#625 follow-up).
+  let writtenService: string | null | undefined;
   const refusal = await setDraftStationery(
     draftId,
     userId,
     // And with the signature it was drawn with (#608), which set_letter_signature changes in place.
     { stationery, previewHtml, pages, drawnFrom: { bodyText: draft.body_text, signOff: draft.sign_off, signature: draft.signature_image } },
-    context.now(), (version, before) => { contentVersion = version; contentVersionBefore = before; }
+    context.now(), (version, before, written) => { contentVersion = version; contentVersionBefore = before; writtenService = written.mailService; }
   );
   if (refusal) throw refused(...STATIONERY_REFUSALS[refusal], context);
 
@@ -174,8 +176,8 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them (#586).
-  // How it travels as it is now, not as read before the lock (#625 follow-up).
-  const service = (await readDraftMailService(draftId)) ?? draft.mail_service;
+  // How the written letter travels, not as read before the lock (#625 follow-up); as read when the version was not.
+  const service = writtenService === undefined ? draft.mail_service : writtenService;
   const payment = letterPayment(letterOption(layout, service), Number(draft.required_credits ?? 2), gift, context, draftId);
   return {
     ...(contentVersion ? { contentVersion, contentVersionBefore } : {}),

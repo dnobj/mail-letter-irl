@@ -555,7 +555,7 @@ export async function setDraftSchedule(
   schedule: DraftSchedule | null,
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string, before: string) => void
+  onWritten?: OnWritten
 ): Promise<DraftScheduleRefusal | null> {
   return withChangeableDraft(draftId, userId, now, async client => {
 
@@ -592,7 +592,7 @@ export async function setDraftMailService(
   mailService: MailService,
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string, before: string) => void
+  onWritten?: OnWritten
 ): Promise<MailServiceRefusal | null> {
   const service = storedMailService({ mailService });
   return withChangeableDraft(draftId, userId, now, async client => {
@@ -636,23 +636,25 @@ async function withChangeableDraft<R extends string | null>(
    * card takes the new one only when the one before is the one it shows, so a
    * change it did not see (the chat's) is never sent on the strength of its own.
    */
-  onWritten?: (contentVersion: string, before: string) => void
+  onWritten?: OnWritten
 ): Promise<DraftScheduleRefusal | R> {
   return transaction(async client => {
     const refusal = await lockChangeableDraft(client, draftId, userId, now);
     if (refusal) return refusal;
-    const readVersion = async () => {
+    const readRow = async () => {
       const read = await client.query<ContentVersionRow>(
         `SELECT ${CONTENT_VERSION_COLUMNS} FROM letter_drafts WHERE draft_id = $1`,
         [draftId]
       );
-      return read.rows[0] ? contentVersionOf(read.rows[0]) : null;
+      return read.rows[0] ?? null;
     };
-    const before = onWritten ? await readVersion() : null;
+    const before = onWritten ? await readRow() : null;
     const result = await change(client);
     if (result === null && onWritten && before !== null) {
-      const written = await readVersion();
-      if (written !== null) onWritten(written, before);
+      const written = await readRow();
+      if (written !== null) {
+        onWritten(contentVersionOf(written), contentVersionOf(before), { mailService: written.mail_service ?? null });
+      }
     }
     return result;
   });
@@ -760,15 +762,12 @@ export type DraftForMailService = Pick<
 >;
 
 /**
- * How a draft travels as it is now (#625 follow-up), read once a restyle, new words or a signature are written: they
- * read the draft before taking its lock, so a change of service landing between priced their answer on the service
- * before it. The answer is priced from this instead; a change after it carries its own terms. Null when the draft is
- * gone, and the caller keeps what it read.
+ * Told a change's content version once it is written (#695), the version it was made to, and what the written row
+ * says of how the letter travels (#625 follow-up), all read in its transaction under the draft's lock. The editors
+ * read the draft before taking the lock, so a change of service landing between would price their answer on the
+ * service before it: they price by this one, which the answer's version describes.
  */
-export async function readDraftMailService(draftId: string): Promise<string | null> {
-  const result = await query<{ mail_service: string | null }>('SELECT mail_service FROM letter_drafts WHERE draft_id = $1', [draftId]);
-  return result.rows[0] ? result.rows[0].mail_service : null;
-}
+export type OnWritten = (contentVersion: string, before: string, written: { mailService: string | null }) => void;
 
 /** The caller's draft as set_mail_service prices it now, or null when it is not theirs or not there. */
 export async function getDraftForMailService(draftId: string, userId: string): Promise<DraftForMailService | null> {
@@ -838,7 +837,7 @@ export async function setDraftStationery(
   },
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string, before: string) => void
+  onWritten?: OnWritten
 ): Promise<DraftRedrawRefusal | null> {
   const stationery = storedStationery(change.stationery);
   // The version goes with the stationery stored (rendererVersionFor), so
@@ -915,7 +914,7 @@ export async function setDraftWords(
   },
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string, before: string) => void
+  onWritten?: OnWritten
 ): Promise<DraftRedrawRefusal | null> {
   return withChangeableDraft(draftId, userId, now, async client => {
     const drawnFrom: DrawnFrom = { words: change.replacing, stationery: change.drawnIn };
@@ -959,7 +958,7 @@ export async function setDraftSignature(
   },
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string, before: string) => void
+  onWritten?: OnWritten
 ): Promise<DraftRedrawRefusal | null> {
   return withChangeableDraft(draftId, userId, now, async client => {
     if (await drawnFromChanged(client, draftId, change.drawnFrom)) return 'changed';
@@ -1045,7 +1044,7 @@ export async function setDraftPostcardStyle(
   },
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string, before: string) => void
+  onWritten?: OnWritten
 ): Promise<DraftRedrawRefusal | null> {
   const front = storedPostcardFront(change.front);
   const rendererVersion = front ? POSTCARD_FRONT_RENDERER_VERSION : RENDERER_VERSION;

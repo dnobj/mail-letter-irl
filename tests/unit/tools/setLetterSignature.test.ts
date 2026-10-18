@@ -13,7 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/services/draftService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/services/draftService.js')>()),
   getDraftForStationery: vi.fn(),
-  readDraftMailService: vi.fn(),
   setDraftSignature: vi.fn()
 }));
 
@@ -21,7 +20,7 @@ vi.mock('../../../src/services/signatureService.js', () => ({
   getSignature: vi.fn()
 }));
 
-import { getDraftForStationery, readDraftMailService, setDraftSignature, type DraftForStationery } from '../../../src/services/draftService.js';
+import { getDraftForStationery, setDraftSignature, type DraftForStationery } from '../../../src/services/draftService.js';
 import { getSignature } from '../../../src/services/signatureService.js';
 import { setLetterSignatureTool } from '../../../src/tools/setLetterSignature.js';
 import { layoutLetterForPreview, withDisplayImage } from '../../../src/tools/letterHelpers.js';
@@ -143,7 +142,7 @@ describe('set_letter_signature', () => {
   it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft());
     vi.mocked(setDraftSignature).mockImplementation(async (...args: unknown[]) => {
-      (args.at(-1) as (version: string, before: string) => void)('0123456789abcdef', 'fedcba9876543210');
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: null });
       return null;
     });
     expect(await run({ signature: true })).toMatchObject({ contentVersion: '0123456789abcdef', contentVersionBefore: 'fedcba9876543210' });
@@ -274,14 +273,16 @@ describe('set_letter_signature', () => {
     vi.stubEnv('LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'true');
     vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
     vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(24) }), mail_service: 'standard' });
-    vi.mocked(readDraftMailService).mockResolvedValueOnce('certified_return_receipt');
+    vi.mocked(setDraftSignature).mockImplementationOnce(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string, before: string, written: { mailService: string | null }) => void)('0123456789abcdef', 'fedcba9876543210', { mailService: 'certified_return_receipt' });
+      return null;
+    });
     const output = await run({ signature: true });
     expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.' });
     expect(output).toMatchObject({ mailService: 'certified_return_receipt', deliveryClass: 'USPS Certified Mail with an electronic return receipt' });
     expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
-    // Read once the change is written, not before its lock (#625 follow-up).
-    expect(readDraftMailService).toHaveBeenCalledWith(vi.mocked(setDraftSignature).mock.calls[0][0]);
-    expect(vi.mocked(readDraftMailService).mock.invocationCallOrder[0]).toBeGreaterThan(vi.mocked(setDraftSignature).mock.invocationCallOrder[0]);
+    // Priced by the row its version describes (#625 follow-up).
+    expect(output).toMatchObject({ contentVersion: '0123456789abcdef' });
   });
 
   it('refuses a draft whose page lost its picture, rather than embed the full image', async () => {

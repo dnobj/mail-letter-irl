@@ -740,16 +740,21 @@
       }
 
       // How a sent letter travelled, as the server said once it was sent (#625): final, so over the preview's and any
-      // terms the card heard before the send.
+      // terms the card heard before the send. A price heard for another service says nothing true of this one, so the
+      // card names none (pricedOtherwise), rather than a pack beside certified mail or Pay & Send beside First-Class.
+      const pricedOtherwise = new WeakSet();
       function withSentTravel(state) {
         const settled = settledDraft();
         if (!state || !settled?.travel || settled.draftId !== state.draftId) return state;
-        return {
+        const changed = (typeof state.mailService === "string" ? state.mailService : "") !== settled.travel.mailService;
+        const sent = {
           ...state,
           mailService: settled.travel.mailService,
           deliveryClass: settled.travel.deliveryClass,
           deliveryDisclaimer: settled.travel.deliveryDisclaimer,
         };
+        if (changed) pricedOtherwise.add(sent);
+        return sent;
       }
 
       function withLatestTerms(output) {
@@ -880,7 +885,9 @@
         const sendEligibility = state.sendEligibility;
         const payAndSend = sendEligibility?.payAndSend;
         const letters = state.lettersRequired ?? 1;
-        document.getElementById("studio-cost").textContent = state.giftCard
+        document.getElementById("studio-cost").textContent = pricedOtherwise.has(state)
+          ? ""
+          : state.giftCard
           ? "Free: a gift letter"
           : paid
             ? payAndSend?.amountCents

@@ -132,6 +132,8 @@ describe('when the status sync stops looking for a carrier number (#625 follow-u
     const worker = fs.readFileSync(path.resolve(__dirname, '../../../src/workers/statusSyncWorker.ts'), 'utf8');
     expect(worker.match(/syncLetterStatuses\([^)]*CARRIER_NUMBER_SYNC_DAYS\)/g)).toHaveLength(2);
     expect(worker).not.toMatch(/syncLetterStatuses\([^)]*\b30\)/);
+    const script = fs.readFileSync(path.resolve(__dirname, '../../../scripts/trigger-status-sync.ts'), 'utf8');
+    expect(script).toMatch(/syncLetterStatuses\(dryRun, CARRIER_NUMBER_SYNC_DAYS\)/);
   });
 
   it('has ended only past the window, and never for a letter not sent', () => {

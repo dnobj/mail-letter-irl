@@ -9,7 +9,8 @@ import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
-import { letterPayment, travelFields, wordsVersionOf, type LetterTravel } from './letterHelpers.js';
+import { letterPayment, wordsVersionOf, type LetterTravel } from './letterHelpers.js';
+import { deliveryWordsOf } from '../content/delivery.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import { isExtraService, mailServiceOf } from '../config/products.js';
@@ -136,7 +137,14 @@ async function handler(
   if (draft.status === 'consumed') {
     // How the letter travelled (#625): a sent draft no longer changes, so its service is the letter's. Without it a
     // card reopened after the send named its preview's service, which set_mail_service may have changed before.
-    const travel = draft.mail_type === 'letter' ? travelFields(draft.mail_service) : {};
+    // Whatever the flag says, as the orders give the service: a sent letter is a fact. Text that is not a service
+    // says nothing, and a postcard has none.
+    const sentService = mailServiceOf(draft.mail_service);
+    const certified = isExtraService(sentService) ? sentService : undefined;
+    const travel =
+      draft.mail_type === 'letter' && (sentService === undefined || certified)
+        ? { ...(certified ? { mailService: certified } : {}), ...deliveryWordsOf(certified) }
+        : {};
     return draft.consumed_letter_id
       ? { draftId, status: 'sent', orderId: draft.consumed_letter_id, ...orderFields(draft), ...travel }
       : { draftId, status: 'sent', ...travel };
