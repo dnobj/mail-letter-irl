@@ -794,9 +794,14 @@ describe('the letter card as a studio (#580)', () => {
     await two.show(output({ lettersRequired: 2 }), ON);
     expect(text(two, 'studio-cost')).toBe('2 letters');
 
+    // Paid on the confirmation page, which names no price here.
     const unpriced = mount();
-    await unpriced.show(output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: false } } }), ON);
+    await unpriced.show(output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: false, pageUrl: 'https://letterirl.example/send/draft_0001' } } }), ON);
     expect(text(unpriced, 'studio-cost')).toBe('Paid when you send it');
+    // Nowhere to pay for it now (PAGES-01 step 11).
+    const unpayable = mount();
+    await unpayable.show(output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: false } } }), ON);
+    expect(text(unpayable, 'studio-cost')).toBe("Can't be paid now");
   });
 
   it('says what the page is printed in when there is no style to choose, and nothing when there is', async () => {
@@ -1980,6 +1985,79 @@ describe("the Words tab's editor (#586)", () => {
       expect(other.updates.length).toBeGreaterThan(0);
       for (const text of other.updates) expect(text).not.toMatch(/the person changed/i);
     });
+  });
+});
+
+describe('mail no pack pays for that cannot be paid here either (PAGES-01 step 11)', () => {
+  // A two-page letter previewed with room to write on, its option turned off since: the server offers no Pay & Send for
+  // it and names no page to pay on.
+  const NOT_SOLD = {
+    packPays: false,
+    payAndSend: { available: false, unavailableReason: "Pay & Send isn't available for this mail." },
+    letterPack: { available: false }
+  };
+  const unpayable = (eligibility: Json = NOT_SOLD) =>
+    output({
+      pages: 2,
+      canSendNow: false,
+      reasonCannotSend: 'Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.',
+      sendEligibility: eligibility
+    });
+
+  it("says the server's reason, not the pack rule, and offers nothing to press", async () => {
+    const card = mount();
+    await card.show(unpayable(), ON);
+    expect(text(card, 'status-pill')).toBe("Pay & Send isn't available for this mail.");
+    expect(text(card, 'checkout-note')).toBe("This can't be paid for here now. Ask in the chat for a new preview.");
+    expect(card.byId('checkout-note').style.display).toBe('block');
+    expect(text(card, 'studio-cost')).toBe("Can't be paid now");
+    expect(text(card, 'cost')).toBe("Can't be paid now");
+    for (const id of ['send-button', 'pay-send-button', 'pay-page-button', 'buy-pack-button', 'website-packs-button']) {
+      expect(card.byId(id).style.display, id).toBe('none');
+    }
+  });
+
+  it('says a reason the server gives in other words, and a plain one when it gives none', async () => {
+    const off = mount();
+    await off.show(unpayable({ ...NOT_SOLD, payAndSend: { available: false, unavailableReason: 'Pay & Send is not enabled.' } }), ON);
+    expect(text(off, 'status-pill')).toBe('Pay & Send is not enabled.');
+    const silent = mount();
+    await silent.show(unpayable({ ...NOT_SOLD, payAndSend: { available: false } }), ON);
+    expect(text(silent, 'status-pill')).toBe("Pay & Send isn't available for this mail.");
+  });
+
+  it('keeps the pack rule and the page where the confirmation page pays for it (an app with no checkout)', async () => {
+    const card = mount();
+    await card.show(
+      unpayable({ ...NOT_SOLD, payAndSend: { available: false, unavailableReason: "Pay & Send isn't available in this app.", pageUrl: 'https://letterirl.example/send/draft_0001' } }),
+      ON
+    );
+    expect(text(card, 'status-pill')).toContain('this one is paid with Pay & Send');
+    expect(text(card, 'checkout-note')).toContain('Letter packs pay for one-page letters and 6x9 postcards.');
+    expect(text(card, 'studio-cost')).not.toBe("Can't be paid now");
+  });
+
+  it('is not said of mail a pack pays for, nor of a gift letter', async () => {
+    const pack = mount();
+    await pack.show(output({ canSendNow: false, reasonCannotSend: 'Not enough letters in your balance.', sendEligibility: { packPays: true, payAndSend: { available: false, unavailableReason: 'Use your existing prepaid letter balance.' }, letterPack: { available: true } } }), ON);
+    expect(text(pack, 'status-pill')).toBe('Not enough letters in your balance.');
+    const gift = mount();
+    await gift.show(output({ ...{ giftCard: { state: 'funded' } }, canSendNow: true, sendEligibility: NOT_SOLD }), ON);
+    expect(text(gift, 'studio-cost')).toBe('Free: a gift letter');
+    expect(text(gift, 'checkout-note')).not.toContain("can't be paid");
+    // A gift letter that cannot be sent now keeps its own reason: there is nothing to pay for a gift.
+    const spent = mount();
+    await spent.show(
+      output({
+        giftCard: { state: 'funded' },
+        canSendNow: false,
+        reasonCannotSend: 'Your gift letter has been used.',
+        sendEligibility: { packPays: false, payAndSend: { available: false, unavailableReason: 'This uses a gift letter, so there is nothing to pay.' }, letterPack: { available: false } }
+      }),
+      ON
+    );
+    expect(text(spent, 'status-pill')).toBe('Your gift letter has been used.');
+    expect(text(spent, 'checkout-note')).not.toContain("can't be paid");
   });
 });
 
