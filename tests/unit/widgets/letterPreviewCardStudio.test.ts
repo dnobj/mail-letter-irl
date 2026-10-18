@@ -54,8 +54,8 @@ async function flush(times = 8): Promise<void> {
   for (let i = 0; i < times; i += 1) await new Promise(resolve => setImmediate(resolve));
 }
 
-/** The card as served, in a fake MCP Apps host. */
-function mount() {
+/** The card as served, in a fake MCP Apps host, which offers the capabilities given. */
+function mount(hostCapabilities: Json = {}) {
   const served = stampPreviewTool(
     inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR),
     'quote_and_preview_letter'
@@ -100,7 +100,7 @@ function mount() {
         initialized = true;
         await deliver({
           id: lastRequest('ui/initialize')!.id,
-          result: { protocolVersion: '2026-01-26', hostInfo: { name: 'fake' }, hostContext: {}, hostCapabilities: {} }
+          result: { protocolVersion: '2026-01-26', hostInfo: { name: 'fake' }, hostContext: {}, hostCapabilities }
         });
         await deliver({ method: 'ui/notifications/tool-input', params: { arguments: args } });
       }
@@ -1630,6 +1630,257 @@ describe("the Words tab's editor (#586)", () => {
     expect(card.byId('studio-words').hidden).toBe(false);
     expect(card.byId('studio-words-chat').hidden).toBe(false);
   });
+
+  // The leftover seen in STUDIO-01 (DEV, 2026-10-17): the card's own Update said the words were changed, and a later
+  // catch-up that brought the chat's words left that note, which then described an older change.
+  it("clears what the card's own change said once a catch-up brings other words, and keeps it for the same words", async () => {
+    // The same words as the card set, whether its own answer named their version or not (an older server's did not).
+    for (const [chat, versioned] of [[false, true], [false, false], [true, true]]) {
+      const card = mount();
+      await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+      await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }), 'get_draft_status');
+      await card.click(card.tab('words'));
+      await type(card, 'studio-words-body', 'Dear Sam,\n\nLonger now.');
+      await card.click(card.byId('studio-words-update'));
+      const { wordsVersion, ...unversioned } = ranOn.result.structuredContent;
+      await card.answer(versioned ? ranOn : { result: { ...ranOn.result, structuredContent: unversioned } }, 'set_letter_words');
+      expect(wordsVersion).toBe('fedcba654321');
+      expect(text(card, 'studio-words-note')).toBe(ranOn.result.structuredContent.message);
+      await comeBack(card);
+      if (chat) {
+        // The chat's words since: the boxes take them, and the note about the card's change goes.
+        await card.answer(status(CHAT_WORDS), 'get_draft_status');
+        expect(box(card, 'studio-words-body')).toBe('Dear Sam,\n\nThe chat wrote this.');
+        expect(card.byId('studio-words-note').hidden).toBe(true);
+      } else {
+        // The draft as the card left it: the note still says what happened.
+        await card.answer(status({ bodyText: 'Dear Sam,\n\nLonger now.', signOff: ARGS.signOff, wordsVersion: 'fedcba654321' }, TWO_PAGES), 'get_draft_status');
+        expect(card.byId('studio-words-note').hidden, String(versioned)).toBe(false);
+        expect(text(card, 'studio-words-note')).toBe(ranOn.result.structuredContent.message);
+      }
+    }
+  });
+
+  it("keeps a refusal said while the boxes take the chat's words", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }), 'get_draft_status');
+    await card.click(card.tab('words'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMuch longer.');
+    await card.click(card.byId('studio-words-update'));
+    const expired = 'This preview has expired. Make a new preview with the words.';
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: expired }] } }, 'set_letter_words');
+    // Typed back to the draft's words: nothing kept, so the chat's fill the boxes.
+    await type(card, 'studio-words-body', ARGS.bodyText);
+    await comeBack(card);
+    await card.answer(status(CHAT_WORDS), 'get_draft_status');
+    expect(box(card, 'studio-words-body')).toBe('Dear Sam,\n\nThe chat wrote this.');
+    expect(text(card, 'studio-words-note')).toBe(expired);
+    expect(card.byId('studio-words-note').classList.contains('alert')).toBe(true);
+  });
+
+  // The model sees none of the card's calls: after the person changed the words on the card, ChatGPT answered from
+  // the preview's that the letter had no "roses" in it, and called nothing (STUDIO-01, DEV 2026-10-17).
+  describe('changes made on the card, told to the model', () => {
+    const CHANGED =
+      /^On (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}:\d{2}) UTC the person changed this letter's (.+) on its Letter IRL card \(draft draft_0001\), and the chat does not see the card's changes: what it last saw of them may be out of date\.( Before saying what the letter's words are, or changing them, call set_letter_words with the wordsVersion last seen: if the words changed since, nothing is changed, and the answer gives them as they are now\.)?$/;
+    const DRAFT_SHARE = /^Shared by a Letter IRL letter card on .+? a Letter IRL tool given this draftId says so\.(?: (.+))?$/s;
+    const restyled = {
+      result: {
+        content: [{ type: 'text', text: 'Restyled.' }],
+        structuredContent: { draftId: 'draft_0001', stationery: { theme: 'botanical', source: 'asked' }, ...canSend },
+        _meta: { previewHtml: PAGE }
+      }
+    };
+
+    /** The texts the card has shared, oldest first: each share answered as it comes, as the host would. */
+    function shares(card: ReturnType<typeof mount>) {
+      const answered = new Set<unknown>();
+      return async () => {
+        for (;;) {
+          const next = card.requests('ui/update-model-context').find(request => !answered.has(request.id));
+          if (!next) break;
+          answered.add(next.id);
+          await card.answerTo(next, { result: {} });
+        }
+        return card.requests('ui/update-model-context').map(request => (request.params.content[0]?.text ?? '') as string);
+      };
+    }
+
+    async function shownAndReady() {
+      const card = mount({ updateModelContext: { text: {} } });
+      const shared = shares(card);
+      await card.show(output(CLASSIC), { ...ON, pageFit: FIT, modelContextEnabled: true });
+      await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }), 'get_draft_status');
+      await shared();
+      return { card, shared };
+    }
+
+    /** What the latest share says of the card's changes, or null. */
+    const changes = (texts: string[]) => {
+      const note = texts[texts.length - 1].match(DRAFT_SHARE)![1];
+      return note === undefined ? null : note.match(CHANGED);
+    };
+
+    it('shares, with the draft, that the words were changed on the card and how to get them, never the words', async () => {
+      const { card, shared } = await shownAndReady();
+      expect(changes(await shared())).toBeNull();
+
+      await card.click(card.tab('words'));
+      await type(card, 'studio-words-body', 'Dear Sam,\n\nCome and see the roses when you can.');
+      await card.click(card.byId('studio-words-update'));
+      await card.answer(ranOn, 'set_letter_words');
+      const after = await shared();
+      const said = changes(after)!;
+      expect(said).not.toBeNull();
+      expect(said[3]).toBe('words');
+      expect(said[4]).toBeDefined();
+      // Stamped with the change's own time.
+      expect(Math.abs(Date.parse(`${said[1]}T${said[2]}Z`) - Date.now())).toBeLessThan(5000);
+      expect(after[after.length - 1]).not.toContain('roses');
+    });
+
+    it('says a change of style without the words sentence, and every change the card made, in one order', async () => {
+      const { card, shared } = await shownAndReady();
+      await card.click(card.document.querySelector('#style-row [data-theme="botanical"]')!);
+      await card.answer(restyled, 'set_stationery');
+      let said = changes(await shared())!;
+      expect(said[3]).toBe('stationery');
+      expect(said[4]).toBeUndefined();
+
+      await card.click(card.tab('words'));
+      await type(card, 'studio-words-body', 'Dear Sam,\n\nLonger now.');
+      await card.click(card.byId('studio-words-update'));
+      await card.answer(ranOn, 'set_letter_words');
+      said = changes(await shared())!;
+      expect(said[3]).toBe('words and stationery');
+      expect(said[4]).toBeDefined();
+    });
+
+    it("says the card's change of signature, of mail service and of arrival date, each without the words sentence", async () => {
+      const cases: [string, Json, Json, (card: ReturnType<typeof mount>) => Element, string, Json][] = [
+        [
+          'signature',
+          { signature: { printed: false, source: 'saved' } },
+          {},
+          card => card.byId('signature-switch'),
+          'set_letter_signature',
+          { structuredContent: { draftId: 'draft_0001', signature: { printed: true, source: 'saved' }, ...canSend }, _meta: { previewHtml: PAGE } }
+        ],
+        [
+          'mail service',
+          { deliveryClass: 'USPS First-Class Mail', deliveryDisclaimer: 'USPS timing varies.' },
+          { mailServices: ['standard', 'certified'] },
+          card => card.byId('service-row').querySelector('[data-service="certified"]')!,
+          'set_mail_service',
+          { structuredContent: { draftId: 'draft_0001', ...canSend, mailService: 'certified', deliveryClass: 'USPS Certified Mail', deliveryDisclaimer: 'Signed for.' } }
+        ],
+        [
+          'arrival date',
+          { arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } },
+          {},
+          card => card.byId('arrives-asap'),
+          'set_arrival_date',
+          { structuredContent: { draftId: 'draft_0001', schedule: null, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } }
+        ]
+      ];
+      for (const [kind, extra, meta, control, tool, answer] of cases) {
+        const card = mount({ updateModelContext: { text: {} } });
+        const shared = shares(card);
+        await card.show(output({ ...CLASSIC, ...extra }), { ...ON, pageFit: FIT, modelContextEnabled: true, ...meta });
+        await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION, ...extra }), 'get_draft_status');
+        expect(changes(await shared()), kind).toBeNull();
+        await card.click(control(card));
+        await card.answer({ result: { content: [{ type: 'text', text: 'Changed.' }], ...answer } }, tool);
+        const said = changes(await shared());
+        expect(said?.[3], kind).toBe(kind);
+        expect(said?.[4], kind).toBeUndefined();
+      }
+    });
+
+    it('says nothing of a change the server refused', async () => {
+      const { card, shared } = await shownAndReady();
+      await card.click(card.tab('words'));
+      await type(card, 'studio-words-body', 'Dear Sam,\n\nMine.');
+      await card.click(card.byId('studio-words-update'));
+      await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'This preview has expired.' }] } }, 'set_letter_words');
+      for (const text of await shared()) expect(text).not.toContain('the person changed');
+    });
+
+    /** The card in ChatGPT, keeping its state and sharing through window.openai. */
+    function inChatGpt(widgetState: Json | null = null) {
+      const kept: Json[] = [];
+      const updates: string[] = [];
+      const document = mountInChatGpt(
+        { ...ON, pageFit: FIT, modelContextEnabled: true },
+        {
+          toolOutput: output(CLASSIC),
+          widgetState,
+          setWidgetState: async (value: Json) => {
+            kept.push(JSON.parse(JSON.stringify(value)));
+          },
+          updateModelContext: async (value: Json) => {
+            updates.push(value.content[0]?.text ?? '');
+            return {};
+          },
+          callTool: async (name: string, args: Json) => {
+            if (name === 'get_draft_status') {
+              return {
+                structuredContent: {
+                  draftId: args.draftId,
+                  status: 'ready',
+                  stationery: { theme: 'classic' },
+                  ...canSend,
+                  bodyText: ARGS.bodyText,
+                  signOff: ARGS.signOff,
+                  wordsVersion: VERSION
+                },
+                _meta: { previewHtml: PAGE }
+              };
+            }
+            if (name === 'set_letter_words') return ranOn.result;
+            return {};
+          }
+        }
+      );
+      return { document, window: document.defaultView as any, kept, updates };
+    }
+
+    it('in ChatGPT, keeps the change in widgetState with a sentence for the model, beside what the card keeps, and shares it', async () => {
+      const card = inChatGpt();
+      await flush();
+      const click = async (element: Element) => {
+        element.dispatchEvent(new card.window.Event('click'));
+        await flush();
+      };
+      await click(card.document.querySelector('[role="tab"][data-tab="words"]')!);
+      const body = card.document.getElementById('studio-words-body') as HTMLTextAreaElement;
+      body.value = 'Dear Sam,\n\nCome and see the roses when you can.';
+      body.dispatchEvent(new card.window.Event('input'));
+      await flush();
+      await click(card.document.getElementById('studio-words-update')!);
+      const last = card.kept[card.kept.length - 1];
+      // What a reopened card reads (#389) is as it was.
+      expect(last).toMatchObject({ v: 1, draftId: 'draft_0001' });
+      expect(last.changedOnCard).toEqual({ draftId: 'draft_0001', what: ['words'], at: expect.any(String), note: expect.stringMatching(CHANGED) });
+      expect(JSON.stringify(last)).not.toContain('roses');
+      expect(card.updates[card.updates.length - 1]).toContain(last.changedOnCard.note);
+    });
+
+    it('in a reopened ChatGPT card, shares the change it kept, in its own words, for its own draft only', async () => {
+      const at = '2026-10-17T14:03:22.000Z';
+      const own = inChatGpt({ v: 1, draftId: 'draft_0001', changedOnCard: { draftId: 'draft_0001', what: ['words', 'nonsense'], at, note: 'Anything.' } });
+      await flush();
+      const said = changes(own.updates)!;
+      expect(said.slice(1, 4)).toEqual(['2026-10-17', '14:03:22', 'words']);
+      expect(own.updates[own.updates.length - 1]).not.toContain('Anything.');
+
+      const other = inChatGpt({ v: 1, draftId: 'draft_0001', changedOnCard: { draftId: 'draft_0002', what: ['words'], at, note: 'Anything.' } });
+      await flush();
+      expect(other.updates.length).toBeGreaterThan(0);
+      for (const text of other.updates) expect(text).not.toContain('the person changed');
+    });
+  });
 });
 
 describe('certified mail on the card (#625)', () => {
@@ -2949,5 +3200,10 @@ describe('the widget version after the certified card (#625)', () => {
   it('is bumped, so a host that cached the card fetches the new one', async () => {
     const { WIDGET_TEMPLATE_VERSION } = await import('../../../src/mcp/widgetUris.js');
     expect(WIDGET_TEMPLATE_VERSION).toBeGreaterThanOrEqual(66);
+  });
+
+  it('is bumped again for the card telling the model of its own changes', async () => {
+    const { WIDGET_TEMPLATE_VERSION } = await import('../../../src/mcp/widgetUris.js');
+    expect(WIDGET_TEMPLATE_VERSION).toBeGreaterThanOrEqual(90);
   });
 });

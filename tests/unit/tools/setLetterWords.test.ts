@@ -28,6 +28,7 @@ vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
 import { getDraftForStationery, setDraftWords } from '../../../src/services/draftService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { setLetterWordsTool } from '../../../src/tools/setLetterWords.js';
+import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
 import { partitionToolResult } from '../../../src/mcp/registerTools.js';
 import { layoutGiftPage, layoutLetter, readImageDataUri, renderPreviewSvg, type Stationery } from '../../../src/render/index.js';
 import { letterPrintText, renderLetterPreviewDocument, signatureParagraph, stampedAddressLines } from '../../../src/services/previewService.js';
@@ -507,16 +508,21 @@ describe('set_letter_words', () => {
       expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter' });
     });
 
-    it('keeps the description as it was while room to write is offered', () => {
+    // Steering r52: the model never sees the card's changes, and once answered from the preview's words that a word was
+    // not in a letter the person had changed on the card (STUDIO-01, DEV 2026-10-17).
+    it('says the card changes the words unseen, so it is called before saying a word is or is not in the letter', () => {
       const describe = setLetterWordsTool.description as (client?: unknown) => string;
       expect(describe()).toBe(
         'Change the words of a previewed letter without previewing it again. Give the draftId from the preview, ' +
           'bodyText and signOff in full, as the letter previews take them, and the wordsVersion of the words being replaced, ' +
-          'from the preview or the last change of words. The letter card can change the words too: if they changed since you ' +
-          'saw them, nothing is changed, and the answer gives the words as they are now. The letter is laid out again in its ' +
+          'from the preview or the last change of words. The person can change the words on the letter card too, and you do ' +
+          'not see those changes: if they changed since you saw them, nothing is changed, and the answer gives the words as ' +
+          'they are now. So call this before saying a word is or is not in the letter, and make the change to the words it ' +
+          'gives. The letter is laid out again in its ' +
           'stationery on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter ' +
           'stays on one page.'
       );
+      expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(52);
     });
 
     it('says the page it lays out on in its description, one or up to three', () => {

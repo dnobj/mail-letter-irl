@@ -67,6 +67,8 @@
    *   also says with hold(), nor while a send refused for a change since asks
    *   for the draft as it is now), onSet()
    *   (a style is being set on the draft), onChange({ draftId, stationery }),
+   *   onEdited(draftId, what) (the draft's words, stationery, signature or
+   *   mail service were changed here: the model never sees the card's calls),
    *   onBusy(), and wordsElement(id), which finds the Words tab's editor
    *   (#586) once the studio has drawn it; and signatureRow and
    *   signatureSwitch, the Signature switch (#608), which may be absent
@@ -174,6 +176,11 @@
       if (typeof options.onVersion === "function" && data && typeof data.contentVersion === "string" && data.contentVersion) {
         options.onVersion(draftId, data.contentVersion, data.contentVersionBefore);
       }
+    }
+    // The draft was changed here ("words", "stationery", "signature" or "mail service"), page or no page: the card tells
+    // the model, which never sees the card's own calls.
+    function edited(draftId, what) {
+      if (typeof options.onEdited === "function") options.onEdited(draftId, what);
     }
     // Terms taken from any answer: when they say how the letter travels, the Mail choice follows them.
     function adoptTerms(said) {
@@ -363,6 +370,7 @@
           }
           state.stationery = stationery;
           state.restyled = true;
+          edited(draftId, "stationery");
           keepSlots(stationery);
           // What it costs now, and how full its pages are (#586). An answer
           // that says nothing of it, as an older server's would not, keeps
@@ -447,6 +455,7 @@
           }
           signature.on = data.signature.printed;
           state.restyled = true;
+          edited(draftId, "signature");
           // What it costs now: the band can run the letter on to a page.
           var said = termsOf(data, result && result._meta && result._meta.pageFit);
           if (said) adoptTerms(said);
@@ -554,6 +563,7 @@
           // The terms say how the letter travels now, and with them the service the draft holds, whichever was pressed.
           adoptTerms(said);
           state.restyled = true;
+          edited(draftId, "mail service");
           tellVersion(draftId, data);
         })
         .catch(function (error) {
@@ -679,6 +689,10 @@
       if (bodyKept || signOffKept) {
         words.message = KEPT;
         words.error = false;
+      } else if (base && !words.error && (base.bodyText !== current.bodyText || base.signOff !== current.signOff)) {
+        // The boxes took other words: what the last change said ("The letter's words are changed...") is about
+        // words they no longer hold. A refusal stays until the person acts on it.
+        words.message = "";
       }
     }
 
@@ -793,6 +807,7 @@
             throw new Error("The words may have changed. Make the preview again to see them.");
           }
           state.restyled = true;
+          edited(draftId, "words");
           words.set = {
             bodyText: bodyText,
             signOff: signOff,

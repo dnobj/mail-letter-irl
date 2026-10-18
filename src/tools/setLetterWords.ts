@@ -260,8 +260,10 @@ export const setLetterWordsTool: McpToolDefinition<SetLetterWordsInput, SetLette
   description: () =>
     'Change the words of a previewed letter without previewing it again. Give the draftId from the preview, ' +
     'bodyText and signOff in full, as the letter previews take them, and the wordsVersion of the words being replaced, ' +
-    'from the preview or the last change of words. The letter card can change the words too: if they changed since you ' +
-    'saw them, nothing is changed, and the answer gives the words as they are now. The letter is laid out again in its ' +
+    'from the preview or the last change of words. The person can change the words on the letter card too, and you do not ' +
+    'see those changes: if they changed since you saw them, nothing is changed, and the answer gives the words as they are ' +
+    'now. So call this before saying a word is or is not in the letter, and make the change to the words it gives. ' +
+    'The letter is laid out again in its ' +
     (letterPageLimit() > 1
       ? 'stationery on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter ' +
         'stays on one page.'
