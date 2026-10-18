@@ -2242,13 +2242,13 @@ The tools name sizes the PostGrid way: `6x4` is the 4x6 and `6x11` is the 11x6.
 
 ---
 
-### ENVELOPE-01 — The envelope reveal on the letter card (#576)
+### ENVELOPE-01 — The envelope reveal on the letter card and the confirmation page (#576)
 
 **Status:** Not run.
 
 The envelope is drawn on the letter card and on the website's confirmation page (website #77): nothing prints differently, and postcards have none.
 
-**Preconditions:** Development, with `LETTER_IRL_ENVELOPE_REVEAL_ENABLED` on in the API (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf`: the envelope dresses our renderer's page. `LETTER_IRL_STATIONERY_ENABLED` and `LETTER_IRL_ARRIVE_BY_ENABLED` for steps 2 and 4, `LETTER_IRL_WORDS_EDITOR_ENABLED` (or room to write) for step 5, and `LETTER_IRL_STUDIO_CARD_ENABLED`, `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 6. Refresh the ChatGPT (DEV) and Claude connectors (widgets v91). The account needs letters in its balance.
+**Preconditions:** Development, with `LETTER_IRL_ENVELOPE_REVEAL_ENABLED` on in the API (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf`: the envelope dresses our renderer's page. `LETTER_IRL_STATIONERY_ENABLED` and `LETTER_IRL_ARRIVE_BY_ENABLED` for steps 2, 4 and 10, `LETTER_IRL_WORDS_EDITOR_ENABLED` (or room to write) for steps 5 and 10, and `LETTER_IRL_STUDIO_CARD_ENABLED`, `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 6. Refresh the ChatGPT (DEV) and Claude connectors (widgets v91). The account needs letters in its balance.
 
 **Steps:**
 
@@ -2270,14 +2270,14 @@ The envelope is drawn on the letter card and on the website's confirmation page 
 8. [ ] Repeat steps 1 and 3 in Claude (DEV). Verify the same. Verify a postcard preview has no envelope.
 9. [ ] **Record** what the card shows after a Pay & Send letter is paid (the code seals only after the card's own send or schedule). Also record what a reopened conversation shows for a letter the card sent (the sealed state is not kept with the card).
 10. [ ] (Confirmation page, the development website with website #77 deployed) Ask the chat to send a new letter by link (`request_send`) and open the link on a desktop browser, then at phone width. Verify:
-    - the envelope covers the preview's top third, its windows over the address boxes, and fades as the page unfolds, once; reading the page again after a refused send (change the words in the chat, then press **Send this letter**) does not play it again;
+    - the envelope covers the first page's top third, its windows over the address boxes, and fades as the page unfolds, once per page load (a refresh plays it again); reading the page again after a refused send (change the words in the chat, then press **Send this letter**) does not play it again;
     - **Send this letter** works while it is still opening, and the result shows the sealed envelope, its windows showing the return address and the recipient (a recipient with a second address line shows it);
     - a letter with an arrival date seals on **Schedule this letter** the same way;
     - with reduced motion (step 7) the page shows at once and the sealed envelope is still;
-    - opening the link again after the send shows "This letter has already been sent." with no envelope, and a postcard's link shows none.
+    - opening the link again after the send shows "This letter has already been sent." with no envelope, and a postcard's link shows none; a letter paid with Pay & Send on the page shows none either (the return from Stripe is a new page load).
 11. [ ] Turn `LETTER_IRL_ENVELOPE_REVEAL_ENABLED` off and deploy the API. Verify a new preview shows the page with no envelope, the confirmation page shows none either, and the PDF of a letter sent with the reveal on matches its preview. Turn the flag back on.
 
-**Pass criteria:** The page opens from the envelope once per draft and folds back in after a successful send or schedule, on the card and on the confirmation page. The card never grows, Send works throughout, reduced motion is respected, and nothing prints differently.
+**Pass criteria:** On the card, the page opens from the envelope once per draft and folds back in after a successful send or schedule; on the confirmation page, it opens once per page load and the sealed envelope shows after the page's own successful Send or Schedule. The card never grows, Send works throughout, reduced motion is respected, and nothing prints differently.
 
 ---
 
