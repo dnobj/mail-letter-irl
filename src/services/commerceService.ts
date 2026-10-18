@@ -3626,7 +3626,8 @@ async function applyRecoveredDisputes(
   committedIntent: string | null,
   events: Array<{ event_id: string; event_type: string; provider_object_id: string | null }>
 ): Promise<{ disputesTakenOver: string[]; lossRuleApplied: boolean }> {
-  // Each dispute's most recent event: the rows come in the order they were claimed.
+  // Each dispute's last event to be claimed (the order the rows come in), which
+  // keys its alert; the alert's type and severity come from the dispute's row.
   const latestEvent = new Map<string, string>();
   for (const event of events) {
     if (event.event_type.startsWith('charge.dispute.') && event.provider_object_id) {
@@ -3647,6 +3648,25 @@ async function applyRecoveredDisputes(
      ORDER BY dispute_id FOR UPDATE`,
     [ours]
   );
+  // Any other unmatched event of these disputes is the order's too: one the
+  // query above could not find (it carried no payment intent), or one that
+  // found no order while this waited for the dispute.
+  const others = await client.query<{ event_id: string }>(
+    `UPDATE stripe_webhook_events SET order_id = $2, processing_status = 'processed', resolved_at = NOW()
+     WHERE processing_status = 'unmatched' AND event_type LIKE 'charge.dispute.%'
+       AND provider_object_id = ANY($1::text[])
+     RETURNING event_id`,
+    [ours, order.order_id]
+  );
+  if (others.rows.length > 0) {
+    await client.query(
+      `UPDATE commerce_operational_alerts SET status = 'resolved', resolved_at = NOW(),
+         resolution_code = 'matched_later_checkout', updated_at = NOW()
+       WHERE source_event_id = ANY($1::varchar[]) AND alert_type = 'stripe_money_event_unmatched'
+         AND status <> 'resolved'`,
+      [others.rows.map(row => row.event_id)]
+    );
+  }
   const disputes = read.rows
     .filter(row => row.user_id === null)
     .sort((a, b) => a.dispute_id.localeCompare(b.dispute_id));
