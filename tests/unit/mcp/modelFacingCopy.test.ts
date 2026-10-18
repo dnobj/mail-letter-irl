@@ -148,10 +148,10 @@ describe('quote summaries', () => {
     // added: what the card shares never reaches Claude's model. The preview's own text, which the model reads beside
     // the words, says to ask set_letter_words first, wherever our card shows and its words editor is offered.
     const letterTools = ['quote_and_preview_letter', 'quote_and_preview_letter_with_header_image', 'quote_and_preview_letter_with_image'];
-    const edited = { ...letterQuote, wordsVersion: 'w-1a2b3c' };
+    const edited = { ...letterQuote, wordsVersion: 'w-1a2b3c', stationery: { theme: 'classic', source: 'default' } };
     const sentence =
       ' The person can change the words on the card, and you do not see those changes. Before saying a word is or ' +
-      'is not in the letter, or changing one, call set_letter_words with the words you last saw and their wordsVersion ' +
+      'is not in the letter, call set_letter_words with the words you last saw and their wordsVersion ' +
       '(w-1a2b3c for this preview\'s): if they changed on the card, its answer gives them as they are now.';
 
     it.each(letterTools.flatMap(tool => CLIENT_PROFILE_NAMES.map(app => [tool, app] as const)))(
@@ -170,6 +170,16 @@ describe('quote summaries', () => {
     it.each(['chatgpt', 'claude'] as const)('says nothing in %s without the words editor (no wordsVersion)', app => {
       const summary = summarizeToolResult('quote_and_preview_letter', letterQuote, clientProfileNamed(app));
       expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
+    });
+
+    it('says nothing while stationery is not offered: the card shows its editor only beside the Style row (#809 review round 1)', () => {
+      const { stationery: _none, ...plain } = edited;
+      const summary = summarizeToolResult('quote_and_preview_letter', plain, clientProfileNamed('claude'));
+      expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
+    });
+
+    it('asks only for a read, not a read before every change (#809 review round 1)', () => {
+      expect(summarizeToolResult('quote_and_preview_letter', edited, clientProfileNamed('claude'))).not.toMatch(/changing one/);
     });
 
     it('says nothing for a postcard, whose words the card cannot change', () => {

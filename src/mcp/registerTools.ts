@@ -1599,10 +1599,13 @@ function stationerySentence(result: Record<string, unknown>): string {
  */
 function cardWordsSentence(result: Record<string, unknown>, client: Pick<ClientProfile, "rendersCards">): string {
   const wordsVersion = result.wordsVersion;
-  if (!client.rendersCards || typeof wordsVersion !== "string") return "";
+  // The card's editor shows only beside its Style row, which a preview without stationery has none of (#809 review round 1).
+  const cardHasEditor = typeof result.stationery === "object" && result.stationery !== null;
+  if (!client.rendersCards || typeof wordsVersion !== "string" || !cardHasEditor) return "";
+  // Only a read is asked for: a change sent with the version last seen is refused the same way (#809 review round 1).
   return (
     ` The person can change the words on the card, and you do not see those changes. Before saying a word is or ` +
-    `is not in the letter, or changing one, call set_letter_words with the words you last saw and their wordsVersion ` +
+    `is not in the letter, call set_letter_words with the words you last saw and their wordsVersion ` +
     `(${wordsVersion} for this preview's): if they changed on the card, its answer gives them as they are now.`
   );
 }

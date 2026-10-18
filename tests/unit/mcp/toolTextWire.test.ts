@@ -181,6 +181,7 @@ describe("tool text on the wire (#484)", () => {
       canSendNow: true,
       layoutType: "text_only",
       wordsVersion: "w-1a2b3c",
+      stationery: { theme: "classic", source: "default" },
       draftExpiresAt: "2026-10-19T18:00:00.000Z",
       sendEligibility: {
         payAndSend: { available: false },
