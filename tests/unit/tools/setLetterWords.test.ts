@@ -29,6 +29,7 @@ import { getDraftForStationery, setDraftWords } from '../../../src/services/draf
 import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { setLetterWordsTool } from '../../../src/tools/setLetterWords.js';
 import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
+import { clientProfileNamed, type ClientProfile } from '../../../src/auth/clientProfiles.js';
 import { partitionToolResult } from '../../../src/mcp/registerTools.js';
 import { layoutGiftPage, layoutLetter, readImageDataUri, renderPreviewSvg, type Stationery } from '../../../src/render/index.js';
 import { letterPrintText, renderLetterPreviewDocument, signatureParagraph, stampedAddressLines } from '../../../src/services/previewService.js';
@@ -510,18 +511,35 @@ describe('set_letter_words', () => {
 
     // Steering r52: the model never sees the card's changes, and once answered from the preview's words that a word was
     // not in a letter the person had changed on the card (STUDIO-01, DEV 2026-10-17).
-    it('says the card changes the words unseen, so it is called before saying a word is or is not in the letter', () => {
-      const describe = setLetterWordsTool.description as (client?: unknown) => string;
-      expect(describe()).toBe(
+    it('says, where the app shows the card, that the card changes the words unseen, and how to read them without changing them', () => {
+      const describe = setLetterWordsTool.description as (client?: ClientProfile) => string;
+      const head =
         'Change the words of a previewed letter without previewing it again. Give the draftId from the preview, ' +
-          'bodyText and signOff in full, as the letter previews take them, and the wordsVersion of the words being replaced, ' +
-          'from the preview or the last change of words. The person can change the words on the letter card too, and you do ' +
-          'not see those changes: if they changed since you saw them, nothing is changed, and the answer gives the words as ' +
-          'they are now. So call this before saying a word is or is not in the letter, and make the change to the words it ' +
-          'gives. The letter is laid out again in its ' +
-          'stationery on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter ' +
-          'stays on one page.'
-      );
+        'bodyText and signOff in full, as the letter previews take them, and the wordsVersion of the words being replaced, ' +
+        'from the preview or the last change of words. ';
+      const tail =
+        'The letter is laid out again in its stationery on up to three pages: a longer letter prints on both sides and is ' +
+        'paid with Pay & Send, and a gift letter stays on one page.';
+      for (const app of ['chatgpt', 'claude'] as const) {
+        expect(describe(clientProfileNamed(app)), app).toBe(
+          head +
+            'The person can change the words on the letter card too, and you do not see those changes: a change to words ' +
+            'that changed since you saw them changes nothing, and its answer gives the words as they are now. Before saying ' +
+            'a word is or is not in the letter, call this with the words and wordsVersion you last saw: if they changed ' +
+            'since, the answer gives them as they are now; if not, the letter already has them and nothing changes. ' +
+            tail
+        );
+      }
+      // An app that shows no card keeps the words it had: there is no card for the person to change them on.
+      for (const app of ['claude_code', 'vscode', 'codex', 'generic'] as const) {
+        expect(describe(clientProfileNamed(app)), app).toBe(
+          head +
+            'The letter card can change the words too: if they changed since you saw them, nothing is changed, and the ' +
+            'answer gives the words as they are now. ' +
+            tail
+        );
+      }
+      expect(describe()).toBe(describe(clientProfileNamed('generic')));
       expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(52);
     });
 

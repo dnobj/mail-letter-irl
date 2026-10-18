@@ -662,6 +662,9 @@
         onEdited(draftId, what) {
           cardEdited(draftId, what);
         },
+        onWordsSeen(draftId) {
+          cardEditSeen(draftId, "words");
+        },
         onChange() {
           render();
         },
@@ -1149,13 +1152,15 @@
       function cardEditNote(draftId, what, at) {
         const named = what.length > 1 ? what.slice(0, -1).join(", ") + " and " + what[what.length - 1] : what[0];
         const stamp = at.slice(0, 10) + " at " + at.slice(11, 19) + " UTC";
+        // One time for all of them: the latest change's.
         let note =
-          "On " + stamp + " the person changed this letter's " + named + " on its Letter IRL card (draft " + draftId + "), " +
-          "and the chat does not see the card's changes: what it last saw of them may be out of date.";
+          "The person changed this letter's " + named + " on its Letter IRL card (draft " + draftId + ")" +
+          (what.length > 1 ? ", most recently on " : " on ") + stamp +
+          ", and the chat does not see the card's changes: what it last saw of them may be out of date.";
         if (what.includes("words")) {
           note +=
-            " Before saying what the letter's words are, or changing them, call set_letter_words with the wordsVersion last " +
-            "seen: if the words changed since, nothing is changed, and the answer gives them as they are now.";
+            " Before saying what the letter's words are, call set_letter_words with the words and wordsVersion last seen: " +
+            "if they changed since, nothing is changed and the answer gives them as they are now; if not, nothing changes.";
         }
         return note;
       }
@@ -1166,6 +1171,14 @@
         const what = CARD_EDITS.filter((edit) => edit === kind || before.includes(edit));
         const at = new Date().toISOString();
         keep({ changedOnCard: { draftId, what, at, note: cardEditNote(draftId, what, at) } });
+      }
+      // The chat changed the words since the card did (a catch-up brought them), so its model has seen them: the
+      // words are no longer said, and a note with nothing left in it goes (#795 review round 1).
+      function cardEditSeen(draftId, kind) {
+        const edit = saved?.changedOnCard;
+        if (!edit || edit.draftId !== draftId || !Array.isArray(edit.what) || !edit.what.includes(kind)) return;
+        const what = CARD_EDITS.filter((other) => other !== kind && edit.what.includes(other));
+        keep({ changedOnCard: what.length ? { draftId, what, at: edit.at, note: cardEditNote(draftId, what, edit.at) } : null });
       }
       // The note for this draft, or none: written afresh from what was changed and when, so a reopened card's kept
       // change is said in this card's words.

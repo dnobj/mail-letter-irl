@@ -69,6 +69,8 @@
    *   (a style is being set on the draft), onChange({ draftId, stationery }),
    *   onEdited(draftId, what) (the draft's words, stationery, signature or
    *   mail service were changed here: the model never sees the card's calls),
+   *   onWordsSeen(draftId) (a catch-up brought other words than the boxes
+   *   were filled from: the chat changed them, so its model has seen them),
    *   onBusy(), and wordsElement(id), which finds the Words tab's editor
    *   (#586) once the studio has drawn it; and signatureRow and
    *   signatureSwitch, the Signature switch (#608), which may be absent
@@ -639,6 +641,8 @@
       "Update the page to use yours instead, or Put back to take the chat's.";
     // Said when an Update was refused for words changed elsewhere, until the card has the new ones.
     var STALE = "The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.";
+    // Said when the words were set but their page did not come back, until a catch-up brings it.
+    var NO_PAGE = "The words are changed, but the page did not come back here. Make the preview again to see it.";
 
     // The editor's elements live in the studio, which draws them after the
     // card starts: found, and listened to, once they are there.
@@ -681,6 +685,16 @@
       if (base && sameWords(base, current)) return;
       // Box by box: one not typed in (it holds the words it was filled from) takes the draft's words now; one typed in
       // keeps what was typed, and the card says so, unless it is what the draft has now.
+      // Other words than the boxes were filled from: the chat changed them since, and so has seen them (the card's
+      // own change of them is no longer news to it), whether or not what was typed is kept.
+      var other = Boolean(base) && (base.bodyText !== current.bodyText || base.signOff !== current.signOff);
+      if (other && typeof options.onWordsSeen === "function") {
+        var seen = state.draftId;
+        // Once this drawing is over: the card keeps it, and shares it.
+        Promise.resolve().then(function () {
+          options.onWordsSeen(seen);
+        });
+      }
       var bodyKept = Boolean(base) && body.value !== base.bodyText && body.value !== current.bodyText;
       var signOffKept = Boolean(base) && signOff.value !== base.signOff && signOff.value !== current.signOff;
       if (!bodyKept) body.value = current.bodyText;
@@ -689,10 +703,12 @@
       if (bodyKept || signOffKept) {
         words.message = KEPT;
         words.error = false;
-      } else if (base && !words.error && (base.bodyText !== current.bodyText || base.signOff !== current.signOff)) {
+      } else if (other && (!words.error || words.message === STALE)) {
         // The boxes took other words: what the last change said ("The letter's words are changed...") is about
-        // words they no longer hold. A refusal stays until the person acts on it.
+        // words they no longer hold, and a copy said to be out of date is now the draft's. Any other refusal stays
+        // until the person acts on it.
         words.message = "";
+        words.error = false;
       }
     }
 
@@ -826,7 +842,7 @@
             tellVersion(draftId, data);
             words.message = typeof data.message === "string" && data.message ? data.message : "The words are changed. Nothing has been sent.";
           } else {
-            words.message = "The words are changed, but the page did not come back here. Make the preview again to see it.";
+            words.message = NO_PAGE;
           }
           options.onChange({ draftId: draftId, stationery: state.stationery });
         })
@@ -1006,7 +1022,11 @@
         if (force) state.restyled = false;
         state.stationery = stationery;
         keepSlots(stationery);
-        if (typeof previewHtml === "string" && previewHtml) state.previewHtml = previewHtml;
+        if (typeof previewHtml === "string" && previewHtml) {
+          state.previewHtml = previewHtml;
+          // The page a change of words did not bring back is here now.
+          if (words.message === NO_PAGE) words.message = "";
+        }
         var terms = termsOf(answer, fit);
         if (terms) adoptTerms(terms);
         // And its words now (#593 review round 1): the chat may have changed
