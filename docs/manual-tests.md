@@ -1996,7 +1996,7 @@ The studio rearranges both preview cards. The letter card becomes a header, the 
 - For step 7: `LETTER_IRL_ROOM_TO_WRITE_ENABLED` on the maintenance service too, and `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` set to the Stripe test prices (as in PAGES-01).
 - `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 9 (without one, `sendAsGift` is refused).
 
-Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v90, steering r52). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
+Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v91, steering r52). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
 
 **Steps:**
 
@@ -2104,7 +2104,17 @@ The account needs a saved return address whose name has initials (such as "Pat E
 
 ### PAGES-01 — Room to write: letters of two and three pages (#586, #578, #579)
 
-**Status:** Not run.
+**Status:** Run on development on 2026-10-17 and 18 (UTC): steps 1 to 11 passed, step 11 with one finding, fixed by #798. Through ChatGPT (DEV) as 4dm1n, and Claude on the web as testlirl02 for step 10. Steps 1 to 8 ran on widgets v88 (build f7feb89), steps 9 to 11 on v89 (#794, e85df29). The owner paid with the Stripe test card through Link.
+
+- **Steps 1 to 8:** passed. Step 8d needs prose: 24 short numbered lines fit one page in Typewriter too, since they do not wrap (the step now says so).
+- **Step 9:** the orders were `jit-letter-2-pages` at USD 5.99 and the three-page letter at USD 6.99, on the DEV test prices. PostGrid test mode, both double-sided, the addresses only in PostGrid's own layer on page 1:
+  - two pages: `letter_qDb1mzxrq78f47PmS8agVT`, `pageCount` 2; page 1 lines 1 to 26, page 2 lines 27 to 40 and the sign-off;
+  - three pages: `letter_4mCSqXAvtefdJ6taxCPydx`, `pageCount` 3; pages of 26, 33 and 11 lines with the sign-off.
+  - `pageCount` counts sides. PostGrid flattens each of our pages to a 300 dpi greyscale image in black-and-white mail.
+- **Step 10:** passed, the note and **Pay & Send on letterirl.com** as written; the confirmation page showed both pages, USD 5.99 and only Pay & Send. testlirl02 has no saved return address: the address check refused an invented sender, so a public address (Union Station, Kansas City) was given for the preview only.
+- **Step 11:** the 40-line refusal read "Letter is 15 lines too long for one page: it takes 41 lines and the page holds 26. Please shorten your message to fit on one page.", `set_letter_words` left the tool list, and a two-page letter paid before the switch printed on two pages (`letter_pjvqoWAPD9nTqSqBYYeor5`). The unpaid two-page draft's card said the pack rule and "Paid when you send it", with nothing to press and no reason; fixed by #798 (widgets v91, not yet on dev when this was written), which also rewrites the step to say what the card should show.
+- **Found on the way, fixed in #794:** the room line counted characters, so prose written over short lines read hundreds of characters past a page it fitted ("672 past" for words the server fitted with 1,164 to spare); and a card did not hear of words the chat changed until a refused Update. ChatGPT answered from the preview's words after words were changed on the card; fixed in #795 (widgets v90), which STUDIO-01 step 3 checks. Still open: ChatGPT once misstated "previously 3" pages in its own summary.
+- **For the next run:** a Pay & Send checkout lapses if left open; pay as soon as it opens. The maintenance cron runs on the hour; Railway's run-now (`deploymentInstanceExecutionCreate`) sends paid mail to the printer at once, and a redeploy does not.
 
 **Preconditions:** Development, with these on in the API **and** the maintenance service:
 - `LETTER_IRL_ROOM_TO_WRITE_ENABLED` (off unless set);
@@ -2155,7 +2165,9 @@ For lengths, use short numbered lines, one to a line with no blank lines. Page 1
     - `set_letter_words` is gone, unless `LETTER_IRL_WORDS_EDITOR_ENABLED` is on;
     - a two-page letter paid before the change still prints on two pages.
 
-    **Record** what Pay & Send says for a two-page draft that was previewed but not paid (the code expects "Pay & Send isn't available for this mail."). Turn the flag back on.
+    - a two-page draft previewed but not paid shows no Pay & Send once its card hears the draft's terms again: with `LETTER_IRL_CERTIFIED_MAIL_ENABLED` and `LETTER_IRL_STATIONERY_ENABLED` on, as on development, reopen the chat, or switch away from it and back (its status answer carries the terms; with certified mail off it carries none, and the card keeps the preview's price). Verify the pill reads "Pay & Send isn't available for this mail.", the cost "Can't be paid now", and the note "This can't be paid for here now. Ask in the chat for a new preview." (Before widgets v91 the card said the pack rule and "Paid when you send it", with nothing to press.)
+
+    Turn the flag back on.
 
 **Pass criteria:** A letter runs to two or three pages, prints double-sided exactly as previewed, and is paid only with Pay & Send at USD 5.99 or 6.99. A pack pays for one-page letters only. A gift letter stays on one page. Nothing past three pages is made.
 
@@ -2236,7 +2248,7 @@ The tools name sizes the PostGrid way: `6x4` is the 4x6 and `6x11` is the 11x6.
 
 The envelope is drawn on the card only: nothing prints differently, and postcards have none.
 
-**Preconditions:** Development, with `LETTER_IRL_ENVELOPE_REVEAL_ENABLED` on in the API (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf`: the envelope dresses our renderer's page. `LETTER_IRL_STATIONERY_ENABLED` and `LETTER_IRL_ARRIVE_BY_ENABLED` for steps 2 and 4, `LETTER_IRL_WORDS_EDITOR_ENABLED` (or room to write) for step 5, and `LETTER_IRL_STUDIO_CARD_ENABLED`, `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 6. Refresh the ChatGPT (DEV) and Claude connectors (widgets v89). The account needs letters in its balance.
+**Preconditions:** Development, with `LETTER_IRL_ENVELOPE_REVEAL_ENABLED` on in the API (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf`: the envelope dresses our renderer's page. `LETTER_IRL_STATIONERY_ENABLED` and `LETTER_IRL_ARRIVE_BY_ENABLED` for steps 2 and 4, `LETTER_IRL_WORDS_EDITOR_ENABLED` (or room to write) for step 5, and `LETTER_IRL_STUDIO_CARD_ENABLED`, `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 6. Refresh the ChatGPT (DEV) and Claude connectors (widgets v91). The account needs letters in its balance.
 
 **Steps:**
 

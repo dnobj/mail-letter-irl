@@ -356,10 +356,16 @@ describe('the postcard card as a postcard maker (#580)', () => {
     // And the classic cost row with it (#592 review round 1).
     expect(text(paid, 'cost')).toBe('Pay & Send USD 3.99');
 
+    // Paid on the confirmation page, which names no price here.
     const unpriced = mount();
-    await unpriced.show(output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: false } } }), ON);
+    await unpriced.show(output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: false, pageUrl: 'https://letterirl.example/send/draft_0001' } } }), ON);
     expect(text(unpriced, 'studio-cost')).toBe('Paid when you send it');
     expect(text(unpriced, 'cost')).toBe('Paid when you send it');
+    // Nowhere to pay for it now (PAGES-01 step 11).
+    const unpayable = mount();
+    await unpayable.show(output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: false } } }), ON);
+    expect(text(unpayable, 'studio-cost')).toBe("Can't be paid now");
+    expect(text(unpayable, 'cost')).toBe("Can't be paid now");
 
     const gift = mount();
     await gift.show(output({ giftCard: { state: 'funded' } }), ON);

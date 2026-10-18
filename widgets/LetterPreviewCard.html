@@ -385,7 +385,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t38</p>
+      <p class="rev">letter t39</p>
     </div>
 
     <!-- The studio card (#580): widgets/shared/studio.js lays the card out
@@ -870,9 +870,11 @@
               ? `Paid ${formatPayAmount(payAndSend)}`
               : "Paid with Pay & Send"
             : sendEligibility?.packPays === false
-              ? payAndSend?.amountCents
-                ? `Pay & Send ${formatPayAmount(payAndSend)}`
-                : "Paid when you send it"
+              ? unpayableReason(state)
+                ? "Can't be paid now"
+                : payAndSend?.amountCents
+                  ? `Pay & Send ${formatPayAmount(payAndSend)}`
+                  : "Paid when you send it"
               : `${letters} letter${letters === 1 ? "" : "s"}`;
 
         // Once sent, the dates are the server's or the send's own, never the
@@ -2406,9 +2408,11 @@
         document.getElementById("cost").textContent = isGiftSend
           ? "Free (gift letter)"
           : sendEligibility?.packPays === false
-            ? costPayAndSend?.amountCents
-              ? `Pay & Send ${formatPayAmount(costPayAndSend)}`
-              : "Paid when you send it"
+            ? unpayableReason(state)
+              ? "Can't be paid now"
+              : costPayAndSend?.amountCents
+                ? `Pay & Send ${formatPayAmount(costPayAndSend)}`
+                : "Paid when you send it"
             : `${letters} Letter${letters === 1 ? "" : "s"}`;
 
         // Delivery info. A date this card set (#535) brings its own estimate.
@@ -2477,7 +2481,7 @@
             statusPill.textContent = "Waiting for your Letter Pack";
           } else {
             statusPill.classList.add("alert");
-            statusPill.textContent = reasonCannotSend ?? "Cannot send";
+            statusPill.textContent = unpayableReason(state) ?? reasonCannotSend ?? "Cannot send";
           }
         }
 
@@ -2616,6 +2620,9 @@
             checkoutNote.style.display = "block";
           } else if (packsOnWebsite) {
             checkoutNote.textContent = WEBSITE_PACKS_NOTE;
+            checkoutNote.style.display = "block";
+          } else if (!effectiveCanSendNow && unpayableReason(state)) {
+            checkoutNote.textContent = unpayableNote(unpayableReason(state));
             checkoutNote.style.display = "block";
           } else {
             checkoutNote.style.display = "none";
@@ -3051,6 +3058,28 @@
           `If you pay, it goes to the printer as soon as it can and may arrive after ${arrives.describeDate(missed.arriveBy)}.`;
         note.style.display = "block";
         return true;
+      }
+
+      // Mail no pack pays for (#579) that the card cannot have paid either: the server offers no Pay & Send for it now (its
+      // option was turned off since the preview: "Pay & Send isn't available for this mail."), and names no confirmation
+      // page to pay on. The card says the server's reason, never the pack rule, which points at a payment it cannot
+      // make, and prices nothing. Null for mail it can send or have paid.
+      function unpayableReason(state) {
+        const eligibility = state?.sendEligibility;
+        const payAndSend = eligibility?.payAndSend;
+        if (state?.giftCard || eligibility?.packPays !== false || !payAndSend || payAndSend.available !== false) return null;
+        if (isHttpsUrl(payAndSend.pageUrl)) return null;
+        return typeof payAndSend.unavailableReason === "string" && payAndSend.unavailableReason
+          ? payAndSend.unavailableReason
+          : "Pay & Send isn't available for this mail.";
+      }
+      // What to do about it: a new preview only for mail whose option is not sold now (a shorter letter, another size),
+      // since a new preview of the same mail meets the same answer; for any other reason (Pay & Send off, not priced
+      // yet, briefly unavailable, an app with no checkout) the card says only that it can't be paid here.
+      function unpayableNote(reason) {
+        return reason === "Pay & Send isn't available for this mail."
+          ? "This can't be paid for here now. Ask in the chat for a new preview."
+          : "This can't be paid for here now.";
       }
 
       function showCheckoutLink(href, label) {
