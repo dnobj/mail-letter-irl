@@ -85,7 +85,7 @@ function pngBytes(width: number, height: number): Buffer {
 const uri = (bytes: Buffer) => `data:image/png;base64,${bytes.toString('base64')}`;
 
 // The signature as the cleaning writes one, and a letter's picture at 300 dpi and as the card shows it.
-const SIGNATURE_PNG = pngBytes(1200, 300);
+const SIGNATURE_PNG = pngBytes(480, 120);
 const SIGNATURE = uri(SIGNATURE_PNG);
 const FULL = uri(pngBytes(1950, 600));
 const SMALL = uri(pngBytes(390, 120));
@@ -93,8 +93,8 @@ const SMALL = uri(pngBytes(390, 120));
 function saved(useByDefault: boolean) {
   return {
     png: SIGNATURE_PNG,
-    width: 1200,
-    height: 300,
+    width: 480,
+    height: 120,
     useByDefault,
     createdAt: '2026-10-02T14:00:00.000Z',
     updatedAt: '2026-10-02T14:00:00.000Z'
@@ -237,7 +237,34 @@ describe('rememberPreviewSignature', () => {
   });
 });
 
+/** A signature as the cleaner stores one, decodable: 1200 x 300, grey ink on white. */
+async function realSignature(): Promise<Buffer> {
+  const strokes = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300"><rect width="100%" height="100%" fill="#fff"/>' +
+      '<path d="M20 220 C 300 0, 700 300, 1180 80" stroke="#000" stroke-width="8" fill="none"/></svg>'
+  );
+  return (await import('sharp')).default(strokes).toColourspace('b-w').png().toBuffer();
+}
+/** The pixel size of a PNG data URI's image. */
+const pngSize = (href: string) => {
+  const bytes = Buffer.from(href.split(',')[1], 'base64');
+  return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+};
+
 describe('a letter preview with the saved signature', () => {
+  it('draws it from a small copy, and keeps the stored one for the print (#614)', async () => {
+    const png = await realSignature();
+    vi.mocked(getSignature).mockResolvedValue({ ...saved(true), png });
+    await run('text_only');
+    const draft = drafted();
+    // The draft keeps the signature as saved: the print draws from it.
+    expect(draft.signatureImage).toBe(uri(png));
+    const href = draft.previewHtml!.match(/<image data-role="signature" href="([^"]+)"/)![1];
+    expect(href).not.toBe(uri(png));
+    expect(pngSize(href)).toEqual([480, 120]);
+    expect(href.length).toBeLessThan(uri(png).length);
+  });
+
   it.each(['text_only', 'header_image', 'inline_image'] as const)(
     '%s: is drawn with it under the closing, records pdf-4, and keeps its own copy',
     async layout => {
@@ -424,7 +451,7 @@ describe('withDisplayImage', () => {
       pages: [{
         items: [
           { kind: 'image', x: 72, top: 72, width: 468, height: 144, image: { bytes: Buffer.from('full'), mime: 'image/png', width: 1950, height: 600 } },
-          { kind: 'image', x: 72, top: 400, width: 180, height: 45, image: { bytes: SIGNATURE_PNG, mime: 'image/png', width: 1200, height: 300 }, role: 'signature' }
+          { kind: 'image', x: 72, top: 400, width: 180, height: 45, image: { bytes: SIGNATURE_PNG, mime: 'image/png', width: 480, height: 120 }, role: 'signature' }
         ]
       }]
     } as unknown as Layout;

@@ -2194,6 +2194,35 @@ describe.each([LETTER, POSTCARD])('$file keeps what it did for a reopened conver
     });
   });
 
+  it('remembers it found the payment already taken, not a checkout it opened (#679)', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001', eligibility(false)),
+      checkoutResponse: () => ({ structuredContent: { orderId: 'ord_taken_0001', status: 'refund_pending', reused: true } })
+    });
+    await flush();
+
+    await harness.click('pay-send-button');
+
+    expect(harness.savedStates.at(-1)).toEqual({
+      v: 1,
+      draftId: 'draft_host_0001',
+      checkout: true,
+      orderId: 'ord_taken_0001',
+      alreadyPaid: true
+    });
+  });
+
+  it('says a reopened card found the payment already taken, not that it started a checkout (#679)', async () => {
+    const harness = mount(spec, {
+      widgetState: { v: 1, draftId: 'draft_host_0001', checkout: true, orderId: 'ord_taken_0001', alreadyPaid: true }
+    });
+    await flush();
+    expect(harness.text('empty-message')).toBe(`This card found a Pay & Send payment already taken for this ${spec.noun}.`);
+    expect(harness.text('id-value')).toBe('ord_taken_0001');
+    expect(harness.visible('checkout-link')).toBe(false);
+    expect(harness.visible('checkout-note')).toBe(false);
+  });
+
   it('offers the kept checkout link while a reopened order is unpaid', async () => {
     const harness = mount(spec, {
       widgetState: {

@@ -160,6 +160,9 @@
       .studio-body{display:flex;flex-direction:column;align-items:center;gap:14px;padding:14px}
       .studio-page{width:100%;max-width:300px;display:flex;flex-direction:column;align-items:center}
       .studio-side{width:100%;min-width:0;display:flex;flex-direction:column;gap:12px}
+      /* The page's row fills the page column: left to fit its content, it took none once the envelope's
+         size container gave the page no width of its own, and the sealed letter folded to a dot (ENVELOPE-01, DEV 2026-10-18). */
+      .studio-page > .letter-mockup-container{align-self:stretch}
       .studio-body.zoomed{align-items:stretch}
       .studio-body.zoomed .studio-page{max-width:none}
       @media (min-width:560px){
@@ -385,7 +388,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t38</p>
+      <p class="rev">letter t44</p>
     </div>
 
     <!-- The studio card (#580): widgets/shared/studio.js lays the card out
@@ -605,6 +608,8 @@
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
           statusPill.textContent = "Cancelled";
+          // The button its send left reading "Letter Scheduled" (STUDIO-01, DEV 2026-10-18).
+          document.getElementById("send-button-text").textContent = "Letter Cancelled";
           refreshStudio();
         },
       });
@@ -736,6 +741,28 @@
       // them who pays. Laid over the preview's answer, so the card draws one
       // price everywhere.
       function withTerms(output) {
+        return withSentTravel(withLatestTerms(output));
+      }
+
+      // How a sent letter travelled, as the server said once it was sent (#625): final, so over the preview's and any
+      // terms the card heard before the send. A price heard for another service says nothing true of this one, so the
+      // card names none (pricedOtherwise), rather than a pack beside certified mail or Pay & Send beside First-Class.
+      const pricedOtherwise = new WeakSet();
+      function withSentTravel(state) {
+        const settled = settledDraft();
+        if (!state || !settled?.travel || settled.draftId !== state.draftId) return state;
+        const serviceDiffers = (typeof state.mailService === "string" ? state.mailService : "") !== settled.travel.mailService;
+        const sent = {
+          ...state,
+          mailService: settled.travel.mailService,
+          deliveryClass: settled.travel.deliveryClass,
+          deliveryDisclaimer: settled.travel.deliveryDisclaimer,
+        };
+        if (serviceDiffers) pricedOtherwise.add(sent);
+        return sent;
+      }
+
+      function withLatestTerms(output) {
         const terms = output && typeof output.draftId === "string" ? styleRow.terms(output.draftId) : null;
         if (!terms) return output;
         const latestTerms = { ...output, canSendNow: terms.canSendNow, sendEligibility: terms.sendEligibility };
@@ -863,16 +890,20 @@
         const sendEligibility = state.sendEligibility;
         const payAndSend = sendEligibility?.payAndSend;
         const letters = state.lettersRequired ?? 1;
-        document.getElementById("studio-cost").textContent = state.giftCard
+        document.getElementById("studio-cost").textContent = pricedOtherwise.has(state)
+          ? ""
+          : state.giftCard
           ? "Free: a gift letter"
           : paid
             ? payAndSend?.amountCents
               ? `Paid ${formatPayAmount(payAndSend)}`
               : "Paid with Pay & Send"
             : sendEligibility?.packPays === false
-              ? payAndSend?.amountCents
-                ? `Pay & Send ${formatPayAmount(payAndSend)}`
-                : "Paid when you send it"
+              ? unpayableReason(state)
+                ? "Can't be paid now"
+                : payAndSend?.amountCents
+                  ? `Pay & Send ${formatPayAmount(payAndSend)}`
+                  : "Paid when you send it"
               : `${letters} letter${letters === 1 ? "" : "s"}`;
 
         // Once sent, the dates are the server's or the send's own, never the
@@ -1260,7 +1291,11 @@
         document.getElementById("empty-hint").style.display = "none";
         document.getElementById("empty-message").textContent = kept.sent
           ? "This letter was sent to the printer from this card. Ask for its status in the chat."
-          : "A checkout for this letter was started from this card.";
+          : kept.alreadyPaid
+            ? "This card found a Pay & Send payment already taken for this letter."
+            : "A checkout for this letter was started from this card.";
+        // Nothing is left to pay for a payment it found taken, so the note about paying goes, as on the live card (#679).
+        if (kept.alreadyPaid) document.getElementById("checkout-note").style.display = "none";
         document.getElementById("empty-state").style.display = "block";
         const statusPill = document.getElementById("status-pill");
         const keptSchedule = arrives.scheduleOf(kept.schedule);
@@ -1498,6 +1533,15 @@
               // Where the order stands (#535), from its letter, not the draft.
               orderStatus: ["scheduled", "cancelled", "sent"].includes(answer.orderStatus) ? answer.orderStatus : null,
               cancellable: answer.cancellable === true,
+              // How it travelled (#625), when the answer says: a sent letter's service is final, and is the letter's.
+              travel:
+                typeof answer.deliveryClass === "string" && answer.deliveryClass
+                  ? {
+                      mailService: typeof answer.mailService === "string" ? answer.mailService : "",
+                      deliveryClass: answer.deliveryClass,
+                      deliveryDisclaimer: typeof answer.deliveryDisclaimer === "string" ? answer.deliveryDisclaimer : "",
+                    }
+                  : null,
             };
             render();
           },
@@ -2403,12 +2447,17 @@
         // Mail no pack pays for (#579), such as a longer letter (#586), says its price.
         const letters = lettersRequired ?? 1;
         const costPayAndSend = sendEligibility?.payAndSend;
-        document.getElementById("cost").textContent = isGiftSend
+        // A sent letter that travelled otherwise than its price was heard for (#625): no price, as on the studio.
+        document.getElementById("cost").textContent = pricedOtherwise.has(state)
+          ? "—"
+          : isGiftSend
           ? "Free (gift letter)"
           : sendEligibility?.packPays === false
-            ? costPayAndSend?.amountCents
-              ? `Pay & Send ${formatPayAmount(costPayAndSend)}`
-              : "Paid when you send it"
+            ? unpayableReason(state)
+              ? "Can't be paid now"
+              : costPayAndSend?.amountCents
+                ? `Pay & Send ${formatPayAmount(costPayAndSend)}`
+                : "Paid when you send it"
             : `${letters} Letter${letters === 1 ? "" : "s"}`;
 
         // Delivery info. A date this card set (#535) brings its own estimate.
@@ -2477,7 +2526,7 @@
             statusPill.textContent = "Waiting for your Letter Pack";
           } else {
             statusPill.classList.add("alert");
-            statusPill.textContent = reasonCannotSend ?? "Cannot send";
+            statusPill.textContent = unpayableReason(state) ?? reasonCannotSend ?? "Cannot send";
           }
         }
 
@@ -2616,6 +2665,9 @@
             checkoutNote.style.display = "block";
           } else if (packsOnWebsite) {
             checkoutNote.textContent = WEBSITE_PACKS_NOTE;
+            checkoutNote.style.display = "block";
+          } else if (!effectiveCanSendNow && unpayableReason(state)) {
+            checkoutNote.textContent = unpayableNote(unpayableReason(state));
             checkoutNote.style.display = "block";
           } else {
             checkoutNote.style.display = "none";
@@ -3053,6 +3105,28 @@
         return true;
       }
 
+      // Mail no pack pays for (#579) that the card cannot have paid either: the server offers no Pay & Send for it now (its
+      // option was turned off since the preview: "Pay & Send isn't available for this mail."), and names no confirmation
+      // page to pay on. The card says the server's reason, never the pack rule, which points at a payment it cannot
+      // make, and prices nothing. Null for mail it can send or have paid.
+      function unpayableReason(state) {
+        const eligibility = state?.sendEligibility;
+        const payAndSend = eligibility?.payAndSend;
+        if (state?.giftCard || eligibility?.packPays !== false || !payAndSend || payAndSend.available !== false) return null;
+        if (isHttpsUrl(payAndSend.pageUrl)) return null;
+        return typeof payAndSend.unavailableReason === "string" && payAndSend.unavailableReason
+          ? payAndSend.unavailableReason
+          : "Pay & Send isn't available for this mail.";
+      }
+      // What to do about it: a new preview only for mail whose option is not sold now (a shorter letter, another size),
+      // since a new preview of the same mail meets the same answer; for any other reason (Pay & Send off, not priced
+      // yet, briefly unavailable, an app with no checkout) the card says only that it can't be paid here.
+      function unpayableNote(reason) {
+        return reason === "Pay & Send isn't available for this mail."
+          ? "This can't be paid for here now. Ask in the chat for a new preview."
+          : "This can't be paid for here now.";
+      }
+
       function showCheckoutLink(href, label) {
         // Only an https link becomes the card's link (#684); the order is still followed.
         if (!isHttpsUrl(href)) return;
@@ -3106,6 +3180,22 @@
             throw new Error(resultText(raw) || "Checkout URL was not returned");
           }
           const result = toolData(raw);
+          // The draft's Pay & Send order already took a payment that did not send it (#679), and the draft is
+          // still pending. The server answers with that order, not a checkout. Nothing more is charged; the card follows
+          // the order, as after a checkout it opened, and keeps that it found it paid, not that it opened one.
+          if (!result.checkoutUrl && typeof result.orderId === "string" && result.orderId && typeof result.status === "string" && result.status !== "checkout_pending") {
+            trackedOrderId = result.orderId;
+            idLabel.textContent = "Purchase";
+            idValue.textContent = result.orderId;
+            button.classList.remove("loading");
+            button.disabled = true;
+            buttonText.textContent = "Already paid";
+            document.getElementById("checkout-note").style.display = "none";
+            keep({ draftId: currentDraftId, checkout: true, orderId: result.orderId, alreadyPaid: true });
+            startStatusPolling("Checking the purchase...");
+            void refreshPurchaseStatus();
+            return;
+          }
           if (!result.checkoutUrl) {
             throw new Error(result.message || "Checkout URL was not returned");
           }

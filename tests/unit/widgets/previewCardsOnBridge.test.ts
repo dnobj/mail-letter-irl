@@ -521,6 +521,114 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     expect(card.document.getElementById('arrives-asap')!.getAttribute('aria-pressed')).toBe('false');
   });
 
+  /** Keys typed into the date field, with the whole dates the browser makes on the way and says changed. */
+  async function typeDate(card: Awaited<ReturnType<typeof offering>>, steps: string[]) {
+    const input = dateInput(card);
+    for (const step of steps) {
+      input.dispatchEvent(new card.window.KeyboardEvent('keydown', { key: '1', bubbles: true }));
+      input.value = step;
+      input.dispatchEvent(new card.window.Event('change'));
+    }
+    await flush();
+  }
+  const setCalls = (card: Awaited<ReturnType<typeof offering>>) =>
+    card.requests('tools/call').filter(request => request.params.name === 'set_arrival_date');
+
+  it('sets a date typed with keys once it is finished, on Enter: not each whole date typing makes on the way (SCHEDULE-01)', async () => {
+    const card = await offering();
+
+    // Year first digit, then the month's "1": each a whole date the browser says changed.
+    await typeDate(card, ['0002-11-05', '2026-01-05', '2026-11-01', '2026-11-05']);
+    expect(setCalls(card)).toHaveLength(0);
+    expect(dateInput(card).disabled).toBe(false);
+
+    dateInput(card).dispatchEvent(new card.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flush();
+    expect(setCalls(card).map(request => request.params.arguments)).toEqual([{ draftId: 'draft_0001', arriveBy: '2026-11-05' }]);
+  });
+
+  it('sets a date chosen in the picker after a key in the field at once: the picker is no key (#810 review rounds 1 and 2)', async () => {
+    const card = await offering();
+    const input = dateInput(card);
+
+    // A key (the month, or the keys that open the picker), then a choice in the picker a moment later.
+    input.dispatchEvent(new card.window.KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 300));
+    input.value = '2026-11-05';
+    input.dispatchEvent(new card.window.Event('change'));
+    await flush();
+    expect(setCalls(card).map(request => request.params.arguments)).toEqual([{ draftId: 'draft_0001', arriveBy: '2026-11-05' }]);
+
+    // Leaving the field afterwards sets nothing more.
+    input.dispatchEvent(new card.window.Event('blur'));
+    await flush();
+    expect(setCalls(card)).toHaveLength(1);
+  });
+
+  it('shows the dates it had again when a date picked after a key is refused: the pick ends the typing', async () => {
+    const card = await offering();
+    const input = dateInput(card);
+
+    input.dispatchEvent(new card.window.KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 300));
+    input.value = '2026-10-13';
+    input.dispatchEvent(new card.window.Event('change'));
+    await flush();
+    await answerTool(card, 'set_arrival_date', {
+      isError: true,
+      content: [{ type: 'text', text: 'The earliest this can arrive is Wed, Oct 14 (2026-10-14). Choose that date or later, or leave arriveBy out to mail as soon as possible.' }]
+    });
+
+    expect(input.value).toBe('');
+    expect(card.text('arrives-note')).toMatch(/^That date can't be met any more\. The earliest on offer is now Wed, Oct 14(, 2026)?\.$/);
+  });
+
+  it('sets a typed date when the field is left', async () => {
+    const card = await offering();
+
+    await typeDate(card, ['2026-11-01', '2026-11-05']);
+    expect(setCalls(card)).toHaveLength(0);
+    dateInput(card).dispatchEvent(new card.window.Event('blur'));
+    await flush();
+    expect(setCalls(card).map(request => request.params.arguments)).toEqual([{ draftId: 'draft_0001', arriveBy: '2026-11-05' }]);
+
+    // Left again with nothing typed since, it sets nothing more.
+    dateInput(card).dispatchEvent(new card.window.Event('blur'));
+    await flush();
+    expect(setCalls(card)).toHaveLength(1);
+  });
+
+  it('keeps what is being typed through a redraw of the card (ChatGPT draws it again at each key)', async () => {
+    const card = await offering();
+
+    await typeDate(card, ['2026-11-05']);
+    await card.toolResult({
+      content: [{ type: 'text', text: 'Preview ready.' }],
+      structuredContent: { ...spec.output('draft_0001', canSend), arrivalWindow: WINDOW },
+      _meta: spec.meta
+    });
+    expect(dateInput(card).value).toBe('2026-11-05');
+
+    dateInput(card).dispatchEvent(new card.window.Event('blur'));
+    await flush();
+    expect(setCalls(card).map(request => request.params.arguments)).toEqual([{ draftId: 'draft_0001', arriveBy: '2026-11-05' }]);
+  });
+
+  it('forgets what was typed for a draft once the card shows another', async () => {
+    const card = await offering();
+
+    await typeDate(card, ['2026-11-05']);
+    await card.toolResult({
+      content: [{ type: 'text', text: 'Preview ready.' }],
+      structuredContent: { ...spec.output('draft_0002', canSend), arrivalWindow: WINDOW },
+      _meta: spec.meta
+    });
+    expect(dateInput(card).value).toBe('');
+    dateInput(card).dispatchEvent(new card.window.Event('blur'));
+    await flush();
+    expect(setCalls(card)).toHaveLength(0);
+  });
+
   it('clears the date with As soon as possible', async () => {
     const card = await offering({ schedule: HELD });
     expect(dateInput(card).value).toBe('2026-10-16');
@@ -598,6 +706,8 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     });
 
     expect(card.text('status-pill')).toBe('Cancelled');
+    // Not the send's "Scheduled" any more (STUDIO-01, DEV 2026-10-18).
+    expect(card.text('send-button-text')).toBe(`${Noun} Cancelled`);
     expect(card.text('scheduled-note')).toBe('Cancelled. The letter it cost is back in the balance.');
     expect(card.visible('cancel-scheduled-button')).toBe(false);
   });

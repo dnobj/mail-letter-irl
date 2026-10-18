@@ -20,7 +20,7 @@
  * coverage whatsoever.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LetterIrlServer } from '../../../src/server.js';
 import { CARD_ONLY_SEND_TOOLS, summarizeToolResult } from '../../../src/mcp/registerTools.js';
 import { buildManifest, servedToolJsonSchemas } from '../../../src/mcp/manifest.js';
@@ -141,6 +141,70 @@ describe('quote summaries', () => {
     });
 
     expect(canSend).toBe(cannotSend);
+  });
+
+  describe('words changed on the card (STUDIO-01, Claude)', () => {
+    // The editor is on the studio card's Words tab.
+    beforeEach(() => {
+      vi.stubEnv('LETTER_IRL_STUDIO_CARD_ENABLED', 'true');
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+    // On DEV 2026-10-18, Claude answered from the preview's words that the letter had no "roses" the card had
+    // added: what the card shares never reaches Claude's model. The preview's own text, which the model reads beside
+    // the words, says to ask set_letter_words first, wherever our card shows and its words editor is offered.
+    const letterTools = ['quote_and_preview_letter', 'quote_and_preview_letter_with_header_image', 'quote_and_preview_letter_with_image'];
+    const edited = { ...letterQuote, wordsVersion: 'w-1a2b3c', stationery: { theme: 'classic', source: 'default' } };
+    const sentence =
+      ' The person can change the words on the card, and you do not see those changes. Before saying a word is or ' +
+      'is not in the letter, call set_letter_words with the words you last saw and their wordsVersion ' +
+      '(w-1a2b3c for this preview\'s): if they changed on the card, its answer gives them as they are now.';
+
+    it.each(letterTools.flatMap(tool => CLIENT_PROFILE_NAMES.map(app => [tool, app] as const)))(
+      '%s in %s says it only where the card shows',
+      (tool, app) => {
+        const client = clientProfileNamed(app);
+        const summary = summarizeToolResult(tool, edited, client);
+        if (client.rendersCards) {
+          expect(summary.endsWith(sentence), summary).toBe(true);
+        } else {
+          expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
+        }
+      }
+    );
+
+    it.each(['chatgpt', 'claude'] as const)('says nothing in %s without the words editor (no wordsVersion)', app => {
+      // With stationery, so only the missing wordsVersion keeps the sentence out.
+      const { wordsVersion: _none, ...withoutEditor } = edited;
+      const summary = summarizeToolResult('quote_and_preview_letter', withoutEditor, clientProfileNamed(app));
+      expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
+    });
+
+    it('says nothing while stationery is not offered: the card shows its editor only beside the Style row (#809 review round 1)', () => {
+      const { stationery: _none, ...plain } = edited;
+      const summary = summarizeToolResult('quote_and_preview_letter', plain, clientProfileNamed('claude'));
+      expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
+    });
+
+    it('asks only for a read, not a read before every change (#809 review round 1)', () => {
+      expect(summarizeToolResult('quote_and_preview_letter', edited, clientProfileNamed('claude'))).not.toMatch(/changing one/);
+    });
+
+    it('says nothing without the studio card, whose Words tab holds the editor (#809 review round 2)', () => {
+      vi.stubEnv('LETTER_IRL_STUDIO_CARD_ENABLED', 'false');
+      const summary = summarizeToolResult('quote_and_preview_letter', edited, clientProfileNamed('claude'));
+      expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
+    });
+
+    it('says nothing for a postcard, whose words the card cannot change', () => {
+      const summary = summarizeToolResult('quote_and_preview_postcard', edited, clientProfileNamed('claude'));
+      expect(summary).not.toMatch(/set_letter_words|change the words on the card/);
+    });
+
+    it('is a later steering revision than r53', () => {
+      expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(54);
+    });
   });
 
   it('still carries the details that do not expire', () => {

@@ -30,14 +30,14 @@ const APPS = {
   vscode: "https://vscode.dev/oauth/client-metadata.json"
 } as const;
 
-async function connect(app: keyof typeof APPS) {
+async function connect(app: keyof typeof APPS, answer?: Record<string, unknown>) {
   vi.stubEnv("LETTER_IRL_REQUIRE_AUTH", "true");
   vi.stubEnv("LETTER_IRL_OAUTH_SCOPES", "openid email offline_access mail:read mail:draft mail:send");
   vi.stubEnv("LETTER_IRL_WEBSITE_BASE_URL", "https://website.example");
   const real = new LetterIrlServer();
-  // The real get_started, run with the app the call arrived with.
+  // The real get_started, run with the app the call arrived with; or, given one, that answer.
   const execute = vi.fn(async (request: { toolName: string; client?: ClientProfile }) => ({
-    result: await getStartedTool.handler({}, { client: request.client } as never),
+    result: answer ?? (await getStartedTool.handler({}, { client: request.client } as never)),
     meta: {}
   }));
   const appServer = {
@@ -171,5 +171,39 @@ describe("tool text on the wire (#484)", () => {
     expect(vscodeText).toContain("https://website.example/dashboard/letter-packs");
     expect(vscodeText).toContain("Things to try:");
     expect(vscodeText).not.toMatch(/\bcard\b|right here/);
+  });
+
+  it("says beside a letter preview where the card shows that its words may change unseen (STUDIO-01, r54)", async () => {
+    // Claude's model never sees what the card shares (HOME-02), so the preview's own text says it. The editor is on the
+    // studio card's Words tab.
+    vi.stubEnv("LETTER_IRL_STUDIO_CARD_ENABLED", "true");
+    const preview = {
+      draftId: "0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0",
+      lettersRequired: 1,
+      canSendNow: true,
+      layoutType: "text_only",
+      wordsVersion: "w-1a2b3c",
+      stationery: { theme: "classic", source: "default" },
+      draftExpiresAt: "2026-10-19T18:00:00.000Z",
+      sendEligibility: {
+        payAndSend: { available: false },
+        letterPack: { available: true, purchaseUrl: "https://website.example/dashboard/letter-packs" }
+      }
+    };
+    const said = /change the words on the card[^]*call set_letter_words[^]*\(w-1a2b3c for this preview's\)/;
+    for (const app of ["chatgpt", "claude", "vscode"] as const) {
+      const { client } = await connect(app, preview);
+      const answer = await client.callTool({
+        name: "quote_and_preview_letter",
+        arguments: {
+          recipient: { name: "Ruth Example", addressLine1: "112 N 6th St", city: "Springfield", state: "IL", postalCode: "62701", country: "US" },
+          bodyText: "Dear Ruth, thank you.",
+          signOff: "Dee"
+        }
+      });
+      const text = (answer.content as Array<{ text: string }>)[0].text;
+      if (app === "vscode") expect(text, app).not.toMatch(/set_letter_words/);
+      else expect(text, app).toMatch(said);
+    }
   });
 });

@@ -3010,11 +3010,11 @@
               "certified",
               "certified_return_receipt"
             ],
-            "description": "With the terms, for a letter that is certified mail now: which service. Absent beside the delivery words: ordinary mail"
+            "description": "With the terms, for a letter that is certified mail now, and for a sent letter that went by it: which service. Absent beside the delivery words: ordinary mail"
           },
           "deliveryClass": {
             "type": "string",
-            "description": "With the terms, for a letter that is certified mail or while certified mail is offered: how it is delivered now, as a new preview would say it. A card draws it on its Delivery line"
+            "description": "With the terms, for a letter that is certified mail or while certified mail is offered, and for a sent letter: how it is delivered, as a new preview would say it. A card draws it on its Delivery line"
           },
           "deliveryDisclaimer": {
             "type": "string",
