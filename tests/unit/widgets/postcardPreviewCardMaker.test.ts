@@ -1010,7 +1010,7 @@ describe('the postcard draft and its changes, told to the model (#650, #795)', (
     );
     const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
       runScripts: 'dangerously',
-      beforeParse(window) {
+      beforeParse(window: any) {
         (window as any).setTimeout = () => 0;
         (window as any).clearTimeout = () => undefined;
         (window as any).openai = {
@@ -1096,7 +1096,7 @@ describe('the postcard draft and its changes, told to the model (#650, #795)', (
     );
     const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
       runScripts: 'dangerously',
-      beforeParse(window) {
+      beforeParse(window: any) {
         (window as any).setTimeout = () => 0;
         (window as any).clearTimeout = () => undefined;
         Object.defineProperty(window, 'parent', { value: parent, configurable: true });
