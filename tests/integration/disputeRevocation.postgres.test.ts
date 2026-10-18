@@ -926,8 +926,13 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(account.sends_blocked_at).not.toBeNull();
       expect(account.sends_blocked_reason).toBe('payment_disputed');
       expect(await readDispute(disputeId)).toEqual({ user_id: userId, status: 'needs_response' });
-      // The recovery never grants the pack.
+      // The recovery never grants the pack, and holds the order as the matched path does.
       expect(await readLedgerStatuses(userId)).toEqual([]);
+      const held = await pool.query(
+        'SELECT hold_reason, hold_previous_status, held_at IS NOT NULL AS held FROM orders WHERE order_id = $1',
+        [orderId]
+      );
+      expect(held.rows[0]).toEqual({ hold_reason: 'payment_disputed', hold_previous_status: 'checkout_pending', held: true });
       expect(await readDisputeAlerts(orderId)).toEqual([
         { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null }
       ]);
@@ -1011,6 +1016,48 @@ describePostgres('dispute and refund pack revocation', () => {
       expect((await readDispute(disputeId)).user_id).toBe(userId);
       // The matched path raises its own alert for that event, beside the recovery's.
       expect(await readDisputeAlerts(orderId)).toEqual([recoveredAlert, recoveredAlert]);
+    }, 60_000);
+
+    it('treats an order whose intent was committed while it waited at Checkout like a funded one', async () => {
+      // An unpaid completed event commits the payment intent and leaves the
+      // order at Checkout; the dispute recorded before that commit is recovered
+      // by the next checkout event.
+      const { userId, orderId, paymentIntentId } = await seedPendingPackOrder();
+      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+      await pool.query('UPDATE orders SET stripe_payment_intent_id = $2 WHERE order_id = $1', [orderId, paymentIntentId]);
+
+      const result = await commerceService.processStripeWebhookEvent(completed(orderId, paymentIntentId));
+
+      expect(result).toMatchObject({ orderId, status: 'disputed' });
+      expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
+      expect((await readDispute(disputeId)).user_id).toBeNull();
+
+      await commerceService.processStripeWebhookEvent(
+        disputeEvent('charge.dispute.funds_withdrawn', disputeFixture({ id: disputeId, payment_intent: paymentIntentId }))
+      );
+      expect((await readDispute(disputeId)).user_id).toBe(userId);
+    }, 60_000);
+
+    it('gives the disputes of an order this checkout adopts the account', async () => {
+      const userId = `user_${randomUUID()}`;
+      await pool.query('INSERT INTO users (user_id, email) VALUES ($1, $2)', [userId, `${userId}@test.invalid`]);
+      const paymentIntentId = `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+      const sessionId = `cs_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+      const disputeId = await disputeFirst(paymentIntentId, [['charge.dispute.created', 'needs_response']]);
+
+      const result = await commerceService.processStripeWebhookEvent({
+        id: `evt_${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+        type: 'checkout.session.completed',
+        data: { object: {
+          id: sessionId, object: 'checkout.session', client_reference_id: null,
+          metadata: { userId, productId: 'credit-pack-4' }, payment_intent: paymentIntentId,
+          payment_status: 'paid', amount_total: 500, currency: 'usd'
+        } }
+      } as unknown as Stripe.Event);
+
+      expect(result).toMatchObject({ orderId: `stripe-${sessionId}`, status: 'disputed' });
+      expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
+      expect((await readDispute(disputeId)).user_id).toBe(userId);
     }, 60_000);
 
     it('leaves the account sending for a card-network inquiry', async () => {

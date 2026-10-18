@@ -1977,6 +1977,8 @@ async function processCheckoutSessionEvent(
       return { duplicate: true };
     }
     let order = await findCheckoutOrder(client, session);
+    // Read from the committed row, as locked: an order adopted below has none.
+    const intentCommitted = Boolean(order?.stripe_payment_intent_id);
     if (!order) order = await createLegacyPackOrder(client, session);
     if (!order) {
       // A paid session we cannot bind to an order is unmatched money. Consuming
@@ -2028,6 +2030,13 @@ async function processCheckoutSessionEvent(
            stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, $3),
            status = $4::varchar, refund_pending_at = CASE WHEN $4::varchar = 'refund_pending'
              THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
+           -- A dispute holds the order as the matched path holds it.
+           hold_previous_status = CASE WHEN $4::varchar = 'disputed'
+             THEN COALESCE(hold_previous_status, status) ELSE hold_previous_status END,
+           held_at = CASE WHEN $4::varchar = 'disputed'
+             THEN COALESCE(held_at, NOW()) ELSE held_at END,
+           hold_reason = CASE WHEN $4::varchar = 'disputed'
+             THEN 'payment_disputed' ELSE hold_reason END,
            last_error_code = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'
              THEN last_error_code ELSE 'UNMATCHED_MONEY_EVENT_RECOVERED' END,
            -- The PAIR, third site (#279). Setting the code without the message
@@ -2057,7 +2066,7 @@ async function processCheckoutSessionEvent(
       );
       // After the resolution above: the alerts this raises are keyed on the
       // same events, and stay open.
-      if (isDispute) await applyRecoveredDisputes(client, order, unmatchedMoney.rows);
+      if (isDispute) await applyRecoveredDisputes(client, order, intentCommitted, unmatchedMoney.rows);
       await recordOrderEvent(client, order.order_id, 'stripe.money_event_recovered',
         order.status, blockedStatus, { eventCount: unmatchedMoney.rows.length });
       return { duplicate: false, orderId: order.order_id, status: blockedStatus };
@@ -3574,8 +3583,10 @@ async function blockAccountSends(
  * checkout ties their money to an order (processCheckoutSessionEvent's
  * recovery): the same rule processDisputeEvent applies to a matched dispute.
  *
- * An order with no payment intent committed yet has had no pack granted and no
- * mail queued, so the block is what is left of the rule. Its dispute rows take
+ * An order whose committed row has no payment intent (intentCommitted false;
+ * an order this checkout adopts has no committed row) has had no pack granted
+ * and no mail queued, so the block is what is left of the rule. Its dispute
+ * rows take
  * the order's account, which processDisputeEvent reads as "its effects ran":
  * the next event of a loss records only, as for a matched loss, and the unblock
  * after another dispute's win (unblockAccountSends) and an operator's lift
@@ -3592,7 +3603,8 @@ async function blockAccountSends(
  * account, so that event acts, and no lock is taken, as that event may hold
  * its dispute's lock while it waits for the order. The block applies
  * meanwhile; with no account on the disputes, the unblock after another
- * dispute's win or an operator's lift does not count them until that event.
+ * dispute's win or an operator's lift does not count them until their next
+ * event, if one comes.
  *
  * Each loss gets the alert the matched path raises, which the dispute's close
  * resolves; an inquiry alerts when it escalates. A dispute already closed, or
@@ -3601,6 +3613,7 @@ async function blockAccountSends(
 async function applyRecoveredDisputes(
   client: Pick<pg.PoolClient, 'query'>,
   order: Order,
+  intentCommitted: boolean,
   events: Array<{ event_id: string; event_type: string; provider_object_id: string | null }>
 ): Promise<void> {
   // Each dispute's most recent event: the rows come in the order they were processed.
@@ -3611,7 +3624,6 @@ async function applyRecoveredDisputes(
     }
   }
   const disputeIds = [...latestEvent.keys()].sort();
-  const intentCommitted = Boolean(order.stripe_payment_intent_id);
   const columns = 'dispute_id, status, resolved_at, reason, amount_cents, currency, charge_id';
   type RecoveredDispute = {
     dispute_id: string; status: string; resolved_at: Date | null; reason: string | null;
