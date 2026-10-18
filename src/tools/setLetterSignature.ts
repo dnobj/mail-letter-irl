@@ -3,7 +3,7 @@ import { letterPageLimit } from '../config/roomToWrite.js';
 import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import type { SendEligibility } from '../services/commerceService.js';
 import { SIGNATURE_LINES, stationeryOf, type PageFit } from '../render/index.js';
-import { getDraftForStationery, setDraftSignature } from '../services/draftService.js';
+import { getDraftForStationery, readDraftMailService, setDraftSignature } from '../services/draftService.js';
 import { getSignature } from '../services/signatureService.js';
 import { PAGE_WORDS, editorPageFit, layoutLetterForPreview, letterPayment, letterRunsPast, pageChangeSentence, redrawLetterPreview, type LetterTravel } from './letterHelpers.js';
 import { letterOption } from '../services/mailOptions.js';
@@ -178,7 +178,9 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them (#586).
-  const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
+  // How it travels as it is now, not as read before the lock (#625 follow-up).
+  const service = (await readDraftMailService(draftId)) ?? draft.mail_service;
+  const payment = letterPayment(letterOption(layout, service), Number(draft.required_credits ?? 2), gift, context, draftId);
   return {
     ...(contentVersion ? { contentVersion, contentVersionBefore } : {}),
     draftId,
@@ -187,7 +189,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
     ...(pages > 1 ? { pages } : {}),
     ...payment,
     ...(isWordsEditorOffered() ? { pageFit: editorPageFit(layout, stationery) } : {}),
-    message: messageFor(signatureImage !== null, pages, pagesBefore, draft.mail_service)
+    message: messageFor(signatureImage !== null, pages, pagesBefore, service)
   };
 }
 

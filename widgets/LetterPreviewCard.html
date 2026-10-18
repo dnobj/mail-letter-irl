@@ -385,7 +385,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t39</p>
+      <p class="rev">letter t41</p>
     </div>
 
     <!-- The studio card (#580): widgets/shared/studio.js lays the card out
@@ -736,6 +736,23 @@
       // them who pays. Laid over the preview's answer, so the card draws one
       // price everywhere.
       function withTerms(output) {
+        return withSentTravel(withLatestTerms(output));
+      }
+
+      // How a sent letter travelled, as the server said once it was sent (#625): final, so over the preview's and any
+      // terms the card heard before the send.
+      function withSentTravel(state) {
+        const settled = settledDraft();
+        if (!state || !settled?.travel || settled.draftId !== state.draftId) return state;
+        return {
+          ...state,
+          mailService: settled.travel.mailService,
+          deliveryClass: settled.travel.deliveryClass,
+          deliveryDisclaimer: settled.travel.deliveryDisclaimer,
+        };
+      }
+
+      function withLatestTerms(output) {
         const terms = output && typeof output.draftId === "string" ? styleRow.terms(output.draftId) : null;
         if (!terms) return output;
         const latestTerms = { ...output, canSendNow: terms.canSendNow, sendEligibility: terms.sendEligibility };
@@ -1500,6 +1517,15 @@
               // Where the order stands (#535), from its letter, not the draft.
               orderStatus: ["scheduled", "cancelled", "sent"].includes(answer.orderStatus) ? answer.orderStatus : null,
               cancellable: answer.cancellable === true,
+              // How it travelled (#625), when the answer says: a sent letter's service is final, and is the letter's.
+              travel:
+                typeof answer.deliveryClass === "string" && answer.deliveryClass
+                  ? {
+                      mailService: typeof answer.mailService === "string" ? answer.mailService : "",
+                      deliveryClass: answer.deliveryClass,
+                      deliveryDisclaimer: typeof answer.deliveryDisclaimer === "string" ? answer.deliveryDisclaimer : "",
+                    }
+                  : null,
             };
             render();
           },

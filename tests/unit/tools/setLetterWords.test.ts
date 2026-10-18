@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/services/draftService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/services/draftService.js')>()),
   getDraftForStationery: vi.fn(),
+  readDraftMailService: vi.fn(),
   setDraftWords: vi.fn()
 }));
 
@@ -25,7 +26,7 @@ vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
   getSendEligibility: vi.fn()
 }));
 
-import { getDraftForStationery, setDraftWords } from '../../../src/services/draftService.js';
+import { getDraftForStationery, readDraftMailService, setDraftWords } from '../../../src/services/draftService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { setLetterWordsTool } from '../../../src/tools/setLetterWords.js';
 import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
@@ -297,6 +298,27 @@ describe('set_letter_words', () => {
     expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
     expect(output.message).not.toContain('Pay & Send.');
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2, mailService: 'certified' });
+  });
+
+  it('prices by how the letter travels once the words are written, not as read before (#625 follow-up)', async () => {
+    // set_mail_service landed between the read and the lock: the letter now goes certified.
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), mail_service: 'standard' } as never);
+    vi.mocked(readDraftMailService).mockResolvedValueOnce('certified');
+
+    const output = await change(lines(40));
+
+    expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.' });
+    expect(output).toMatchObject({ mailService: 'certified', deliveryClass: 'USPS Certified Mail' });
+    expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
+    expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2, mailService: 'certified' });
+    // Read once the change is written, not before its lock (#625 follow-up).
+    expect(readDraftMailService).toHaveBeenCalledWith(vi.mocked(setDraftWords).mock.calls[0][0]);
+    expect(vi.mocked(readDraftMailService).mock.invocationCallOrder[0]).toBeGreaterThan(vi.mocked(setDraftWords).mock.invocationCallOrder[0]);
+
+    // Gone by then: priced as it was read.
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), mail_service: 'certified' } as never);
+    vi.mocked(readDraftMailService).mockResolvedValueOnce(null);
+    expect(await change(lines(40))).toMatchObject({ mailService: 'certified' });
   });
 
   it('says nothing of a pack when a certified letter fits back on one page (#625)', async () => {

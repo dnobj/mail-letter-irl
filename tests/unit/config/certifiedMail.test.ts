@@ -1,7 +1,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CARRIER_TRACKING_NUMBER_SHAPE, MAIL_SERVICES, certifiedFactsOf, isCertifiedMailOffered, uspsTrackingUrl } from '../../../src/config/certifiedMail.js';
+import {
+  CARRIER_NUMBER_SYNC_DAYS,
+  CARRIER_TRACKING_NUMBER_SHAPE,
+  MAIL_SERVICES,
+  carrierNumberLookupEnded,
+  certifiedFactsOf,
+  isCertifiedMailOffered,
+  uspsTrackingUrl
+} from '../../../src/config/certifiedMail.js';
 import { CERTIFIED_MAIL_FLAG } from '../../../src/config/products.js';
 
 /**
@@ -112,5 +120,25 @@ describe('the carrier number this code will show (#625)', () => {
     const stored = /const CARRIER_TRACKING_NUMBER = (\/\^.*\$\/);/.exec(source);
     expect(stored, 'the provider names its shape').not.toBeNull();
     expect(CARRIER_TRACKING_NUMBER_SHAPE.toString()).toBe(stored![1]);
+  });
+});
+
+describe('when the status sync stops looking for a carrier number (#625 follow-up)', () => {
+  const now = new Date('2026-11-01T12:00:00Z');
+  const ago = (ms: number) => new Date(now.getTime() - ms);
+
+  it('is a month, the window the sync is run with', () => {
+    expect(CARRIER_NUMBER_SYNC_DAYS).toBe(30);
+    const worker = fs.readFileSync(path.resolve(__dirname, '../../../src/workers/statusSyncWorker.ts'), 'utf8');
+    expect(worker.match(/syncLetterStatuses\([^)]*CARRIER_NUMBER_SYNC_DAYS\)/g)).toHaveLength(2);
+    expect(worker).not.toMatch(/syncLetterStatuses\([^)]*\b30\)/);
+  });
+
+  it('has ended only past the window, and never for a letter not sent', () => {
+    expect(carrierNumberLookupEnded(ago(2592000000), now)).toBe(false);
+    expect(carrierNumberLookupEnded(ago(2592000000 + 1), now)).toBe(true);
+    expect(carrierNumberLookupEnded(ago(86400000), now)).toBe(false);
+    expect(carrierNumberLookupEnded(null, now)).toBe(false);
+    expect(carrierNumberLookupEnded(undefined, now)).toBe(false);
   });
 });

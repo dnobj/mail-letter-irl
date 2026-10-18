@@ -10,7 +10,9 @@ import type { LetterStatus } from '../contracts/types.js';
  * - In flight (accepted, printing, in transit, delivered): the number is the
  *   printer's to set, some time after it accepts the letter, and Letter IRL's
  *   provider status sync (every six hours, for a month after the send) stores
- *   it, so before then it is "not here yet, check again later".
+ *   it, so before then it is "not here yet, check again later". Once the sync
+ *   has stopped looking (lookupEnded, #625 follow-up), none is coming from us,
+ *   and the words say so rather than ask the person to check again.
  * - Scheduled or pending: the number comes after the printer accepts the
  *   letter, so there is none to wait for yet. (Pending also covers a letter
  *   held for an operator, so nothing here says it has reached the printer.)
@@ -27,7 +29,7 @@ import type { LetterStatus } from '../contracts/types.js';
  * return receipt is delivered is not settled (the development check is meant
  * to), so the words say only what Letter IRL does: it does not send it.
  */
-export function certifiedOrderNote(facts: CertifiedFacts, status: LetterStatus): string {
+export function certifiedOrderNote(facts: CertifiedFacts, status: LetterStatus, lookupEnded = false): string {
   const name =
     facts.mailService === 'certified_return_receipt'
       ? 'USPS Certified Mail with an electronic return receipt'
@@ -40,8 +42,17 @@ export function certifiedOrderNote(facts: CertifiedFacts, status: LetterStatus):
     facts.mailService === 'certified_return_receipt'
       ? ' The electronic return receipt is the record USPS keeps of who signed for the letter. Letter IRL does not send it to you: once the letter is delivered, ask USPS for it with the tracking number.'
       : '';
+  // With no number to ask USPS with, the receipt's last words would send the person nowhere.
+  const receiptWithoutNumber =
+    facts.mailService === 'certified_return_receipt'
+      ? ' The electronic return receipt is the record USPS keeps of who signed for the letter. Letter IRL does not send it to you.'
+      : '';
   const printerHasIt = (): string =>
-    `Sent as ${name}. ${tracking ?? 'The USPS tracking number is not here yet: the printer adds it some time after it accepts the letter, so check again later.'}${receipt}`;
+    tracking
+      ? `Sent as ${name}. ${tracking}${receipt}`
+      : lookupEnded
+        ? `Sent as ${name}. No USPS tracking number came from the printer for it, and Letter IRL stopped looking for one a month after the send.${receiptWithoutNumber}`
+        : `Sent as ${name}. The USPS tracking number is not here yet: the printer adds it some time after it accepts the letter, so check again later.${receipt}`;
   switch (status) {
     case 'failed':
       return `This letter (${name}) did not go out. ${tracking ?? 'It has no USPS tracking number.'}`;

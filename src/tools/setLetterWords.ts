@@ -7,7 +7,7 @@ import { mailServiceOf } from '../config/products.js';
 import type { SendEligibility } from '../services/commerceService.js';
 import { getGiftBalance } from '../services/giftLetterService.js';
 import { stationeryOf, type Layout, type PageFit } from '../render/index.js';
-import { getDraftForStationery, setDraftWords } from '../services/draftService.js';
+import { getDraftForStationery, readDraftMailService, setDraftWords } from '../services/draftService.js';
 import {
   layoutLetterForPreview,
   letterPayment,
@@ -243,10 +243,12 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them.
-  const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
+  // How it travels as it is now, not as read before the lock (#625 follow-up).
+  const service = (await readDraftMailService(draftId)) ?? draft.mail_service;
+  const payment = letterPayment(letterOption(layout, service), Number(draft.required_credits ?? 2), gift, context, draftId);
   // Never for certified mail (#625): no gift letter pays for it, and a new preview that used one would drop the service.
   const note =
-    pages === 1 && pagesBefore > 1 && !payment.canSendNow && !gift && mailServiceOf(draft.mail_service) === undefined
+    pages === 1 && pagesBefore > 1 && !payment.canSendNow && !gift && mailServiceOf(service) === undefined
       ? await giftLetterNote(context)
       : '';
   return {
@@ -257,7 +259,7 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
     ...payment,
     pageFit: editorPageFit(layout, stationery),
     wordsVersion: wordsVersionOf(bodyText, signOff),
-    message: messageFor(pages, pagesBefore, note, already, draft.mail_service)
+    message: messageFor(pages, pagesBefore, note, already, service)
   };
 }
 

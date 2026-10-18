@@ -16,6 +16,7 @@ vi.mock('../../../src/services/draftService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/services/draftService.js')>()),
   createDraft: vi.fn(),
   getDraftForStationery: vi.fn(),
+  readDraftMailService: vi.fn(),
   setDraftStationery: vi.fn()
 }));
 

@@ -3,7 +3,7 @@ import { query } from "../db/index.js";
 import { getBalance } from "../services/creditService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
 import { isImageGenerationOff } from "../config/imageGeneration.js";
-import { certifiedFactsOf } from "../config/certifiedMail.js";
+import { carrierNumberLookupEnded, certifiedFactsOf } from "../config/certifiedMail.js";
 import { heldDatesOf, scheduleSentence } from "../services/deliverySchedule.js";
 import {
   classifyDiagnosticError,
@@ -170,7 +170,10 @@ export class FileAccountStore {
           previewFirstPageHtml: row.preview_html || undefined,
           ...(schedule ? { schedule, cancellable: waiting && row.funding_type !== 'jit_order' } : {}),
           // Certified mail (#625): the service, and the carrier's number once the status sync has it.
-          ...(certified ? { certified } : {})
+          ...(certified ? { certified } : {}),
+          ...(certified && !certified.carrierTrackingNumber && carrierNumberLookupEnded(row.sent_at)
+            ? { carrierNumberLookupEnded: true }
+            : {})
         } as OrderRecord;
       });
     } catch (error) {

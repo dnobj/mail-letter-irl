@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/services/draftService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/services/draftService.js')>()),
   getDraftForStationery: vi.fn(),
+  readDraftMailService: vi.fn(),
   setDraftSignature: vi.fn()
 }));
 
@@ -20,7 +21,7 @@ vi.mock('../../../src/services/signatureService.js', () => ({
   getSignature: vi.fn()
 }));
 
-import { getDraftForStationery, setDraftSignature, type DraftForStationery } from '../../../src/services/draftService.js';
+import { getDraftForStationery, readDraftMailService, setDraftSignature, type DraftForStationery } from '../../../src/services/draftService.js';
 import { getSignature } from '../../../src/services/signatureService.js';
 import { setLetterSignatureTool } from '../../../src/tools/setLetterSignature.js';
 import { layoutLetterForPreview, withDisplayImage } from '../../../src/tools/letterHelpers.js';
@@ -267,6 +268,20 @@ describe('set_letter_signature', () => {
     expect(output.sendEligibility).toMatchObject({ packPays: false });
     expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
     expect(output.message).not.toContain('letter pack');
+  });
+
+  it('prices by how the letter travels once it is signed, not as read before (#625 follow-up)', async () => {
+    vi.stubEnv('LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(24) }), mail_service: 'standard' });
+    vi.mocked(readDraftMailService).mockResolvedValueOnce('certified_return_receipt');
+    const output = await run({ signature: true });
+    expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.' });
+    expect(output).toMatchObject({ mailService: 'certified_return_receipt', deliveryClass: 'USPS Certified Mail with an electronic return receipt' });
+    expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
+    // Read once the change is written, not before its lock (#625 follow-up).
+    expect(readDraftMailService).toHaveBeenCalledWith(vi.mocked(setDraftSignature).mock.calls[0][0]);
+    expect(vi.mocked(readDraftMailService).mock.invocationCallOrder[0]).toBeGreaterThan(vi.mocked(setDraftSignature).mock.invocationCallOrder[0]);
   });
 
   it('refuses a draft whose page lost its picture, rather than embed the full image', async () => {

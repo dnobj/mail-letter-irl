@@ -231,8 +231,18 @@ describe("get_draft_status (#474)", () => {
       expect(postcard).not.toHaveProperty("mailService");
       expect(postcard).not.toHaveProperty("deliveryClass");
 
-      // A sent or expired draft says nothing of it.
+      // A sent draft names how it travelled: it no longer changes, so its service is the letter's (#625 follow-up).
       vi.mocked(getDraftState).mockResolvedValue({ ...letter, mail_service: "certified", status: "consumed", consumed_letter_id: ORDER_ID } as any);
+      const sent = await ask({ draftId: DRAFT_ID }, rich);
+      expect(sent).toMatchObject({ status: "sent", orderId: ORDER_ID, mailService: "certified", deliveryClass: CERTIFIED_CLASS.certified });
+      expect(sent).not.toHaveProperty("canSendNow");
+      vi.mocked(getDraftState).mockResolvedValue({ ...letter, mail_service: "certified", status: "consumed", consumed_letter_id: null } as any);
+      expect(await ask({ draftId: DRAFT_ID }, rich)).toMatchObject({ status: "sent", mailService: "certified" });
+      // A sent postcard has none.
+      vi.mocked(getDraftState).mockResolvedValue({ ...letter, mail_type: "postcard", mail_service: "certified", status: "consumed", consumed_letter_id: ORDER_ID } as any);
+      expect(await ask({ draftId: DRAFT_ID }, rich)).not.toHaveProperty("mailService");
+      // An expired draft says nothing of it.
+      vi.mocked(getDraftState).mockResolvedValue({ ...letter, mail_service: "certified", status: "expired" } as any);
       expect(await ask({ draftId: DRAFT_ID }, rich)).not.toHaveProperty("mailService");
     } finally {
       vi.unstubAllEnvs();

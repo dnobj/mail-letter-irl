@@ -104,7 +104,7 @@ async function handler(
           ...(order.certified.carrierTrackingNumber
             ? { carrierTrackingNumber: order.certified.carrierTrackingNumber, carrierTrackingUrl: order.certified.carrierTrackingUrl }
             : {}),
-          certifiedNote: certifiedOrderNote(order.certified, order.currentStatus)
+          certifiedNote: certifiedOrderNote(order.certified, order.currentStatus, order.carrierNumberLookupEnded === true)
         }
       : {})
   };

@@ -9,7 +9,7 @@ import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
-import { letterPayment, wordsVersionOf, type LetterTravel } from './letterHelpers.js';
+import { letterPayment, travelFields, wordsVersionOf, type LetterTravel } from './letterHelpers.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import { isExtraService, mailServiceOf } from '../config/products.js';
@@ -134,9 +134,12 @@ async function handler(
     return { draftId, status: 'not_found' };
   }
   if (draft.status === 'consumed') {
+    // How the letter travelled (#625): a sent draft no longer changes, so its service is the letter's. Without it a
+    // card reopened after the send named its preview's service, which set_mail_service may have changed before.
+    const travel = draft.mail_type === 'letter' ? travelFields(draft.mail_service) : {};
     return draft.consumed_letter_id
-      ? { draftId, status: 'sent', orderId: draft.consumed_letter_id, ...orderFields(draft) }
-      : { draftId, status: 'sent' };
+      ? { draftId, status: 'sent', orderId: draft.consumed_letter_id, ...orderFields(draft), ...travel }
+      : { draftId, status: 'sent', ...travel };
   }
   const expiresAt = new Date(draft.expires_at);
   if (

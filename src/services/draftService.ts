@@ -759,6 +759,17 @@ export type DraftForMailService = Pick<
   'mail_type' | 'postcard_size' | 'pages' | 'mail_service' | 'is_gift_send' | 'required_credits' | 'status'
 >;
 
+/**
+ * How a draft travels as it is now (#625 follow-up), read once a restyle, new words or a signature are written: they
+ * read the draft before taking its lock, so a change of service landing between priced their answer on the service
+ * before it. The answer is priced from this instead; a change after it carries its own terms. Null when the draft is
+ * gone, and the caller keeps what it read.
+ */
+export async function readDraftMailService(draftId: string): Promise<string | null> {
+  const result = await query<{ mail_service: string | null }>('SELECT mail_service FROM letter_drafts WHERE draft_id = $1', [draftId]);
+  return result.rows[0] ? result.rows[0].mail_service : null;
+}
+
 /** The caller's draft as set_mail_service prices it now, or null when it is not theirs or not there. */
 export async function getDraftForMailService(draftId: string, userId: string): Promise<DraftForMailService | null> {
   const result = await query<DraftForMailService>(

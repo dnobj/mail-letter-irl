@@ -58,6 +58,8 @@ export interface OrderRecord {
   cancellable?: boolean;
   /** Sent as USPS Certified Mail (#625): which service, the carrier's number once the status sync has it, and where USPS shows it. Absent for an ordinary letter. */
   certified?: CertifiedFacts;
+  /** Certified mail with no carrier number, sent more than CARRIER_NUMBER_SYNC_DAYS ago: the sync has stopped looking (#625). */
+  carrierNumberLookupEnded?: boolean;
 }
 
 export interface UserAccount {

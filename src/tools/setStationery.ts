@@ -7,7 +7,7 @@ import type { SendEligibility } from '../services/commerceService.js';
 import { CUSTOM_THEME, type PageFit } from '../render/index.js';
 import { getDesign } from '../services/stationeryDesignService.js';
 import type { PreviewStationery } from './stationeryInput.js';
-import { getDraftForStationery, setDraftStationery } from '../services/draftService.js';
+import { getDraftForStationery, readDraftMailService, setDraftStationery } from '../services/draftService.js';
 import { editorPageFit, layoutLetterForPreview, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter, type LetterTravel } from './letterHelpers.js';
 import { letterOption } from '../services/mailOptions.js';
 import { draftLetter, draftRefusals, draftRefuser, editableDraft, type DraftRefusal } from './draftEdit.js';
@@ -174,7 +174,9 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them (#586).
-  const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
+  // How it travels as it is now, not as read before the lock (#625 follow-up).
+  const service = (await readDraftMailService(draftId)) ?? draft.mail_service;
+  const payment = letterPayment(letterOption(layout, service), Number(draft.required_credits ?? 2), gift, context, draftId);
   return {
     ...(contentVersion ? { contentVersion, contentVersionBefore } : {}),
     draftId,
@@ -183,7 +185,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     ...(pages > 1 ? { pages } : {}),
     ...payment,
     ...(isWordsEditorOffered() ? { pageFit: editorPageFit(layout, stationery) } : {}),
-    message: messageFor(stationery, pages, pagesBefore, draft.mail_service)
+    message: messageFor(stationery, pages, pagesBefore, service)
   };
 }
 
