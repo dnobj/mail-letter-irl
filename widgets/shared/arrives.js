@@ -115,6 +115,8 @@
     // pending: the date being set while the server answers ("" for as soon
     // as possible), so the field keeps what the person chose meanwhile.
     var state = { draftId: null, schedule: null, min: "", max: "", busy: false, pending: null, message: "", error: false, set: false };
+    // Whether a date is being typed into the field: from a key in it until Enter or leaving it.
+    var typing = false;
     // Whether the card may change the draft now (options.idle, where the card gives one): not while it sends or pays,
     // nor while a send refused for a change since asks for the draft as it is now.
     function idle() {
@@ -124,8 +126,12 @@
     function draw() {
       options.input.min = state.min;
       options.input.max = state.max;
-      options.input.value =
-        state.busy && state.pending !== null ? state.pending : state.schedule ? state.schedule.arriveBy : "";
+      // Not while a date is being typed: the host may draw the card again at any time (ChatGPT does at each key, as the
+      // card shares the draft), and writing the field would take away what was typed.
+      if (!typing) {
+        options.input.value =
+          state.busy && state.pending !== null ? state.pending : state.schedule ? state.schedule.arriveBy : "";
+      }
       options.input.disabled = state.busy;
       options.asap.disabled = state.busy || !state.schedule;
       options.asap.setAttribute("aria-pressed", state.schedule ? "false" : "true");
@@ -200,7 +206,7 @@
         });
     }
 
-    options.input.addEventListener("change", function () {
+    function commit() {
       var value = options.input.value;
       // Cleared by hand, or not a date: the dates stay as they are.
       if (!isCalendarDate(value)) {
@@ -209,6 +215,29 @@
       }
       if (state.schedule && state.schedule.arriveBy === value) return;
       set(value);
+    }
+    // A date typed with keys is set once it is finished: on Enter, or when the field is left. The browser makes a
+    // whole date at each step of typing one, and says so (change): the year's first digit gives the year 0002, the
+    // month's "1" January. Set at each, they were refused or set in turn, and the field, held while the server
+    // answered, lost the next keys (SCHEDULE-01, DEV 2026-10-18). A date chosen in the browser's picker is set at once.
+    options.input.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        if (typing) {
+          typing = false;
+          commit();
+        }
+        return;
+      }
+      typing = true;
+    });
+    options.input.addEventListener("blur", function () {
+      if (!typing) return;
+      typing = false;
+      commit();
+    });
+    options.input.addEventListener("change", function () {
+      if (typing) return;
+      commit();
     });
     options.asap.addEventListener("click", function () {
       if (state.schedule) set(null);
@@ -238,6 +267,8 @@
           return;
         }
         if (state.draftId !== draftId) {
+          // What was being typed was for the draft shown before.
+          typing = false;
           state.draftId = draftId;
           state.schedule = scheduleOf(output.schedule);
           state.min = offered.earliestArrival;
