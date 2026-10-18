@@ -3486,10 +3486,7 @@ async function unblockAccountSends(
        AND sends_blocked_reason = 'payment_disputed'
        AND NOT EXISTS (
          SELECT 1 FROM stripe_disputes other
-          WHERE (other.user_id = $1
-                 OR other.payment_intent_id IN (
-                      SELECT o.stripe_payment_intent_id FROM orders o
-                       WHERE o.user_id = $1 AND o.stripe_payment_intent_id IS NOT NULL))
+          WHERE (other.user_id = $1)
             AND other.dispute_id <> $2
             AND NOT (other.status = ANY($3::text[]))
        )`,
