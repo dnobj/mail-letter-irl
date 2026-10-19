@@ -2077,7 +2077,7 @@ async function processCheckoutSessionEvent(
         ? await applyRecoveredDisputes(client, order, committedIntent, unmatchedMoney.rows)
         : undefined;
       await recordOrderEvent(client, order.order_id, 'stripe.money_event_recovered',
-        order.status, blockedStatus, { eventCount: unmatchedMoney.rows.length, ...applied });
+        order.status, blockedStatus, { eventCount: unmatchedMoney.rows.length });
       return { duplicate: false, orderId: order.order_id, status: blockedStatus };
     }
 
