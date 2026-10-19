@@ -2022,7 +2022,7 @@ async function processCheckoutSessionEvent(
        WHERE e.processing_status = 'unmatched'
          AND (($1::varchar IS NOT NULL AND e.provider_payment_intent_id = $1)
            OR e.metadata_order_id = $2)
-         AND (e.event_type NOT LIKE 'charge.dispute.%'
+         AND (TRUE OR e.event_type NOT LIKE 'charge.dispute.%'
            OR EXISTS (SELECT 1 FROM stripe_disputes d
                        WHERE d.dispute_id = e.provider_object_id
                          AND d.payment_intent_id = $3::text))
