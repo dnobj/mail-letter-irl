@@ -5,11 +5,12 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promises as fs } from "node:fs";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { McpServer, createMcpHandler, type McpHttpHandler } from "@modelcontextprotocol/server";
+import { toNodeHandler, type NodeIncomingMessageLike } from "@modelcontextprotocol/node";
 import { LetterIrlServer } from "../server.js";
 import { registerLetterTools, servedWidgetFile, type RegisterToolsOptions } from "./registerTools.js";
 import { logMcpClientRequests } from "./clientRequestLog.js";
+import { hostOrOriginRefusal, PARSE_ERROR_BODY, toSdkAuthInfo, userFromSdkAuthInfo } from "./mcpEndpoint.js";
 import { buildServerInstructions } from "./serverInstructions.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
@@ -302,11 +303,41 @@ export async function createMcpServer(
     name: "letter-irl",
     version: "0.1.0"
   }, {
-    // In the calling app's words (#484), as its tool descriptions are.
-    instructions: buildServerInstructions(isSendConfirmationEnabled(), resolveClientProfile(authInfo))
+    // In the calling app's words (#484), as its tool descriptions are. SDK v2 also answers server/discover with
+    // them, so a 2026-07-28 client reads its own app's instructions too.
+    instructions: buildServerInstructions(isSendConfirmationEnabled(), resolveClientProfile(authInfo)),
+    cacheHints: MCP_CACHE_HINTS
   });
   await registerLetterTools(mcpServer, letterServer, authInfo, options);
   return mcpServer;
+}
+
+/**
+ * How long a 2026-07-28 client may keep each list or read, and who may share it (#477): not at all, and only the
+ * caller. The tools, their descriptions, the instructions and the cards all differ by app and by flag, so a list
+ * cached as public could be handed to another token's app. These are the SDK's defaults today, said here so a
+ * change of default cannot change them (tests/unit/mcp/mcpEndpoint.test.ts).
+ */
+export const MCP_CACHE_HINTS = Object.fromEntries(
+  ["tools/list", "prompts/list", "resources/list", "resources/templates/list", "resources/read", "server/discover"].map(method => [
+    method,
+    { ttlMs: 0, cacheScope: "private" as const }
+  ])
+);
+
+/**
+ * The /mcp handler (#477): SDK v2 serves 2026-07-28 requests and, statelessly, 2025-era ones, from one factory, so
+ * the two eras are served the same tools. One server per request, as before, for the caller we signed in, which
+ * reaches the factory as the request's authInfo. JSON answers only: nothing here streams, and Railway buffers SSE.
+ */
+export function createLetterMcpHandler(letterServer: LetterIrlServer): McpHttpHandler {
+  return createMcpHandler(async ({ authInfo }) => createMcpServer(letterServer, userFromSdkAuthInfo(authInfo)), {
+    legacy: "stateless",
+    responseMode: "json",
+    onerror: (error) => {
+      writeDiagnostic("warn", "mcp.handler_error", { errorClass: classifyDiagnosticError(error, "transport_error") });
+    }
+  });
 }
 
 export async function startHttpServer() {
@@ -317,6 +348,12 @@ export async function startHttpServer() {
   let cachedToolNames: Set<string> | null = null;
   const allowedHosts = getAllowedHosts();
   const allowedOrigins = getAllowedOrigins();
+  const mcpHandler = createLetterMcpHandler(letterServer);
+  const serveMcp = toNodeHandler(mcpHandler, {
+    onerror: (error) => {
+      writeDiagnostic("error", "mcp.request_failed", { errorClass: classifyDiagnosticError(error, "transport_error") });
+    }
+  });
 
   // Allowlist or fallback, never a wildcard: see corsOrigin.ts for the
   // "null" origin case this used to special-case.
@@ -330,7 +367,7 @@ export async function startHttpServer() {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Methods": "GET, POST, DELETE, PATCH, OPTIONS",
-      "Access-Control-Allow-Headers": "authorization, content-type, mcp-session-id"
+      "Access-Control-Allow-Headers": "authorization, content-type, mcp-session-id, mcp-protocol-version, mcp-method, mcp-name"
     });
     res.end();
   };
@@ -912,44 +949,49 @@ export async function startHttpServer() {
         ...clientFields
       });
 
-      const sessionTransport = new StreamableHTTPServerTransport({
-        allowedHosts,
-        allowedOrigins,
-        enableDnsRebindingProtection: true
-      });
-
-      // Create per-session MCP server with auth context
-      const sessionServer = await createMcpServer(letterServer, authInfo);
-
-      // Clean up when response closes
-      res.on('close', async () => {
-        writeDiagnostic("info", "mcp.connection_closed");
-        await sessionServer.close();
-      });
+      // SDK v1's transport checked these; v2's handler checks nothing (#477), so they are checked here, at the same
+      // point: after the sign-in and the limiters, before any server is made.
+      const refused = hostOrOriginRefusal(req.headers, allowedHosts, allowedOrigins);
+      if (refused) {
+        writeDiagnostic("warn", "mcp.request_refused", { reason: refused.reason });
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(refused.body));
+        return;
+      }
 
       try {
-        // Connect the MCP server to the transport
-        console.log('Connecting MCP server to Streamable HTTP transport...');
-        await sessionServer.connect(sessionTransport);
-        writeDiagnostic("info", "mcp.server_connected");
-
-        // For Streamable HTTP POST, parse body and handle request with timeout
+        // Read under our own limit: the SDK's applies only to a body it reads itself.
         const body = await parseRequestBody(req, MCP_BODY_LIMIT_BYTES);
-
-        const parsedBody = body ? JSON.parse(body) : undefined;
+        let parsedBody: unknown;
+        try {
+          parsedBody = body ? JSON.parse(body) : undefined;
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(PARSE_ERROR_BODY));
+          return;
+        }
         writeDiagnostic("info", "mcp.request_parsed");
 
         // Issue #235 observability: which client class asked for what, and
-        // which metadata revisions a tools/list response served.
+        // which metadata revisions a tools/list response served; and which
+        // protocol revision it spoke (#477).
         logMcpClientRequests(
           parsedBody,
           req.headers["user-agent"],
           cachedToolNames ?? new Set(),
-          clientFields.client
+          clientFields.client,
+          firstHeaderValue(req.headers["mcp-protocol-version"])
         );
 
-        await sessionTransport.handleRequest(req, res, parsedBody);
-        console.log(`Request handled successfully`);
+        // The adapter hands the request's auth to the handler as its authInfo: our caller, in the SDK's words.
+        const forwarded: NodeIncomingMessageLike = {
+          method: req.method,
+          url: req.url,
+          headers: req.headers,
+          auth: authInfo ? toSdkAuthInfo(authInfo) : undefined,
+          [Symbol.asyncIterator]: () => req[Symbol.asyncIterator]()
+        };
+        await serveMcp(forwarded, res, parsedBody);
       } catch (error) {
         writeDiagnostic("error", "mcp.request_failed", {
           errorClass: classifyDiagnosticError(error, "transport_error")

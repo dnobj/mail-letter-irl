@@ -4,9 +4,9 @@ vi.mock("../../../src/auth/identity.js", () => ({
   prepareAuthenticatedUser: vi.fn().mockResolvedValue(undefined)
 }));
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/client";
+import { McpServer } from "@modelcontextprotocol/server";
 import { buildDuplicateMailToolResult, registerLetterTools } from "../../../src/mcp/registerTools.js";
 import { DuplicateMailError } from "../../../src/services/duplicateMailService.js";
 

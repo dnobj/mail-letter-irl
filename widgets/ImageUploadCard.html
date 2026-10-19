@@ -504,7 +504,19 @@
 
         // One call of the card's own: a refusal comes back as an error result.
         async function uploadToolCall(args) {
-          var result = await host.callTool("upload_photo_chunk", args);
+          var result;
+          try {
+            result = await host.callTool("upload_photo_chunk", args);
+          } catch (err) {
+            // The server refuses a tool it no longer lists as an error of the
+            // connection (#477), not as an error result: the same words.
+            if (err && /Tool upload_photo_chunk (not found|disabled)/.test(String(err.message))) {
+              var gone = new Error(uploadUnavailable.textContent);
+              gone.refused = true;
+              throw gone;
+            }
+            throw err;
+          }
           if (result && result.isError) {
             var parts = Array.isArray(result.content) ? result.content : [];
             var text = "";

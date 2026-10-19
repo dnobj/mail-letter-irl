@@ -11,8 +11,8 @@ vi.mock('../../../src/auth/identity.js', () => ({
   prepareAuthenticatedUser: vi.fn().mockResolvedValue('person@example.com')
 }));
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/client';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { LetterIrlServer } from '../../../src/server.js';
 import { A_REMOVED_RISK_SENTENCE, SWITCH_STATES, everyFlag, modelFacingStrings } from '../../fixtures/riskWords.js';

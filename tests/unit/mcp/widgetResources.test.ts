@@ -44,9 +44,9 @@ import { createHash } from 'crypto';
 import { widgetTemplateUri, WIDGET_TEMPLATE_VERSION } from '../../../src/mcp/widgetUris.js';
 import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
 import { LetterIrlServer } from '../../../src/server.js';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { McpServer } from '@modelcontextprotocol/server';
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/client';
 
 describe('Widget Resource Registration (US-MCP-07)', () => {
   describe('widget currency fallback tables', () => {
@@ -159,8 +159,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       parts.push(`shared/studio.js:${createHash('sha256').update(studio).digest('hex')}`);
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 99,
-        digest: '8be1269de7e2'
+        version: 100,
+        digest: '1544d2116c7e'
       });
     });
   });
@@ -550,7 +550,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
           }
           break;
         }
-        const objectShape = (current as unknown as { shape?: Record<string, z.ZodTypeAny> })?.shape;
+        const objectShape: Record<string, z.ZodTypeAny> | undefined = (current as unknown as { shape?: Record<string, z.ZodTypeAny> })?.shape;
         // A read one level into a non-object (or a passthrough record) cannot
         // be proven wrong; treat the parent's declaration as sufficient.
         if (!objectShape) return true;
@@ -748,7 +748,7 @@ describe('widget resources tolerate any template version (#235)', () => {
 
     expect(result.contents).toHaveLength(1);
     expect(result.contents[0].mimeType).toBe(WIDGET_MIME_TYPE);
-    expect(String(result.contents[0].text)).toContain('id="pay-send-button"');
+    expect(String((result.contents[0] as { text?: unknown }).text)).toContain('id="pay-send-button"');
   });
 
   it('serves a widget requested at a version that does not exist yet', async () => {
@@ -804,7 +804,7 @@ describe('widget resources tolerate any template version (#235)', () => {
     for (const [name, file, tool] of cases) {
       const uri = widgetTemplateUri(name);
       const result = await client.readResource({ uri });
-      const text = String(result.contents[0].text);
+      const text = String((result.contents[0] as { text?: unknown }).text);
       // The file on disk with the host bridge inlined (#474).
       const original = inlineHostBridge(await fs.readFile(path.join(widgetDir, `${file}.html`), 'utf-8'), widgetDir);
 
@@ -825,7 +825,7 @@ describe('widget resources tolerate any template version (#235)', () => {
 
     const result = await client.readResource({ uri: stale });
 
-    expect(String(result.contents[0].text)).toContain(
+    expect(String((result.contents[0] as { text?: unknown }).text)).toContain(
       'content="quote_and_preview_letter_with_image"'
     );
   });
@@ -845,7 +845,7 @@ describe('widget resources tolerate any template version (#235)', () => {
       'ui://widgets/LetterPreviewCard.html@vlatest'
     ]) {
       const result = await client.readResource({ uri });
-      const text = String(result.contents[0].text);
+      const text = String((result.contents[0] as { text?: unknown }).text);
       expect(text, uri).toContain('id="retry-button"');
       expect(text, uri).not.toContain('<meta name="letter-irl-preview-tool"');
     }
@@ -859,7 +859,7 @@ describe('widget resources tolerate any template version (#235)', () => {
       `ui://widgets/LetterPreviewCard.html@v${WIDGET_TEMPLATE_VERSION + 1}`
     ]) {
       const result = await client.readResource({ uri });
-      expect(String(result.contents[0].text), uri).toContain(
+      expect(String((result.contents[0] as { text?: unknown }).text), uri).toContain(
         '<meta name="letter-irl-preview-tool" content="quote_and_preview_letter" />'
       );
     }
@@ -870,7 +870,7 @@ describe('widget resources tolerate any template version (#235)', () => {
 
     for (const uri of ['ui://widgets/PostcardPreviewCard.html', 'ui://widgets/PostcardPreviewCard.html@v12']) {
       const result = await client.readResource({ uri });
-      expect(String(result.contents[0].text), uri).toContain(
+      expect(String((result.contents[0] as { text?: unknown }).text), uri).toContain(
         '<meta name="letter-irl-preview-tool" content="quote_and_preview_postcard" />'
       );
     }
@@ -882,7 +882,7 @@ describe('widget resources tolerate any template version (#235)', () => {
     for (const { name } of WIDGET_DEFINITIONS) {
       if (PREVIEW_TOOL_BY_TEMPLATE.has(name)) continue;
       const result = await client.readResource({ uri: widgetTemplateUri(name) });
-      expect(String(result.contents[0].text), name).not.toContain(
+      expect(String((result.contents[0] as { text?: unknown }).text), name).not.toContain(
         `<meta name="${PREVIEW_TOOL_META_NAME}"`
       );
     }

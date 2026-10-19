@@ -14,8 +14,8 @@ vi.mock('../../../src/auth/identity.js', () => ({
   prepareAuthenticatedUser: vi.fn().mockResolvedValue('person@example.com')
 }));
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/client';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { buildManifest } from '../../../src/mcp/manifest.js';
 import { type ClientProfile } from '../../../src/auth/clientProfiles.js';
@@ -120,7 +120,7 @@ describe('set_postcard_style in tools/list', () => {
     const client = await connected();
     for (const argument of [{ size: 'A5' }, { layout: 'collage' }]) {
       const result = await client.callTool({ name: TOOL, arguments: { draftId: DRAFT_ID, ...argument } }).catch(error => error);
-      expect(JSON.stringify(result), JSON.stringify(argument)).toMatch(new RegExp(`Invalid option: expected one of .* at ${Object.keys(argument)[0]}`));
+      expect(JSON.stringify(result), JSON.stringify(argument)).toMatch(new RegExp(`${Object.keys(argument)[0]}: Invalid option: expected one of `));
     }
     expect(received).toHaveLength(0);
   });

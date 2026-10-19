@@ -246,7 +246,7 @@ describe("clientLogFields (#473)", () => {
     );
     // The legacy SSE stream logged a line of its own; it is retired (#730).
     expect(httpServer).toMatch(
-      /logMcpClientRequests\(\s*parsedBody,\s*req\.headers\["user-agent"\],\s*cachedToolNames \?\? new Set\(\),\s*clientFields\.client\s*\);/
+      /logMcpClientRequests\(\s*parsedBody,\s*req\.headers\["user-agent"\],\s*cachedToolNames \?\? new Set\(\),\s*clientFields\.client,\s*firstHeaderValue\(req\.headers\["mcp-protocol-version"\]\)\s*\);/
     );
     // Every tool's name, not one app's list: from the list without an app a
     // checkout call logged as "other" (#520). toolNames() itself is covered in
