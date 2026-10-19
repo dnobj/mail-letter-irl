@@ -2027,7 +2027,7 @@ async function processCheckoutSessionEvent(
                        WHERE d.dispute_id = e.provider_object_id
                          AND d.payment_intent_id = $3::text))
        ORDER BY e.processed_at FOR UPDATE OF e`,
-      [intentId, order.order_id, committedIntent ?? intentId]
+      [intentId, order.order_id, committedIntent]
     );
     if (unmatchedMoney.rows[0]) {
       const isDispute = unmatchedMoney.rows.some(row => row.event_type.startsWith('charge.dispute.'));
