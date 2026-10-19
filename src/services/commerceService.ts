@@ -3683,7 +3683,7 @@ async function applyRecoveredDisputes(
   ]);
   // Read under the order's lock. A checkout records the intent before it grants,
   // so an order still at Checkout has had nothing granted, intent or not.
-  const nothingFunded = order.status === 'checkout_pending';
+  const nothingFunded = committedIntent === null;
   if (!nothingFunded) {
     for (const dispute of disputes) {
       await stopFundedMailBeforeFinancialReversal(
