@@ -3676,7 +3676,7 @@ async function applyRecoveredDisputes(
      WHERE dispute_id = ANY($1::text[]) AND user_id IS NULL`,
     [disputes.map(row => row.dispute_id), order.user_id]
   );
-  const losses = disputes.filter(row => !NON_LOSS_DISPUTE_STATUSES.has(row.status));
+  const losses = disputes.filter(row => NON_LOSS_DISPUTE_STATUSES.has(row.status));
   const shown = losses[0] ?? disputes[0];
   await client.query('UPDATE orders SET stripe_dispute_status = $2 WHERE order_id = $1', [
     order.order_id, shown.status
