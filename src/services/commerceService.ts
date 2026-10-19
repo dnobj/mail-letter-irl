@@ -3715,7 +3715,9 @@ async function applyRecoveredDisputes(
           amountCents: dispute.amount_cents,
           currency: dispute.currency,
           chargeReferencePresent: Boolean(dispute.charge_id),
-          matchedAfterCheckout: true
+          matchedAfterCheckout: true,
+          // False: the order was never granted, so a payment it kept is owed.
+          orderFunded: !nothingFunded
         })
       ]
     );
@@ -3790,7 +3792,9 @@ async function processDisputeEvent(
     // An event that found no order may have looked before a checkout committed
     // the order's payment intent, then waited here while that checkout's
     // recovery held this dispute's row. The order is visible now: fail rather
-    // than record the event unmatched, and Stripe's retry takes the matched path.
+    // than record the event unmatched, and Stripe's retry takes the matched
+    // path. Not the order's lock here: taken after the dispute's row, it would
+    // invert the recovery's order (orders, then stripe_disputes).
     if (!order && paymentIntentId) {
       const appeared = await client.query(
         'SELECT 1 FROM orders WHERE stripe_payment_intent_id = $1',

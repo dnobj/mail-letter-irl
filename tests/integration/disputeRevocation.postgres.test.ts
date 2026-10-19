@@ -907,6 +907,15 @@ describePostgres('dispute and refund pack revocation', () => {
       return result.rows;
     }
 
+    async function readAlertFunded(orderId: string) {
+      const result = await pool.query<{ funded: string }>(
+        `SELECT details->>'orderFunded' AS funded FROM commerce_operational_alerts
+          WHERE order_id = $1 AND alert_type LIKE 'stripe_dispute_%' ORDER BY alert_type`,
+        [orderId]
+      );
+      return result.rows.map(row => row.funded);
+    }
+
     async function readRecoveredEvent(orderId: string) {
       const result = await pool.query<{ metadata: Record<string, unknown> }>(
         `SELECT metadata FROM commerce_order_events
@@ -1056,6 +1065,7 @@ describePostgres('dispute and refund pack revocation', () => {
       expect((await readDispute(disputeId)).user_id).toBe(userId);
       const recoveredAlert = { alert_type: 'stripe_dispute_created', severity: 'warning', status: 'open', resolution_code: null };
       expect(await readDisputeAlerts(orderId)).toEqual([recoveredAlert]);
+      expect(await readAlertFunded(orderId)).toEqual(['true']);
 
       // Its effects ran, so its next event records only.
       await commerceService.processStripeWebhookEvent(
@@ -1229,6 +1239,7 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(await readDisputeAlerts(orderId)).toEqual([
         { alert_type: 'stripe_dispute_closed', severity: 'info', status: 'open', resolution_code: null }
       ]);
+      expect(await readAlertFunded(orderId)).toEqual(['false']);
     }, 60_000);
 
     // Guards that the recovery's block never clobbers an earlier one, and that
