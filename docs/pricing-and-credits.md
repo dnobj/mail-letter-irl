@@ -242,3 +242,19 @@ Qualifying purchases grant explicit image entitlements. The defaults are five
 per prepaid physical-mail entitlement and two future generations per completed
 JIT order (`IMAGE_ENTITLEMENTS_PER_JIT_ORDER`, default 2), both configurable. `IMAGE_TRIAL_ENABLED` remains false unless a
 separate, budget-capped acquisition experiment is approved.
+
+## Published capabilities and prices (#630)
+
+`GET /capabilities.json` (`src/api/capabilitiesApi.ts`) publishes what this deployment sells, for agents and for the
+website's `/capabilities` page and `llms.txt`, which are built from it. It needs no sign-in and may be cached for five
+minutes.
+
+- **Built from the tables above,** on each request: the packs and the Pay & Send prices from `src/config/products.ts`,
+  the options from the switches that offer them, and the delivery words the previews use (`src/content/delivery.ts`).
+- **Only what is offered:** a Pay & Send price appears only while its product is sold and the previews offer its option
+  (for the longer letters and the other postcard sizes, our renderer as well). Production therefore shows only what
+  production sells.
+- **Nothing internal:** no product codes, price ids, settings or flags.
+- **The test** (`tests/unit/api/capabilitiesApi.test.ts`) fails when a listed price disagrees with the product table, or
+  when a product is sold but not listed.
+- **The copy** is plain: the job, the cost, the delivery time, the limits and who sends. It promises no delivery date.
