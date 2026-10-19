@@ -160,6 +160,9 @@
       .studio-body{display:flex;flex-direction:column;align-items:center;gap:14px;padding:14px}
       .studio-page{width:100%;max-width:300px;display:flex;flex-direction:column;align-items:center}
       .studio-side{width:100%;min-width:0;display:flex;flex-direction:column;gap:12px}
+      /* The page's row fills the page column: left to fit its content, it took none once the envelope's
+         size container gave the page no width of its own, and the sealed letter folded to a dot (ENVELOPE-01, DEV 2026-10-18). */
+      .studio-page > .letter-mockup-container{align-self:stretch}
       .studio-body.zoomed{align-items:stretch}
       .studio-body.zoomed .studio-page{max-width:none}
       @media (min-width:560px){
@@ -385,7 +388,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t42</p>
+      <p class="rev">letter t45</p>
     </div>
 
     <!-- The studio card (#580): widgets/shared/studio.js lays the card out
@@ -591,6 +594,9 @@
           render();
         },
       });
+      // What the card's note says of a letter sent with a date, as the server last told it: waiting, or cancelled.
+      const SCHEDULED_NOTE = "This letter has already been sent, to go to the printer on its mail date.";
+      const CANCELLED_NOTE = "This letter was sent with a date, then cancelled. Nothing will be mailed.";
       const scheduled = arrives.createScheduled({
         host,
         block: document.getElementById("scheduled"),
@@ -605,6 +611,11 @@
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
           statusPill.textContent = "Cancelled";
+          // The button its send left reading "Letter Scheduled" (STUDIO-01, DEV 2026-10-18).
+          document.getElementById("send-button-text").textContent = "Letter Cancelled";
+          // A reopened card's note said it waits for its mail date (SCHEDULE-01, Claude, DEV 2026-10-18).
+          const note = document.getElementById("note");
+          note.textContent = note.textContent.replace(SCHEDULED_NOTE, CANCELLED_NOTE);
           refreshStudio();
         },
       });
@@ -2531,9 +2542,9 @@
         const noteEl = document.getElementById("note");
         const noteParts = [];
         if (sentOrder === "scheduled") {
-          noteParts.push("This letter has already been sent, to go to the printer on its mail date.");
+          noteParts.push(SCHEDULED_NOTE);
         } else if (sentOrder === "cancelled") {
-          noteParts.push("This letter was sent with a date, then cancelled. Nothing will be mailed.");
+          noteParts.push(CANCELLED_NOTE);
         } else if (settled?.status === "sent") {
           noteParts.push("This letter has already been sent. Ask for its status in the chat.");
         } else if (settled?.status === "expired") {
