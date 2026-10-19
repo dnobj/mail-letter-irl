@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 /**
  * #625. A draft's price depends on its mail type, its pages and its mail
@@ -50,14 +50,21 @@ function draftSelects(): Array<{ file: string; columns: string }> {
 }
 
 describe('the draft columns a price is read from (#625)', () => {
+  // One walk of the source tree for the whole file. A walk takes about 0.2s alone but 2.5s while the
+  // full unit suite loads the machine, and the first test used to make two of them: it timed out under load.
+  let selects: Array<{ file: string; columns: string }>;
+  beforeAll(() => {
+    selects = draftSelects();
+  }, 60_000);
+
   it('finds the queries it is guarding', () => {
     // If the source layout or the query shape changes, fail loudly rather than guard nothing.
-    expect(draftSelects().length).toBeGreaterThanOrEqual(8);
-    expect(draftSelects().some(select => /\bpages\b/.test(select.columns))).toBe(true);
+    expect(selects.length).toBeGreaterThanOrEqual(8);
+    expect(selects.some(select => /\bpages\b/.test(select.columns))).toBe(true);
   });
 
   it('never selects pages without mail_service', () => {
-    const partial = draftSelects()
+    const partial = selects
       .filter(select => select.columns.trim() !== '*' && /\bpages\b/.test(select.columns))
       .filter(select => !/\bmail_service\b/.test(select.columns))
       .map(select => `${select.file}: ${select.columns.replace(/\s+/g, ' ').slice(0, 120)}`);
@@ -66,7 +73,7 @@ describe('the draft columns a price is read from (#625)', () => {
 
   it('selects the whole row where it prices a draft by SELECT *', () => {
     // The checkout and the send lock the row with SELECT * ... FOR NO KEY UPDATE: a column list there would be the same defect.
-    const whole = draftSelects().filter(select => select.columns.trim() === '*').map(select => select.file);
+    const whole = selects.filter(select => select.columns.trim() === '*').map(select => select.file);
     expect(whole).toContain('src/services/commerceService.ts');
     expect(whole).toContain('src/services/mailSendService.ts');
   });
