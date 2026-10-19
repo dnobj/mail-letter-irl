@@ -290,4 +290,28 @@ describe("dashboard runtime logging privacy", () => {
       expect(body).not.toContain(value);
     }
   });
+
+  it("logs a dispute event deferred for Stripe's retry as a warning, still answering 500", async () => {
+    verifyWebhookSignature.mockReturnValue({
+      id: "evt_deferred",
+      type: "charge.dispute.closed",
+      livemode: false,
+      data: { object: { id: "dp_deferred" } }
+    });
+    processStripeWebhookEvent.mockRejectedValue(
+      Object.assign(new Error("deferred"), { diagnosticClass: "dispute_order_committed_meanwhile" })
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleStripeWebhook({ headers: { "stripe-signature": "sig" }, body: "body" } as never, res as never);
+
+    expect(res.statusCode).toBe(500);
+    expect(warn.mock.calls.flat().map(String).join("\n")).toContain(
+      '"errorClass":"dispute_order_committed_meanwhile","event":"stripe.webhook_deferred"'
+    );
+    expect(error.mock.calls.flat().map(String).join("\n")).not.toContain("credits.webhook_failed");
+  });
 });
