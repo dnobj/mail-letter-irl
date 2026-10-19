@@ -89,19 +89,19 @@ describe('set_postcard_style in tools/list', () => {
     expect(schema.properties.size.description).toContain('a gift postcard stays a 6x9');
     expect(schema.properties.layout.description).toContain('Left out, the front stays as it is.');
     expect(schema.required).toEqual(['draftId']);
-    expect(schema.additionalProperties).toBe(false);
+    expect(schema.additionalProperties).toBeUndefined();
   });
 
   it('takes a size alone while only the sizes are offered, and a front alone while only the layouts are, open to the rest', async () => {
     offer(true, false);
     const sizes = (await served())!;
     expect(Object.keys(sizes.properties).sort()).toEqual(['draftId', 'size']);
-    expect(sizes.additionalProperties).toBe(true);
+    expect(sizes.additionalProperties).toEqual({});
 
     offer(false, true);
     const layouts = (await served())!;
     expect(Object.keys(layouts.properties).sort()).toEqual(['caption', 'draftId', 'layout', 'place']);
-    expect(layouts.additionalProperties).toBe(true);
+    expect(layouts.additionalProperties).toEqual({});
   });
 
   it('passes an argument withheld to the tool, whose own refusal runs, not the SDK strip', async () => {
@@ -120,7 +120,7 @@ describe('set_postcard_style in tools/list', () => {
     const client = await connected();
     for (const argument of [{ size: 'A5' }, { layout: 'collage' }]) {
       const result = await client.callTool({ name: TOOL, arguments: { draftId: DRAFT_ID, ...argument } }).catch(error => error);
-      expect(JSON.stringify(result), JSON.stringify(argument)).toContain(`received '${Object.values(argument)[0]}'`);
+      expect(JSON.stringify(result), JSON.stringify(argument)).toMatch(new RegExp(`Invalid option: expected one of .* at ${Object.keys(argument)[0]}`));
     }
     expect(received).toHaveLength(0);
   });

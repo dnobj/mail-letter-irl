@@ -693,7 +693,7 @@ describe('arrive-by in the served schemas (#535)', () => {
     // cancel_scheduled_mail is listed only while arrival dates are on.
     const said = 'With an arrival date: whether it can still be cancelled free, before it goes to the printer';
     const cancellable = (shape: z.ZodRawShape | undefined) => (shape?.cancellable as z.ZodTypeAny | undefined)?.description;
-    const listed = (getZodOutputShape('list_orders')!.orders as z.ZodArray<z.AnyZodObject>).element.shape;
+    const listed = (getZodOutputShape('list_orders')!.orders as z.ZodArray<z.ZodObject>).element.shape;
     expect(cancellable(getZodOutputShape('send_letter')), 'send_letter').toBe(said);
     expect(cancellable(getZodOutputShape('send_postcard')), 'send_postcard').toBe(said);
     expect(cancellable(getZodOutputShape('get_order_status')), 'get_order_status').toBe(said);
@@ -738,7 +738,7 @@ describe('arrive-by in the served schemas (#535)', () => {
     }
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
     for (const name of PREVIEWS) {
-      const served = getServedInputSchema(name) as z.AnyZodObject;
+      const served = getServedInputSchema(name) as z.ZodObject;
       expect(served, name).toBeInstanceOf(z.ZodObject);
       expect(served.shape, name).not.toHaveProperty('arriveBy');
       // Everything else is served as it was.
@@ -748,7 +748,7 @@ describe('arrive-by in the served schemas (#535)', () => {
 
   it("passes a stray arriveBy through to the preview while off, so its refusal runs, not the SDK's strip", () => {
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
-    const served = getServedInputSchema('quote_and_preview_letter') as z.AnyZodObject;
+    const served = getServedInputSchema('quote_and_preview_letter') as z.ZodObject;
     const recipient = { name: 'Sam', addressLine1: '1 Main St', city: 'X', state: 'NY', postalCode: '10001', country: 'US' };
     const parsed = served.parse({ recipient, bodyText: 'Hi', signOff: 'Pat', arriveBy: '2026-10-16' });
     expect(parsed.arriveBy).toBe('2026-10-16');

@@ -991,7 +991,7 @@ export function getZodInputShape(name: string) {
  * message's room, as before the 4x6 and 11x6 (#594). A client holding the
  * wider schema has a 4x6 refused by validation, never printed as a 6x9.
  */
-export function getServedInputSchema(name: string): z.ZodRawShape | z.AnyZodObject | undefined {
+export function getServedInputSchema(name: string): z.ZodRawShape | z.ZodObject | undefined {
   const declared = getZodInputShape(name);
   let shape = declared && servesPostcardSixByNineOnly(name) ? { ...declared, ...postcardSixByNineZ } : declared;
   if (shape && servesStationeryThemeOnly(name)) {
@@ -1001,7 +1001,7 @@ export function getServedInputSchema(name: string): z.ZodRawShape | z.AnyZodObje
   const withheld = withheldInputKeys(name);
   if (!shape || withheld.length === 0) return shape;
   const served = Object.fromEntries(Object.entries(shape).filter(([key]) => !withheld.includes(key))) as z.ZodRawShape;
-  return z.object(served).passthrough();
+  return z.looseObject(served);
 }
 
 /**

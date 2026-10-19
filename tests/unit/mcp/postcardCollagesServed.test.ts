@@ -135,9 +135,9 @@ describe('the collage photos in tools/list', () => {
   it('passes a stray collage through to the preview while off, so its refusal runs, not the SDK\'s strip', async () => {
     allOtherFieldsOffered();
     offer('true');
-    expect((await listed()).get('quote_and_preview_postcard')!.inputSchema.additionalProperties).toBe(false);
+    expect((await listed()).get('quote_and_preview_postcard')!.inputSchema.additionalProperties).toBeUndefined();
     offer('');
-    expect((await listed()).get('quote_and_preview_postcard')!.inputSchema.additionalProperties).toBe(true);
+    expect((await listed()).get('quote_and_preview_postcard')!.inputSchema.additionalProperties).toEqual({});
     const client = await connected();
     await client.callTool({ name: 'quote_and_preview_postcard', arguments: { ...POSTCARD, imageUrls: ['https://photos.example/1.jpg', 'https://photos.example/2.jpg'] } });
     expect(received).toHaveLength(1);

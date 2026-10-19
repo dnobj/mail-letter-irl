@@ -114,7 +114,7 @@ describe('stationery in tools/list', () => {
   it('serves the letter previews open to unknown keys while not offered, so a stray theme reaches the preview', async () => {
     offer('', 'pdf');
     const tools = await listedTools();
-    for (const name of LETTERS) expect(tools.get(name)!.additionalProperties, name).toBe(true);
+    for (const name of LETTERS) expect(tools.get(name)!.additionalProperties, name).toEqual({});
     const client = await connected();
     // An app that cached the schema from while it was offered.
     await client.callTool({ name: 'quote_and_preview_letter', arguments: { ...LETTER, stationery: 'botanical', headline: 'Hi' } });
@@ -140,8 +140,8 @@ describe('stationery in tools/list', () => {
     expect(received).toHaveLength(0);
     const said = JSON.stringify(result);
     expect(said).toContain('stationery');
-    expect(said).toContain("received 'floral'");
-    for (const theme of STATIONERY_THEMES) expect(said, theme).toContain(`'${theme}'`);
+    expect(said).toMatch(/Invalid option: expected one of .* at stationery/);
+    for (const theme of STATIONERY_THEMES) expect(said, theme).toContain(`\\"${theme}\\"`);
   });
 
   it('hands the preview no theme for a null one, as for an empty one (review round 1)', async () => {
@@ -173,7 +173,7 @@ describe('stationery in tools/list', () => {
     }
     // Closed while nothing of its own is withheld.
     offer('true', 'pdf');
-    expect((await listedTools()).get('quote_and_preview_postcard')!.additionalProperties).toBe(false);
+    expect((await listedTools()).get('quote_and_preview_postcard')!.additionalProperties).toBeUndefined();
   });
 });
 

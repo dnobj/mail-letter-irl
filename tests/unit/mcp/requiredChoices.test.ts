@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
@@ -16,7 +17,7 @@ import {
  * "Required" alone; zod's message for a wrong value already lists the options, so a missing one says them too.
  */
 describe('required choices name their options when missing', () => {
-  const issueFor = (schema: { safeParse: (value: unknown) => { success: boolean; error?: { issues: Array<{ path: Array<string | number>; message: string }> } } }, input: unknown, field: string) => {
+  const issueFor = (schema: z.ZodType, input: unknown, field: string) => {
     const parsed = schema.safeParse(input);
     expect(parsed.success).toBe(false);
     return parsed.error!.issues.find(issue => issue.path[0] === field)!.message;
@@ -46,7 +47,8 @@ describe('required choices name their options when missing', () => {
   });
 
   it('still names the options for a wrong value, and takes a right one', () => {
-    expect(issueFor(createPackCheckoutInputZ, { pack: 'huge' }, 'pack')).toMatch(/starter.*regular.*power/);
+    // A wrong value is not called missing: zod's own message says it is not one of them.
+    expect(issueFor(createPackCheckoutInputZ, { pack: 'huge' }, 'pack')).toMatch(/^Invalid option: expected one of .*starter.*regular.*power/);
     expect(createPackCheckoutInputZ.safeParse({ pack: 'starter' }).success).toBe(true);
   });
 });
