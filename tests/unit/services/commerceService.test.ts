@@ -2441,6 +2441,38 @@ describe('commerceService', () => {
       expect(all()[lock][1]).toEqual(['stripe_dispute:dp-1']);
     });
 
+    it('fails for a retry when an order for the payment committed while the event waited for the dispute', async () => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+        if (sql.includes('SELECT status, resolved_at, user_id FROM stripe_disputes')) {
+          return { rows: [{ status: 'needs_response', resolved_at: null, user_id: 'user-1' }] };
+        }
+        if (sql.includes('SELECT * FROM orders')) return { rows: [] };
+        if (sql.includes('SELECT 1 FROM orders WHERE stripe_payment_intent_id = $1')) return { rows: [{}] };
+        return { rows: [] };
+      });
+      await expect(processStripeWebhookEvent({
+        id: 'evt-1', type: 'charge.dispute.closed', data: { object: {
+          id: 'dp-1', payment_intent: 'pi-1', charge: 'ch-1', amount: 499,
+          currency: 'usd', reason: 'fraudulent', status: 'won'
+        } }
+      } as any)).rejects.toMatchObject({ diagnosticClass: 'dispute_order_committed_meanwhile' });
+      const prior = all().findIndex(([sql]) => sql.includes('SELECT status, resolved_at, user_id FROM stripe_disputes'));
+      const recheck = all().findIndex(([sql]) => sql.includes('SELECT 1 FROM orders WHERE stripe_payment_intent_id = $1'));
+      // After the dispute's row is locked: that is what makes the order visible.
+      expect(prior).toBeGreaterThan(-1);
+      expect(recheck).toBeGreaterThan(prior);
+      expect(all()[recheck][1]).toEqual(['pi-1']);
+      expect(calls('INSERT INTO stripe_disputes')).toHaveLength(0);
+      expect(calls("processing_status = 'unmatched'")).toHaveLength(0);
+    });
+
+    it('records an event as unmatched when no order carries its payment', async () => {
+      await deliver('charge.dispute.created', 'needs_response', undefined, null);
+      expect(calls('SELECT 1 FROM orders WHERE stripe_payment_intent_id = $1')).toHaveLength(1);
+      expect(calls("processing_status = 'unmatched'")).toHaveLength(1);
+    });
+
     it('acts on a loss recorded while no order matched, whose effects never ran', async () => {
       await deliver('charge.dispute.updated', 'under_review', { status: 'needs_response', resolved_at: null, user_id: null });
       expect(blocked()).toBe(true);

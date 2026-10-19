@@ -1977,6 +1977,8 @@ async function processCheckoutSessionEvent(
       return { duplicate: true };
     }
     let order = await findCheckoutOrder(client, session);
+    // Read from the committed row, as locked: an order adopted below has none.
+    const committedIntent = order?.stripe_payment_intent_id || null;
     if (!order) order = await createLegacyPackOrder(client, session);
     if (!order) {
       // A paid session we cannot bind to an order is unmatched money. Consuming
@@ -2010,13 +2012,22 @@ async function processCheckoutSessionEvent(
     ]);
 
     const intentId = paymentIntentId(session);
-    const unmatchedMoney = await client.query<{ event_id: string; event_type: string }>(
-      `SELECT event_id, event_type FROM stripe_webhook_events
-       WHERE processing_status = 'unmatched'
-         AND (($1::varchar IS NOT NULL AND provider_payment_intent_id = $1)
-           OR metadata_order_id = $2)
-       ORDER BY processed_at FOR UPDATE`,
-      [intentId, order.order_id]
+    // A dispute's events count only when the dispute's own payment intent is
+    // the one this order ends up with: no event of any other can reach the
+    // order, so it stays unmatched, with its alert open, for an operator.
+    const unmatchedMoney = await client.query<{
+      event_id: string; event_type: string; provider_object_id: string | null;
+    }>(
+      `SELECT e.event_id, e.event_type, e.provider_object_id FROM stripe_webhook_events e
+       WHERE e.processing_status = 'unmatched'
+         AND (($1::varchar IS NOT NULL AND e.provider_payment_intent_id = $1)
+           OR e.metadata_order_id = $2)
+         AND (e.event_type NOT LIKE 'charge.dispute.%'
+           OR EXISTS (SELECT 1 FROM stripe_disputes d
+                       WHERE d.dispute_id = e.provider_object_id
+                         AND d.payment_intent_id = $3::text))
+       ORDER BY e.processed_at FOR UPDATE OF e`,
+      [intentId, order.order_id, committedIntent ?? intentId]
     );
     if (unmatchedMoney.rows[0]) {
       const isDispute = unmatchedMoney.rows.some(row => row.event_type.startsWith('charge.dispute.'));
@@ -2026,6 +2037,13 @@ async function processCheckoutSessionEvent(
            stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, $3),
            status = $4::varchar, refund_pending_at = CASE WHEN $4::varchar = 'refund_pending'
              THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
+           -- A dispute holds the order as the matched path holds it.
+           hold_previous_status = CASE WHEN $4::varchar = 'disputed'
+             THEN COALESCE(hold_previous_status, status) ELSE hold_previous_status END,
+           held_at = CASE WHEN $4::varchar = 'disputed'
+             THEN COALESCE(held_at, NOW()) ELSE held_at END,
+           hold_reason = CASE WHEN $4::varchar = 'disputed'
+             THEN 'payment_disputed' ELSE hold_reason END,
            last_error_code = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'
              THEN last_error_code ELSE 'UNMATCHED_MONEY_EVENT_RECOVERED' END,
            -- The PAIR, third site (#279). Setting the code without the message
@@ -2053,8 +2071,13 @@ async function processCheckoutSessionEvent(
          WHERE source_event_id = ANY($1::varchar[]) AND status <> 'resolved'`,
         [unmatchedMoney.rows.map(row => row.event_id)]
       );
+      // After the resolution above: the alerts this raises are keyed on the
+      // same events, and stay open.
+      const applied = isDispute
+        ? await applyRecoveredDisputes(client, order, committedIntent, unmatchedMoney.rows)
+        : undefined;
       await recordOrderEvent(client, order.order_id, 'stripe.money_event_recovered',
-        order.status, blockedStatus, { eventCount: unmatchedMoney.rows.length });
+        order.status, blockedStatus, { eventCount: unmatchedMoney.rows.length, ...applied });
       return { duplicate: false, orderId: order.order_id, status: blockedStatus };
     }
 
@@ -3565,6 +3588,149 @@ async function blockAccountSends(
 }
 
 /**
+ * The loss rule for disputes recorded while no order matched, run when a later
+ * checkout ties their money to an order (processCheckoutSessionEvent's
+ * recovery): the same rule processDisputeEvent applies to a matched dispute.
+ *
+ * The recovery hands it only disputes whose own payment intent is the one this
+ * order ends up with (committedIntent, read before any adoption, or else this
+ * checkout's): their later events match this order.
+ *
+ * Where the order's committed row has no payment intent, no event of these
+ * disputes can find the order, so none waits on it: each dispute's lock is
+ * taken, after the order's (the other way round from processDisputeEvent), and
+ * an event handled now, holding it, finishes before the dispute is read. Where
+ * the committed row carries the intent, every event of these disputes locks
+ * this order before it touches the dispute's row, so the order's lock
+ * serialises them and no dispute lock is taken: one may be held by an event
+ * waiting for the order. The disputes' rows are read locked, so a dispute event
+ * still writing one (it found no order, before the intent was committed)
+ * finishes first.
+ *
+ * Each dispute not already the account's is taken over and its effects run
+ * here, as the matched path would run them: its row takes the order's account,
+ * which processDisputeEvent reads as "its effects ran" (its next loss event
+ * records only, and unblockAccountSends and countStandingDisputes count it).
+ * An order still at Checkout has had nothing granted or queued, so the block
+ * is the whole of it. Any other order may hold funded
+ * mail and a pack's lots, which the matched path's own steps take. A dispute
+ * already the account's had them run when an event of its own matched this
+ * order, or when an earlier checkout event recovered it.
+ *
+ * Each gets the alert the matched path raises (for an open dispute, one its
+ * close resolves), and the order shows a dispute's status, a loss's first.
+ */
+async function applyRecoveredDisputes(
+  client: pg.PoolClient,
+  order: Order,
+  committedIntent: string | null,
+  events: Array<{ event_id: string; event_type: string; provider_object_id: string | null }>
+): Promise<{ disputesTakenOver: string[]; lossRuleApplied: boolean }> {
+  // Each dispute's last event to be claimed (the order the rows come in), which
+  // keys its alert; the alert's type and severity come from the dispute's row.
+  const latestEvent = new Map<string, string>();
+  for (const event of events) {
+    if (event.event_type.startsWith('charge.dispute.') && event.provider_object_id) {
+      latestEvent.set(event.provider_object_id, event.event_id);
+    }
+  }
+  const ours = [...latestEvent.keys()].sort();
+  if (ours.length === 0) return { disputesTakenOver: [], lossRuleApplied: false };
+  for (const disputeId of committedIntent === null ? ours : []) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`stripe_dispute:${disputeId}`]);
+  }
+  const read = await client.query<{
+    dispute_id: string; status: string; resolved_at: Date | null; reason: string | null;
+    amount_cents: number; currency: string; charge_id: string; user_id: string | null;
+  }>(
+    `SELECT dispute_id, status, resolved_at, reason, amount_cents, currency, charge_id, user_id
+     FROM stripe_disputes WHERE dispute_id = ANY($1::text[])
+     ORDER BY dispute_id FOR UPDATE`,
+    [ours]
+  );
+  // Any other unmatched event of these disputes is the order's too: one the
+  // query above could not find (it carried no payment intent), or one that
+  // found no order while this waited for the dispute.
+  const others = await client.query<{ event_id: string }>(
+    `UPDATE stripe_webhook_events SET order_id = $2, processing_status = 'processed', resolved_at = NOW()
+     WHERE processing_status = 'unmatched' AND event_type LIKE 'charge.dispute.%'
+       AND provider_object_id = ANY($1::text[])
+     RETURNING event_id`,
+    [ours, order.order_id]
+  );
+  if (others.rows.length > 0) {
+    await client.query(
+      `UPDATE commerce_operational_alerts SET status = 'resolved', resolved_at = NOW(),
+         resolution_code = 'matched_later_checkout', updated_at = NOW()
+       WHERE source_event_id = ANY($1::varchar[]) AND alert_type = 'stripe_money_event_unmatched'
+         AND status <> 'resolved'`,
+      [others.rows.map(row => row.event_id)]
+    );
+  }
+  const disputes = read.rows
+    .filter(row => row.user_id === null)
+    .sort((a, b) => a.dispute_id.localeCompare(b.dispute_id));
+  if (disputes.length === 0) return { disputesTakenOver: [], lossRuleApplied: false };
+  await client.query(
+    `UPDATE stripe_disputes SET user_id = $2, updated_at = NOW()
+     WHERE dispute_id = ANY($1::text[]) AND user_id IS NULL`,
+    [disputes.map(row => row.dispute_id), order.user_id]
+  );
+  const losses = disputes.filter(row => !NON_LOSS_DISPUTE_STATUSES.has(row.status));
+  const shown = losses[0] ?? disputes[0];
+  await client.query('UPDATE orders SET stripe_dispute_status = $2 WHERE order_id = $1', [
+    order.order_id, shown.status
+  ]);
+  // Read under the order's lock. A checkout records the intent before it grants,
+  // so an order still at Checkout has had nothing granted, intent or not.
+  const nothingFunded = order.status === 'checkout_pending';
+  if (!nothingFunded) {
+    for (const dispute of disputes) {
+      await stopFundedMailBeforeFinancialReversal(
+        client, order, latestEvent.get(dispute.dispute_id) as string, 'payment_disputed'
+      );
+    }
+    if (order.order_type === 'letter_pack') {
+      for (const dispute of losses) {
+        const eventId = latestEvent.get(dispute.dispute_id) as string;
+        await holdMailFundedByOrder(client, order, eventId, 'funding_disputed');
+        await revokePackLots(client, order, { credits: 'all', cause: 'payment_disputed', disputeId: dispute.dispute_id });
+      }
+    }
+  }
+  if (losses.length > 0) await blockAccountSends(client, order.user_id, 'payment_disputed');
+  for (const dispute of disputes) {
+    const closed = dispute.resolved_at !== null;
+    await client.query(
+      `INSERT INTO commerce_operational_alerts (
+         source_event_id, order_id, alert_type, severity, details
+       ) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (source_event_id, alert_type) DO NOTHING`,
+      [
+        latestEvent.get(dispute.dispute_id),
+        order.order_id,
+        closed ? 'stripe_dispute_closed' : 'stripe_dispute_created',
+        closed ? (dispute.status === 'lost' ? 'critical' : dispute.status === 'won' ? 'info' : 'warning') : 'warning',
+        JSON.stringify({
+          disputeStatus: dispute.status,
+          reason: dispute.reason,
+          amountCents: dispute.amount_cents,
+          currency: dispute.currency,
+          chargeReferencePresent: Boolean(dispute.charge_id),
+          matchedAfterCheckout: true,
+          // False: the order was never granted, so a payment it kept is owed.
+          orderFunded: !nothingFunded
+        })
+      ]
+    );
+  }
+  return {
+    disputesTakenOver: disputes.map(row => row.dispute_id),
+    lossRuleApplied: losses.length > 0
+  };
+}
+
+/**
  * The dispute events that carry its state (#730). An inquiry opens as
  * `warning_needs_response` and revokes nothing; when the bank escalates it to
  * a chargeback, Stripe updates the same dispute (`updated`, and
@@ -3625,6 +3791,23 @@ async function processDisputeEvent(
       'SELECT status, resolved_at, user_id FROM stripe_disputes WHERE dispute_id = $1 FOR UPDATE',
       [dispute.id]
     );
+    // An event that found no order may have looked before a checkout committed
+    // the order's payment intent, then waited here while that checkout's
+    // recovery held this dispute's row. The order is visible now: fail rather
+    // than record the event unmatched, and Stripe's retry takes the matched
+    // path. Not the order's lock here: taken after the dispute's row, it would
+    // invert the recovery's order (orders, then stripe_disputes).
+    if (!order && paymentIntentId) {
+      const appeared = await client.query(
+        'SELECT 1 FROM orders WHERE stripe_payment_intent_id = $1',
+        [paymentIntentId]
+      );
+      if (appeared.rows[0]) {
+        throw Object.assign(new Error('An order for this dispute committed while the event waited'), {
+          diagnosticClass: 'dispute_order_committed_meanwhile'
+        });
+      }
+    }
     const priorStatus = prior.rows[0]?.status;
     const priorStatusIsLoss = priorStatus !== undefined && !NON_LOSS_DISPUTE_STATUSES.has(priorStatus);
     const priorLoss = priorStatusIsLoss && prior.rows[0]?.user_id != null;
