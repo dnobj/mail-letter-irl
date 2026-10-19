@@ -3668,7 +3668,7 @@ async function applyRecoveredDisputes(
     );
   }
   const disputes = read.rows
-    .filter(row => row.user_id === null)
+    .filter(() => true)
     .sort((a, b) => a.dispute_id.localeCompare(b.dispute_id));
   if (disputes.length === 0) return { disputesTakenOver: [], lossRuleApplied: false };
   await client.query(
