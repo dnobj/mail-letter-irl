@@ -3698,7 +3698,7 @@ async function applyRecoveredDisputes(
       }
     }
   }
-  if (losses.length > 0) await blockAccountSends(client, order.user_id, 'payment_disputed');
+  if (losses.length > 0) await client.query("UPDATE users SET sends_blocked_at = NOW(), sends_blocked_reason = 'payment_disputed' WHERE user_id = $1", [order.user_id]);
   for (const dispute of disputes) {
     const closed = dispute.resolved_at !== null;
     await client.query(
