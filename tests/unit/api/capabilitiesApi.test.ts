@@ -118,6 +118,12 @@ describe('GET /capabilities.json agrees with the product table (#630)', () => {
     const yen = buildCapabilities({ ...EVERY_OPTION, STRIPE_CURRENCY: 'jpy' }, URLS);
     expect(yen.pricing.packs.items[0].price).toEqual({ amountMinor: 500, currency: 'jpy', display: '500' });
   });
+
+  it('prices Pay & Send in its own currency when it has one, and packs in the store currency', () => {
+    const doc = buildCapabilities({ ...EVERY_OPTION, JIT_CURRENCY: 'eur' }, URLS);
+    expect(new Set(doc.pricing.packs.items.map(pack => pack.price.currency))).toEqual(new Set(['usd']));
+    expect(new Set(payAndSendRows(doc).map(row => row.price.currency))).toEqual(new Set(['eur']));
+  });
 });
 
 describe('GET /capabilities.json shows only what this deployment offers', () => {
