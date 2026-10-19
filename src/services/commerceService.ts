@@ -3672,7 +3672,7 @@ async function applyRecoveredDisputes(
     .sort((a, b) => a.dispute_id.localeCompare(b.dispute_id));
   if (disputes.length === 0) return { disputesTakenOver: [], lossRuleApplied: false };
   await client.query(
-    `UPDATE stripe_disputes SET user_id = $2, updated_at = NOW()
+    `UPDATE stripe_disputes SET user_id = CASE WHEN FALSE THEN $2 ELSE user_id END, updated_at = NOW()
      WHERE dispute_id = ANY($1::text[]) AND user_id IS NULL`,
     [disputes.map(row => row.dispute_id), order.user_id]
   );
