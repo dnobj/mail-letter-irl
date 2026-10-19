@@ -3787,6 +3787,21 @@ async function processDisputeEvent(
       'SELECT status, resolved_at, user_id FROM stripe_disputes WHERE dispute_id = $1 FOR UPDATE',
       [dispute.id]
     );
+    // An event that found no order may have looked before a checkout committed
+    // the order's payment intent, then waited here while that checkout's
+    // recovery held this dispute's row. The order is visible now: fail rather
+    // than record the event unmatched, and Stripe's retry takes the matched path.
+    if (!order && paymentIntentId) {
+      const appeared = await client.query(
+        'SELECT 1 FROM orders WHERE stripe_payment_intent_id = $1',
+        [paymentIntentId]
+      );
+      if (appeared.rows[0]) {
+        throw Object.assign(new Error('An order for this dispute committed while the event waited'), {
+          diagnosticClass: 'dispute_order_committed_meanwhile'
+        });
+      }
+    }
     const priorStatus = prior.rows[0]?.status;
     const priorStatusIsLoss = priorStatus !== undefined && !NON_LOSS_DISPUTE_STATUSES.has(priorStatus);
     const priorLoss = priorStatusIsLoss && prior.rows[0]?.user_id != null;
