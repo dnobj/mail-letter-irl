@@ -3698,7 +3698,7 @@ async function applyRecoveredDisputes(
       }
     }
   }
-  if (losses.length > 0) await blockAccountSends(client, order.user_id, 'payment_disputed');
+  if (losses.length > 0) await blockAccountSends(client, order.user_id, 'dispute_recovered');
   for (const dispute of disputes) {
     const closed = dispute.resolved_at !== null;
     await client.query(
