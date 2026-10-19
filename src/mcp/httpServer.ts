@@ -329,11 +329,14 @@ export const MCP_CACHE_HINTS = Object.fromEntries(
  * The /mcp handler (#477): SDK v2 serves 2026-07-28 requests and, statelessly, 2025-era ones, from one factory, so
  * the two eras are served the same tools. One server per request, as before, for the caller we signed in, which
  * reaches the factory as the request's authInfo. JSON answers only: nothing here streams, and Railway buffers SSE.
+ * No subscriptions/listen streams either: we publish no change events, and the SDK's cap on open streams is one count
+ * for the whole process, so one client holding streams open could refuse every other client's.
  */
 export function createLetterMcpHandler(letterServer: LetterIrlServer): McpHttpHandler {
   return createMcpHandler(async ({ authInfo }) => createMcpServer(letterServer, userFromSdkAuthInfo(authInfo)), {
     legacy: "stateless",
     responseMode: "json",
+    maxSubscriptions: 0,
     onerror: (error) => {
       writeDiagnostic("warn", "mcp.handler_error", { errorClass: classifyDiagnosticError(error, "transport_error") });
     }

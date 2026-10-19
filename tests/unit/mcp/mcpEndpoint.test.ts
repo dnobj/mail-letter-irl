@@ -231,6 +231,36 @@ describe('one handler, both protocol revisions', () => {
     }
   );
 
+  it('opens no subscriptions/listen stream: the cap on them is one count for the whole process', async () => {
+    const handler = createLetterMcpHandler(new LetterIrlServer());
+    const listen = () =>
+      handler.fetch(
+        new Request('http://localhost:8090/mcp', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            'mcp-protocol-version': '2026-07-28',
+            'mcp-method': 'subscriptions/listen'
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'subscriptions/listen',
+            params: {
+              notifications: { toolsListChanged: true },
+              _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} }
+            }
+          })
+        }),
+        { authInfo: toSdkAuthInfo(USER) }
+      );
+    const said = await (await listen()).text();
+    expect(said).toMatch(/-32603/);
+    expect(said).toMatch(/Subscription limit reached/);
+    await handler.close();
+  });
+
   it('answers a GET or a DELETE with 405: nothing is held between requests', async () => {
     const handler = createLetterMcpHandler(new LetterIrlServer());
     for (const method of ['GET', 'DELETE']) {
