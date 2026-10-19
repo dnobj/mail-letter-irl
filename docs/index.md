@@ -28,7 +28,7 @@ maintenance job.
 - [User Stories](user-stories.md) - stories and acceptance criteria
 - [Personas](personas.md) - user personas for design and testing
 - [Business Overview](business-overview.md) - users, model, goals, positioning
-- [Pricing and Credits](pricing-and-credits.md) - letter packs, Pay & Send, specifications, refunds
+- [Pricing and Credits](pricing-and-credits.md) - letter packs, Pay & Send, specifications, refunds, and `/capabilities.json`
 - [Letter Packages](credit-packages-spec.md) - pack definitions (plus planned ACP feed material)
 - [Account and Credits](account-credits.md) - how credits, letters and balances relate
 - [Gift Letters](gift-letters.md) - free sends that print a card with a code for the recipient (built, off by default)

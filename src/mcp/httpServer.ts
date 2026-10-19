@@ -75,6 +75,7 @@ import { resolveCorsOriginFor } from "./corsOrigin.js";
 import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js";
 import { APPS_CHALLENGE_PATH, appsChallengeResponse } from "./appsChallenge.js";
 import { logRestRequestOnFinish } from "../api/restRequestLog.js";
+import { CAPABILITIES_PATH, handleCapabilitiesRequest } from "../api/capabilitiesApi.js";
 import { OAUTH_NOT_CONFIGURED } from "../auth/oauthErrors.js";
 import { clientLogFields, resolveClientProfile } from "../auth/clientProfiles.js";
 
@@ -386,6 +387,12 @@ export async function startHttpServer() {
         error: "gone",
         message: `The SSE transport is retired. Connect with streamable HTTP at ${MCP_PATH}.`
       }));
+      return;
+    }
+
+    // What Letter IRL does and costs, for agents and the website (#630).
+    if (url.pathname === CAPABILITIES_PATH) {
+      handleCapabilitiesRequest(req, res, { mcpServer: `${getPublicBaseUrl(req)}${MCP_PATH}` });
       return;
     }
 
