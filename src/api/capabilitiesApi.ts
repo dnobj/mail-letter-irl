@@ -208,6 +208,22 @@ function payAndSendPrice(product: JitProductDefinition, currency: string, env: N
   };
 }
 
+/**
+ * What Pay & Send is, and which offered options only it pays for (#579):
+ * named only while offered, so a deployment never names an option it does not sell.
+ */
+function payAndSendSummary(env: NodeJS.ProcessEnv): string {
+  const only = [
+    ...(isRoomToWriteOffered(env) ? ['a letter of more than one page'] : []),
+    ...(isPostcardSizesOffered(env) ? ['a 4x6 or 11x6 postcard'] : []),
+    ...(isCertifiedMailOffered(env) ? ['certified mail'] : [])
+  ];
+  const sentence = 'Pay at checkout for one piece of mail when it is sent.';
+  if (only.length === 0) return sentence;
+  const list = only.length === 1 ? only[0] : `${only.slice(0, -1).join(', ')} and ${only[only.length - 1]}`;
+  return `${sentence} ${list.charAt(0).toUpperCase()}${list.slice(1)} ${only.length === 1 ? 'is' : 'are'} paid only this way.`;
+}
+
 function whoSends(env: NodeJS.ProcessEnv): string {
   return isSendConfirmationEnabled(env)
     ? 'A person sends each piece of mail. Where the assistant shows the Letter IRL preview card, they press Send on it; ' +
@@ -218,7 +234,7 @@ function whoSends(env: NodeJS.ProcessEnv): string {
 
 function letterOptions(env: NodeJS.ProcessEnv): MailOption[] {
   const options: MailOption[] = [
-    { name: 'Image', description: 'A picture at the top of the letter or within it.' }
+    { name: 'Image', description: 'A picture at the top of the letter, or after the signature.' }
   ];
   if (isRoomToWriteOffered(env)) {
     options.push({
@@ -229,7 +245,7 @@ function letterOptions(env: NodeJS.ProcessEnv): MailOption[] {
   if (isStationeryOffered(env)) {
     options.push({
       name: 'Stationery',
-      description: `A printed design for the paper: ${STATIONERY_THEMES.join(', ')}.`
+      description: `A style for the letter: ${STATIONERY_THEMES.join(', ')}. Classic is a plain page.`
     });
   }
   if (isCustomStationeryOffered(env)) {
@@ -354,8 +370,7 @@ export function buildCapabilities(env: NodeJS.ProcessEnv, urls: CapabilitiesUrls
       ...(payAndSend.length > 0
         ? {
             payAndSend: {
-              description:
-                'Pay at checkout for one piece of mail when it is sent. A letter of more than one page, a postcard of another size and certified mail are paid only this way.',
+              description: payAndSendSummary(env),
               items: payAndSend
             }
           }

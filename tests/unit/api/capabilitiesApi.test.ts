@@ -140,6 +140,25 @@ describe('GET /capabilities.json shows only what this deployment offers', () => 
     }
   });
 
+  it('with Pay & Send alone, names none of the options it does not offer', () => {
+    const doc = buildCapabilities(PAY_AND_SEND, URLS);
+    expect(doc.pricing.payAndSend?.description).toBe('Pay at checkout for one piece of mail when it is sent.');
+    const text = JSON.stringify(doc);
+    for (const word of ['ertified', '4x6', '11x6', 'more than one page', 'Stationery', 'arrive by']) {
+      expect(text, word).not.toContain(word);
+    }
+  });
+
+  it('says which offered options only Pay & Send pays for', () => {
+    expect(buildCapabilities(EVERY_OPTION, URLS).pricing.payAndSend?.description).toBe(
+      'Pay at checkout for one piece of mail when it is sent. ' +
+        'A letter of more than one page, a 4x6 or 11x6 postcard and certified mail are paid only this way.'
+    );
+    expect(buildCapabilities(FLAGS_WITHOUT_RENDERER, URLS).pricing.payAndSend?.description).toBe(
+      'Pay at checkout for one piece of mail when it is sent. Certified mail is paid only this way.'
+    );
+  });
+
   it('with every option on, names each one', () => {
     const doc = buildCapabilities(EVERY_OPTION, URLS);
     expect(doc.mail[0].options.map(option => option.name)).toEqual([
