@@ -892,14 +892,20 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     expect(card.visible('arrives-row')).toBe(false);
     expect(card.visible('scheduled')).toBe(true);
     expect(card.text('cancel-scheduled-button-text')).toBe(`Cancel this ${noun}`);
+    expect(card.text('note')).toContain(`This ${noun} has already been sent, to go to the printer on its mail date.`);
 
-    // Cancelled from here, it stays cancelled, in its own words, when redrawn.
+    // Cancelled from here, the note says so at once, with nothing drawn again (SCHEDULE-01, Claude, DEV 2026-10-18).
     await card.click('cancel-scheduled-button');
     await card.click('cancel-scheduled-button');
     await answerTool(card, 'cancel_scheduled_mail', {
       content: [],
       structuredContent: { status: 'cancelled', message: 'Cancelled. The letter it cost is back in the balance.' }
     });
+    expect(card.text('status-pill')).toBe('Cancelled');
+    expect(card.text('note')).toContain(`This ${noun} was sent with a date, then cancelled. Nothing will be mailed.`);
+    expect(card.text('note')).not.toContain('to go to the printer on its mail date');
+
+    // And it stays cancelled, in its own words, when redrawn.
     await card.toolResult({
       content: [],
       structuredContent: { ...spec.output('draft_0001', canSend), arrivalWindow: WINDOW },

@@ -324,7 +324,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t40</p>
+      <p class="rev">postcard t41</p>
     </div>
 
     <!-- The postcard maker (#580): widgets/shared/studio.js lays the card out
@@ -531,6 +531,9 @@
           render();
         },
       });
+      // What the card's note says of a postcard sent with a date, as the server last told it: waiting, or cancelled.
+      const SCHEDULED_NOTE = "This postcard has already been sent, to go to the printer on its mail date.";
+      const CANCELLED_NOTE = "This postcard was sent with a date, then cancelled. Nothing will be mailed.";
       const scheduled = arrives.createScheduled({
         host,
         block: document.getElementById("scheduled"),
@@ -547,6 +550,9 @@
           statusPill.textContent = "Cancelled";
           // The button its send left reading "Postcard Scheduled" (STUDIO-01, DEV 2026-10-18).
           document.getElementById("send-button-text").textContent = "Postcard Cancelled";
+          // A reopened card's note said it waits for its mail date (SCHEDULE-01, Claude, DEV 2026-10-18).
+          const note = document.getElementById("note");
+          note.textContent = note.textContent.replace(SCHEDULED_NOTE, CANCELLED_NOTE);
           refreshStudio();
         },
       });
@@ -2474,9 +2480,9 @@
         const noteEl = document.getElementById("note");
         const noteParts = [];
         if (sentOrder === "scheduled") {
-          noteParts.push("This postcard has already been sent, to go to the printer on its mail date.");
+          noteParts.push(SCHEDULED_NOTE);
         } else if (sentOrder === "cancelled") {
-          noteParts.push("This postcard was sent with a date, then cancelled. Nothing will be mailed.");
+          noteParts.push(CANCELLED_NOTE);
         } else if (settled?.status === "sent") {
           noteParts.push("This postcard has already been sent. Ask for its status in the chat.");
         } else if (settled?.status === "expired") {
