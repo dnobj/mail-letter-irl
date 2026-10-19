@@ -280,9 +280,15 @@ export async function handleStripeWebhook(
     res.json({ received: true, duplicate: processed.duplicate });
     return;
   } catch (error: unknown) {
-    writeDiagnostic('error', 'credits.webhook_failed', {
-      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error')
-    });
+    const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
+    // A dispute event that met an order committed while it waited fails on
+    // purpose (processDisputeEvent), so that Stripe's retry takes the matched
+    // path: a deferral, not a fault.
+    if (errorClass === 'dispute_order_committed_meanwhile') {
+      writeDiagnostic('warn', 'stripe.webhook_deferred', { errorClass });
+    } else {
+      writeDiagnostic('error', 'credits.webhook_failed', { errorClass });
+    }
     res.statusCode = 500;
     res.json({ error: 'Webhook processing failed' });
   }
