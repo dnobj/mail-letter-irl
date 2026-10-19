@@ -3719,7 +3719,7 @@ async function applyRecoveredDisputes(
           chargeReferencePresent: Boolean(dispute.charge_id),
           matchedAfterCheckout: true,
           // False: the order was never granted, so a payment it kept is owed.
-          orderFunded: !nothingFunded
+          orderFunded: true
         })
       ]
     );
