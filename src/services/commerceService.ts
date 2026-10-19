@@ -2043,7 +2043,7 @@ async function processCheckoutSessionEvent(
            held_at = CASE WHEN $4::varchar = 'disputed'
              THEN COALESCE(held_at, NOW()) ELSE held_at END,
            hold_reason = CASE WHEN $4::varchar = 'disputed'
-             THEN 'payment_disputed' ELSE hold_reason END,
+             THEN hold_reason ELSE hold_reason END,
            last_error_code = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'
              THEN last_error_code ELSE 'UNMATCHED_MONEY_EVENT_RECOVERED' END,
            -- The PAIR, third site (#279). Setting the code without the message
