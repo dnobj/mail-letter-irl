@@ -30,7 +30,12 @@ export async function startStdioServer() {
   // listen callback; connect() is not held up.
   kickPriceCatalog(undefined, 'stdio_startup');
 
-  serveStdio(build);
+  serveStdio(build, {
+    // A server that cannot be built is answered "Internal server error" by the SDK; say why here too.
+    onerror: (error) => {
+      writeDiagnostic("error", "mcp.stdio_error", { errorClass: classifyDiagnosticError(error, "configuration_error") });
+    }
+  });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

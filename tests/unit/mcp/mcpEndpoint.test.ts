@@ -163,14 +163,14 @@ describe('one handler, both protocol revisions', () => {
   /** A real v2 client, speaking one revision, to the handler /mcp mounts, with the caller /mcp signed in. */
   async function connect(mode: 'legacy' | { pin: string }) {
     const handler = createLetterMcpHandler(new LetterIrlServer());
-    const seen: Array<{ method: string; version: string | null; answer?: Promise<unknown> }> = [];
+    const seen: Array<{ method: string; version: string | null; type: string | null; answer?: Promise<unknown> }> = [];
     const transport = new StreamableHTTPClientTransport(new URL('http://localhost:8090/mcp'), {
       fetch: async (url, init) => {
         const request = new Request(url, init);
         const body = init?.body ? JSON.parse(String(init.body)) : undefined;
         const response = await handler.fetch(request, { authInfo: toSdkAuthInfo(USER) });
         const answer = response.headers.get('content-type')?.includes('json') ? response.clone().json() : undefined;
-        seen.push({ method: body?.method ?? request.method, version: request.headers.get('mcp-protocol-version'), answer });
+        seen.push({ method: body?.method ?? request.method, version: request.headers.get('mcp-protocol-version'), type: response.headers.get('content-type'), answer });
         return response;
       }
     });
@@ -185,6 +185,8 @@ describe('one handler, both protocol revisions', () => {
     expect(tools.map(tool => tool.name)).toContain('quote_and_preview_letter');
     expect(seen[0]).toMatchObject({ method: 'initialize' });
     expect(seen.find(entry => entry.method === 'tools/list')?.version).toBe('2025-11-25');
+    // As SDK v1 answered it: one event on an SSE response, whatever responseMode says (it is the modern leg's).
+    expect(seen.find(entry => entry.method === 'tools/list')?.type).toMatch(/^text\/event-stream/);
     expect(client.getInstructions()).toMatch(/Letter IRL/);
     await client.close();
     await handler.close();
@@ -197,6 +199,7 @@ describe('one handler, both protocol revisions', () => {
     expect(client.getInstructions()).toMatch(/Letter IRL/);
     const listed = await client.listTools();
     expect(listed.tools.map(tool => tool.name)).toContain('quote_and_preview_letter');
+    expect(seen.find(entry => entry.method === 'tools/list')?.type).toMatch(/^application\/json/);
     // On the wire: kept by nobody, shared with nobody.
     for (const method of ['server/discover', 'tools/list']) {
       const answer = (await seen.find(entry => entry.method === method)?.answer) as { result?: Record<string, unknown> };

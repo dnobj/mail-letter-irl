@@ -328,7 +328,9 @@ export const MCP_CACHE_HINTS = Object.fromEntries(
 /**
  * The /mcp handler (#477): SDK v2 serves 2026-07-28 requests and, statelessly, 2025-era ones, from one factory, so
  * the two eras are served the same tools. One server per request, as before, for the caller we signed in, which
- * reaches the factory as the request's authInfo. JSON answers only: nothing here streams, and Railway buffers SSE.
+ * reaches the factory as the request's authInfo. A 2026-07-28 request is answered in JSON (responseMode): nothing
+ * here streams. A 2025 one is answered as SDK v1 answered it, one event on an SSE response, which the SDK's
+ * stateless leg does whatever responseMode says.
  * No subscriptions/listen streams either: we publish no change events, and the SDK's cap on open streams is one count
  * for the whole process, so one client holding streams open could refuse every other client's.
  */
