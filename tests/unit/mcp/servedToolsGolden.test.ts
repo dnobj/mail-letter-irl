@@ -15,9 +15,10 @@ vi.mock('../../../src/auth/clientProfiles.js', async importOriginal => {
   };
 });
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/client';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
+import { buildManifest } from '../../../src/mcp/manifest.js';
 
 /**
  * The launch cut as proposed on #816 (update 2, issuecomment-6271510222): group 1 on; group 2 (certified mail,
@@ -87,6 +88,21 @@ describe('the tools/list ChatGPT is served (#816)', () => {
       for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
       const tools = await listed();
       await expect(JSON.stringify(tools, null, 2) + '\n').toMatchFileSnapshot(`./__snapshots__/tools-list.${file}.json`);
+    }, 120_000);
+
+    // SDK v2 does not export its converter, so /manifest.json makes the same call itself (#477): held equal here.
+    it(`gives /manifest.json the schemas tools/list serves, tool by tool, for ${label}`, async () => {
+      vi.stubEnv('LETTER_IRL_REQUIRE_AUTH', 'true');
+      vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', 'openid email offline_access mail:read mail:draft mail:send');
+      for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+      const listedByName = new Map((await listed()).map(tool => [tool.name, tool]));
+      const manifest = buildManifest().tools as Array<{ name: string; inputSchema: unknown; outputSchema: unknown }>;
+      const compared = manifest.filter(tool => listedByName.has(tool.name));
+      expect(compared.length).toBeGreaterThan(20);
+      for (const tool of compared) {
+        expect(tool.inputSchema, `${tool.name} input`).toEqual(listedByName.get(tool.name)!.inputSchema);
+        expect(tool.outputSchema, `${tool.name} output`).toEqual(listedByName.get(tool.name)!.outputSchema);
+      }
     }, 120_000);
   }
 });

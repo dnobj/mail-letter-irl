@@ -12,8 +12,8 @@ vi.mock('../../../src/auth/identity.js', () => ({
   prepareAuthenticatedUser: vi.fn().mockResolvedValue('person@example.com')
 }));
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/client';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { buildManifest } from '../../../src/mcp/manifest.js';
 import { partitionToolResult, summarizeToolResult, withheldInputKeys } from '../../../src/mcp/registerTools.js';

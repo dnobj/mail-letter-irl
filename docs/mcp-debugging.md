@@ -1,12 +1,14 @@
 # MCP Debugging Notes
 
-**Last Updated:** September 23, 2026
+**Last Updated:** October 19, 2026
 **Purpose:** Transport-level troubleshooting for the MCP endpoint
 
 This document captures lessons learned while wiring the Letter IRL MCP server into ChatGPT Apps (November 2025). Refer here when troubleshooting connector issues. For widget problems see [learnings/widget-debugging-notes.md](learnings/widget-debugging-notes.md); for OAuth see [learnings/chatgpt-auth0-oauth-learnings.md](learnings/chatgpt-auth0-oauth-learnings.md).
 
 ## 1. HTTP Transport Requirements
-- **Use the Streamable HTTP transport** (`StreamableHTTPServerTransport`). The Apps SDK expects HTTPS and SSE support; stdio is limited to local tests.
+- **The handler is SDK v2's `createMcpHandler`** (`@modelcontextprotocol/server` 2.3.1, mounted with `toNodeHandler` from `@modelcontextprotocol/node`, #477). One handler serves both protocol revisions from one server factory: 2026-07-28 requests (no `initialize`; each request names its revision in `_meta`, and `server/discover` answers the per-app instructions), and 2025-era requests statelessly, one server per request. A 2026-07-28 request is answered in JSON (`responseMode: "json"`); a 2025 one, as under SDK v1, as one event on an SSE response. No `subscriptions/listen` stream is opened (`maxSubscriptions: 0`): we publish no change events, and the SDK's cap on them is one count for the whole process. Every cacheable result says `ttlMs: 0` and `cacheScope: "private"`, because the tools, instructions and cards differ by app and by flag. stdio uses `serveStdio` and is limited to local tests.
+- **Checks before the handler:** v2's handler checks no Host, no Origin and no token. `src/mcp/httpServer.ts` runs the limiter, the sign-in, the account limiter and then the Host and Origin allow-lists (`src/mcp/mcpEndpoint.ts`) before handing the request over, with the same 403 answers SDK v1's transport gave.
+- **Which revision a client speaks:** each `mcp.client_request` log line carries `protocolVersion`: a revision date, `none` or `other`.
 - **Allowed hosts/origins:** configure `LETTER_IRL_ALLOWED_HOSTS`, `LETTER_IRL_ALLOWED_ORIGINS`, and `LETTER_IRL_DEFAULT_ORIGIN` so both `localhost`/`127.0.0.1` (dev) and your tunnel domain (e.g., ngrok) are permitted.
 - **Endpoint paths:** the MCP endpoint is `/mcp`, streamable HTTP only (POST; a preflight is answered, and GET answers 405). The legacy SSE transport is retired (#730): it ran at GET `/mcp` with `/messages` in both deployments (`/mcp/sse` by default), and `/messages`, `/mcp/sse` and `/mcp/sse/messages` now answer 410. The same process serves `/healthz`, `/readyz`, `/manifest.json`, the `/.well-known/*` OAuth metadata and the plugin portal's `/.well-known/openai-apps-challenge`, `/widgets/<name>.html`, `/webhooks/stripe`, `/purchase/start` and `/purchase/return`, and the dashboard's `/api/*` routes. The dispatch in `src/mcp/httpServer.ts` is the complete list.
 
@@ -16,8 +18,7 @@ This document captures lessons learned while wiring the Letter IRL MCP server in
 
 ## 3. Initialization Gotchas
 - ChatGPT sends two `initialize` JSON-RPC calls in quick succession (protocol versions `2025-03-26` then `2025-06-18`).
-- **Do not set `sessionIdGenerator`** on `StreamableHTTPServerTransport` unless you want to enforce per-session state. Leaving it unset avoids the "Invalid Request: Server already initialized" 400 response on the second initialize.
-- Because we removed session tracking, `Mcp-Session-Id` headers are no longer required for subsequent requests.
+- **No sessions.** The 2025-era leg is stateless, a fresh server for each request, so a second `initialize` is answered like the first, and `Mcp-Session-Id` is neither issued nor required. GET and DELETE answer 405. (Under SDK v1 this needed `sessionIdGenerator` left unset.)
 
 ## 4. Manual Testing Scripts
 These scripts date from November 2025 and hardcode a retired ngrok hostname and the pre-CIMD registration endpoint. Pass your own URL, and override the exported variables before relying on them.

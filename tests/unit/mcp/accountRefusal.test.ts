@@ -70,7 +70,7 @@ describe("a tool call from a caller with no account", () => {
     for (const tool of TOOLS) {
       const handler = handlers.get(tool.name);
       expect(handler, `${tool.name} was not registered`).toBeDefined();
-      const result = await handler!({}, { _meta: {} });
+      const result = await handler!({}, { mcpReq: { _meta: {} } });
 
       expect(result).toEqual({
         isError: true,
@@ -86,7 +86,7 @@ describe("a tool call from a caller with no account", () => {
   it("names a conflicting address rather than reporting it as a refusal", async () => {
     const { handlers } = await registerWithRefusal(new EmailAlreadyLinkedError());
 
-    const result = await handlers.get("send_letter")!({}, { _meta: {} });
+    const result = await handlers.get("send_letter")!({}, { mcpReq: { _meta: {} } });
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toBe(EMAIL_ALREADY_LINKED_MESSAGE);
@@ -101,7 +101,7 @@ describe("a tool call from a caller with no account", () => {
     error.mockRestore();
 
     for (const tool of TOOLS) {
-      const result = await handlers.get(tool.name)!({}, { _meta: {} });
+      const result = await handlers.get(tool.name)!({}, { mcpReq: { _meta: {} } });
       expect(result).toEqual({ isError: true, content: [{ type: "text", text: ACCOUNT_ERASED_MESSAGE }] });
     }
     expect(appServer.execute).not.toHaveBeenCalled();
@@ -135,7 +135,7 @@ describe("a tool call from a caller with no account", () => {
       },
       { recheckAccountPerCall: true }
     );
-    const result = await handlers.get("send_letter")!({}, { _meta: {} });
+    const result = await handlers.get("send_letter")!({}, { mcpReq: { _meta: {} } });
 
     expect(result).toEqual({ isError: true, content: [{ type: "text", text: ACCOUNT_ERASED_MESSAGE }] });
     expect(appServer.execute).not.toHaveBeenCalled();
@@ -165,7 +165,7 @@ describe("a tool call from a caller with no account", () => {
       { userId: "auth0|confirmed-later", claims: {}, token: "token", authType: "jwt" as const, scopes: ["mail:read", "mail:draft", "mail:send"] },
       { recheckAccountPerCall: true }
     );
-    await handlers.get("get_account_balance")!({}, { _meta: {} });
+    await handlers.get("get_account_balance")!({}, { mcpReq: { _meta: {} } });
 
     expect(appServer.execute).toHaveBeenCalledTimes(1);
   });
@@ -191,7 +191,7 @@ describe("a tool call from a caller with no account", () => {
       { userId: "auth0|unreadable", claims: {}, token: "token", authType: "jwt" as const, scopes: ["mail:read", "mail:draft", "mail:send"] },
       { recheckAccountPerCall: true }
     );
-    const result = await handlers.get("send_letter")!({}, { _meta: {} });
+    const result = await handlers.get("send_letter")!({}, { mcpReq: { _meta: {} } });
     error.mockRestore();
 
     expect(result).toEqual({ isError: true, content: [{ type: "text", text: ACCOUNT_UNAVAILABLE_MESSAGE }] });
@@ -200,8 +200,8 @@ describe("a tool call from a caller with no account", () => {
 
   it("decides the account once per server when not asked to recheck", async () => {
     const { handlers } = await registerWithRefusal(null);
-    await handlers.get("get_account_balance")!({}, { _meta: {} });
-    await handlers.get("get_account_balance")!({}, { _meta: {} });
+    await handlers.get("get_account_balance")!({}, { mcpReq: { _meta: {} } });
+    await handlers.get("get_account_balance")!({}, { mcpReq: { _meta: {} } });
     expect(identity.prepareAuthenticatedUser).toHaveBeenCalledTimes(1);
   });
 
@@ -210,7 +210,7 @@ describe("a tool call from a caller with no account", () => {
     // back whole, as BETA_ACCESS_MESSAGE is.
     const { handlers } = await registerWithRefusal(new VerifiedEmailRequiredError());
 
-    const result = await handlers.get("send_letter")!({}, { _meta: {} });
+    const result = await handlers.get("send_letter")!({}, { mcpReq: { _meta: {} } });
 
     expect(result.content[0].text).not.toContain("auth0|no-account");
     expect(result.content[0].text).not.toContain("token");
@@ -249,7 +249,7 @@ describe("a tool call from a caller with no account", () => {
     // Guards the assertions above: the refusal must not be the default.
     const { handlers, appServer } = await registerWithRefusal(null);
 
-    const result = await handlers.get("get_account_balance")!({}, { _meta: {} });
+    const result = await handlers.get("get_account_balance")!({}, { mcpReq: { _meta: {} } });
 
     expect(result.isError).toBeUndefined();
     expect(appServer.execute).toHaveBeenCalledTimes(1);
@@ -264,7 +264,7 @@ describe("a tool call from a caller with no account", () => {
     const { handlers, appServer } = await registerWithRefusal(new Error("connection terminated"));
     error.mockRestore();
 
-    const result = await handlers.get("get_account_balance")!({}, { _meta: {} });
+    const result = await handlers.get("get_account_balance")!({}, { mcpReq: { _meta: {} } });
 
     expect(result).toEqual({ isError: true, content: [{ type: "text", text: ACCOUNT_UNAVAILABLE_MESSAGE }] });
     expect(result.content[0].text).not.toBe(VERIFIED_EMAIL_MESSAGE);

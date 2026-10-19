@@ -1,5 +1,5 @@
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ToolAnnotations, McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { McpServer, ProtocolError, ProtocolErrorCode, ResourceTemplate } from "@modelcontextprotocol/server";
+import type { ServerContext, ToolAnnotations } from "@modelcontextprotocol/server";
 import { isLetterHomeEnabled } from "../config/letterHome.js";
 import { openLetterHomeInputZ, openLetterHomeOutputZ } from "../zodSchemas.js";
 import { z } from "zod";
@@ -742,7 +742,7 @@ export async function registerWidgetResources(
           const result = await readWidgetResource(widget.name, uri, version, client);
           // Unreachable: the name comes from WIDGET_DEFINITIONS itself.
           if (!result) {
-            throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
+            throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Resource ${uri} not found`);
           }
           return result;
         }
@@ -770,7 +770,7 @@ export async function registerWidgetResources(
       async () => {
         const result = await readWidgetResource(variant.name, uri, WIDGET_TEMPLATE_VERSION, client);
         if (!result) {
-          throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
+          throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Resource ${uri} not found`);
         }
         return result;
       }
@@ -813,7 +813,7 @@ export async function registerWidgetResources(
         // Same error the SDK raises for an unregistered URI, so an unknown
         // widget name is indistinguishable to the client from one we never
         // advertised - it just gets logged on our side now.
-        throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
+        throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Resource ${uri} not found`);
       }
       return result;
     }
@@ -980,8 +980,8 @@ export function getZodInputShape(name: string) {
  * dropped and its mail sent at once, or its theme dropped and its letter
  * printed plain. While a field is withheld, its tool is served as an object
  * that passes unknown keys through, so the preview sees the field and
- * refuses it: its JSON Schema then reads `additionalProperties: true`, where
- * a raw shape's reads false (tests/unit/mcp/arriveByServed.test.ts,
+ * refuses it: its JSON Schema then reads `additionalProperties: {}`, where
+ * a raw shape's says nothing (tests/unit/mcp/arriveByServed.test.ts,
  * stationeryServed.test.ts). Every other tool is served its raw shape, as
  * before, set_arrival_date included: its own arriveBy is offered with it,
  * only while the flag is on.
@@ -1196,17 +1196,17 @@ export async function registerLetterTools(
         // (#484); every tool has a title now.
         title: tool.title,
         description: tool.description,
-        // A raw shape, or for the previews while arrive-by is off a passthrough
-        // object (getServedInputSchema); the SDK normalizes either. Typed as
-        // getZodInputShape's loose result, as it always was: the SDK's
-        // generics cannot infer through the union (TS2589), and the handler
-        // below takes its arguments loosely anyway.
-        inputSchema: inputShape as ReturnType<typeof getZodInputShape>,
-        outputSchema: outputShape,
+        // An object, or for the previews while a field is withheld one that
+        // passes unknown keys through (getServedInputSchema). SDK v2 takes
+        // objects: a raw shape is deprecated there. Typed loosely, as it always
+        // was: the SDK's generics cannot infer through the union (TS2589), and
+        // the handler below takes its arguments loosely anyway.
+        inputSchema: (inputShape instanceof z.ZodObject ? inputShape : z.object(inputShape)) as z.ZodObject,
+        outputSchema: z.object(outputShape) as z.ZodObject,
         annotations,
         _meta: buildToolMeta(tool.name, tool.meta)
       },
-      async (args: Record<string, unknown>, extra: any) => {
+      async (args: Record<string, unknown>, ctx: ServerContext) => {
         try {
           authorizeTool(sendsByLinkOnly ? REQUEST_SEND_TOOL : tool.name, authInfo);
         } catch (error) {
@@ -1242,7 +1242,8 @@ export async function registerLetterTools(
         }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
-        const extraMeta = extra._meta as Record<string, unknown> | undefined;
+        // SDK v2 carries the request's _meta on ctx.mcpReq (v1's extra._meta): typed, so a rename fails the build.
+        const extraMeta = ctx?.mcpReq?._meta as Record<string, unknown> | undefined;
         const userAgent = extractUserAgent(argsMeta, extraMeta);
         const isMobile = userAgent ? isMobileClient(userAgent) : undefined;
 

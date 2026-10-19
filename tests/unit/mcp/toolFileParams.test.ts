@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js';
 import { getZodInputShape } from '../../../src/mcp/registerTools.js';
 import { UNRESOLVED_IMAGE_FILE_ID } from '../../../src/utils/imageFileParam.js';
 
@@ -14,9 +13,9 @@ import { UNRESOLVED_IMAGE_FILE_ID } from '../../../src/utils/imageFileParam.js';
  * layer ChatGPT actually reads; the manifest snapshot test cannot see it.
  */
 
-/** The input schema as the SDK converts it for tools/list (server/mcp.js). */
+/** The input schema as SDK v2 converts it for tools/list: zod's Standard JSON Schema, input side, draft 2020-12. */
 function served(shape: z.ZodRawShape) {
-  return toJsonSchemaCompat(z.object(shape), { strictUnions: true, pipeStrategy: 'input' }) as {
+  return z.object(shape)['~standard'].jsonSchema.input({ target: 'draft-2020-12' }) as {
     properties?: Record<string, Record<string, unknown>>;
   };
 }

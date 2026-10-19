@@ -1,24 +1,26 @@
 import { LetterIrlServer } from "../server.js";
 import { getServedInputSchema, getZodOutputShape, listedWidgets } from "./registerTools.js";
-import { normalizeObjectSchema, objectFromShape } from "@modelcontextprotocol/sdk/server/zod-compat.js";
-import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
+import { z } from "zod";
 import { DEFAULT_OAUTH_SCOPES } from "../auth/oauthConfig.js";
 import { buildServerInstructions } from "./serverInstructions.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { clientProfileNamed } from "../auth/clientProfiles.js";
 
+/** The JSON Schema draft SDK v2 converts every tool schema to (its JSON_SCHEMA_CONVERSION_TARGET). */
+const JSON_SCHEMA_TARGET = "draft-2020-12";
+
 /**
  * A tool's schemas exactly as tools/list serves them (#688): the served Zod shapes (getServedInputSchema, with the
  * fields this deployment withholds left out and the postcard and set_stationery served as before their features),
- * converted by the SDK's own converter with the options its tools/list handler uses. So the manifest and tools/list
- * cannot disagree, and src/zodSchemas.ts is the one tool contract.
+ * converted as SDK v2's tools/list converts them: the object registerTool is given, through zod's own Standard JSON
+ * Schema, input side for inputs and output side for outputs, at the SDK's draft (#477). SDK v2 does not export its
+ * converter, so this is the same call, and tests/unit/mcp/servedToolsGolden.test.ts holds the two equal, tool by
+ * tool; src/zodSchemas.ts stays the one tool contract.
  */
-function servedJsonSchema(schema: unknown, pipeStrategy: "input" | "output"): unknown {
-  // As registerTool stores it: a raw shape, even an empty one, becomes an object schema first.
-  const isRawShape = typeof schema === "object" && schema !== null && !("_def" in schema) && !("_zod" in schema);
-  const stored = isRawShape ? objectFromShape(schema as Parameters<typeof objectFromShape>[0]) : schema;
-  const object = normalizeObjectSchema(stored as Parameters<typeof normalizeObjectSchema>[0]);
-  return object ? toJsonSchemaCompat(object, { strictUnions: true, pipeStrategy }) : { type: "object", properties: {} };
+function servedJsonSchema(schema: z.ZodRawShape | z.ZodObject | undefined, io: "input" | "output"): unknown {
+  if (!schema) return { type: "object", properties: {} };
+  const object = schema instanceof z.ZodObject ? schema : z.object(schema);
+  return { type: "object", ...object["~standard"].jsonSchema[io]({ target: JSON_SCHEMA_TARGET }) };
 }
 
 /** A tool's input and output schemas as tools/list and /manifest.json serve them, as this deployment stands. */

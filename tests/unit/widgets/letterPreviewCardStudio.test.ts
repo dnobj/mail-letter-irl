@@ -2645,6 +2645,14 @@ describe('the Mail choice on the Delivery tab (#648)', () => {
     }
   });
 
+  it('says certified mail is not available when the server refuses the gone tool as an error of the connection (#477)', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    await card.answer({ error: { code: -32602, message: 'Tool set_mail_service not found' } }, SET);
+    expect(text(card, 'service-note')).toBe('Certified mail is not available right now. The preview stays as it is.');
+  });
+
   it("takes a longer letter's pages from the answer, and keeps how full they are: a change of service leaves the page as it is", async () => {
     const PAY_AND_SEND = { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } };
     const card = mount();

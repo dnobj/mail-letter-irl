@@ -14,8 +14,8 @@ vi.mock('../../../src/auth/identity.js', () => ({
   prepareAuthenticatedUser: vi.fn().mockResolvedValue('person@example.com')
 }));
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/client';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { buildManifest } from '../../../src/mcp/manifest.js';
 import { withheldInputKeys } from '../../../src/mcp/registerTools.js';
@@ -133,7 +133,7 @@ describe('the postcard size in tools/list', () => {
     expect(received).toHaveLength(0);
     const said = JSON.stringify(result);
     expect(said).toContain('size');
-    expect(said).toMatch(/expected .*6x9.* at size/);
+    expect(said).toMatch(/size: Invalid input: expected .*6x9/);
     // A 6x9, named or not, reaches it.
     await client.callTool({ name: 'quote_and_preview_postcard', arguments: { ...POSTCARD, size: '6x9' } });
     await client.callTool({ name: 'quote_and_preview_postcard', arguments: POSTCARD });
@@ -150,7 +150,7 @@ describe('the postcard size in tools/list', () => {
       .callTool({ name: 'quote_and_preview_postcard', arguments: { ...POSTCARD, size: '5x7' } })
       .catch(error => error);
     expect(received).toHaveLength(2);
-    expect(JSON.stringify(result)).toMatch(/Invalid option: expected one of .*6x9.*6x4.*6x11.* at size/);
+    expect(JSON.stringify(result)).toMatch(/size: Invalid option: expected one of .*6x9.*6x4.*6x11/);
   });
 });
 

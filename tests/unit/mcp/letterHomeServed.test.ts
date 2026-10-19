@@ -4,9 +4,9 @@ vi.mock('../../../src/db/index.js', () => ({ query: vi.fn().mockResolvedValue({ 
 vi.mock('../../../src/store/fileAccountStore.js', () => ({ FileAccountStore: class {
   async getOrCreate(userId: string) { return { userId, creditsRemaining: 0, orders: [] }; }
 } }));
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/client';
+import { McpServer } from '@modelcontextprotocol/server';
 import { registerLetterTools } from '../../../src/mcp/registerTools.js';
 import { LetterIrlServer } from '../../../src/server.js';
 import { buildManifest } from '../../../src/mcp/manifest.js';
@@ -63,7 +63,7 @@ describe('Letter IRL home on the MCP wire', () => {
     const tool = (await client.listTools()).tools.find(tool => tool.name === 'open_letter_home')!;
     expect(tool.title).toBe('Letter IRL');
     expect(tool.inputSchema.properties).toEqual({});
-    expect(tool.outputSchema?.properties?.appUrl).toMatchObject({ type: 'string' });
+    expect((tool.outputSchema?.properties as Record<string, any> | undefined)?.appUrl).toMatchObject({ type: 'string' });
     expect(tool._meta).toMatchObject({ 'openai/ui': { entrypoints: [{ type: 'global' }] } });
     expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false });
     const result = await client.callTool({ name: 'open_letter_home', arguments: {} });
@@ -115,7 +115,7 @@ describe('a delivered status said as an estimate (HOME-01)', () => {
     vi.stubEnv('LETTER_IRL_HOME_ENABLED', 'true');
     const client = await connect();
     const tool = (await client.listTools()).tools.find(tool => tool.name === 'open_letter_home')!;
-    const served = (tool.outputSchema?.properties?.orders as any).items.properties.status;
+    const served = ((tool.outputSchema?.properties as Record<string, any> | undefined)?.orders as any).items.properties.status;
     expect(served.description).toBe(HOME_ORDER_STATUS_DESCRIPTION);
     expect(HOME_ORDER_STATUS_DESCRIPTION).toMatch(/no carrier confirmed it, so say its delivery is estimated/);
     expect((openLetterHomeOutputSchema as any).properties.orders.items.properties.status.description).toBe(HOME_ORDER_STATUS_DESCRIPTION);
@@ -127,8 +127,8 @@ describe('a delivered status said as an estimate (HOME-01)', () => {
     const tools = (await client.listTools()).tools;
     const status = tools.find(tool => tool.name === 'get_order_status')!;
     const list = tools.find(tool => tool.name === 'list_orders')!;
-    expect((status.outputSchema?.properties?.currentStatus as any).description).toBe(ORDER_STATUS_DESCRIPTION);
-    expect((list.outputSchema?.properties?.orders as any).items.properties.status.description).toBe(ORDER_STATUS_DESCRIPTION);
+    expect(((status.outputSchema?.properties as Record<string, any> | undefined)?.currentStatus as any).description).toBe(ORDER_STATUS_DESCRIPTION);
+    expect(((list.outputSchema?.properties as Record<string, any> | undefined)?.orders as any).items.properties.status.description).toBe(ORDER_STATUS_DESCRIPTION);
     expect(ORDER_STATUS_DESCRIPTION).toMatch(/no carrier confirmed it, so say its delivery is estimated/);
     expect((getOrderStatusOutputSchema as any).properties.currentStatus.description).toBe(ORDER_STATUS_DESCRIPTION);
     expect((listOrdersOutputSchema as any).properties.orders.items.properties.status.description).toBe(ORDER_STATUS_DESCRIPTION);

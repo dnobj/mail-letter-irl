@@ -22,9 +22,9 @@
  * the letter card's address window empty on every preview ever rendered.
  *
  * Where the drop happens is worth being precise about, because it dictates
- * what a guard can be. At `@modelcontextprotocol/sdk` 1.31.0 the server does
- * NOT strip: `registerTools` hands the SDK a raw zod shape, and the SDK's
- * `validateToolOutput` calls `safeParseAsync` but discards `parseResult.data`,
+ * what a guard can be. At `@modelcontextprotocol/server` 2.3.1, as at SDK 1.x,
+ * the server does NOT strip: `registerTools` hands the SDK a zod object, and
+ * the SDK's `validateToolOutput` validates it but discards the parsed value,
  * so the unstripped result goes on the wire. The drop is client-side, when
  * ChatGPT filters `structuredContent` against the JSON Schema published on
  * `tools/list`. A server-side runtime assertion would therefore never

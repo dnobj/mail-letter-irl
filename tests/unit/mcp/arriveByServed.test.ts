@@ -12,8 +12,8 @@ vi.mock('../../../src/auth/identity.js', () => ({
   prepareAuthenticatedUser: vi.fn().mockResolvedValue('person@example.com')
 }));
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/client';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { type ClientProfile } from '../../../src/auth/clientProfiles.js';
 import { LetterIrlServer } from '../../../src/server.js';
@@ -249,6 +249,8 @@ describe('set_arrival_date in tools/list', () => {
     const client = await connected();
     const result = await client.callTool({ name: 'set_arrival_date', arguments: { draftId: DRAFT_ID, arriveBy: '2026-10-16' } }).catch(error => error);
     expect(received).toHaveLength(0);
-    expect(JSON.stringify(result)).toMatch(/set_arrival_date/);
+    // SDK v2 refuses an unknown tool as a JSON-RPC error, which the client throws, not as a result.
+    expect(result).toBeInstanceOf(Error);
+    expect(String(result.message)).toMatch(/set_arrival_date/);
   });
 });

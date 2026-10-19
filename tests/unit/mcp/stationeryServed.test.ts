@@ -12,8 +12,8 @@ vi.mock('../../../src/auth/identity.js', () => ({
   prepareAuthenticatedUser: vi.fn().mockResolvedValue('person@example.com')
 }));
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/client';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { type ClientProfile } from '../../../src/auth/clientProfiles.js';
 import { LetterIrlServer } from '../../../src/server.js';
@@ -140,7 +140,7 @@ describe('stationery in tools/list', () => {
     expect(received).toHaveLength(0);
     const said = JSON.stringify(result);
     expect(said).toContain('stationery');
-    expect(said).toMatch(/Invalid option: expected one of .* at stationery/);
+    expect(said).toMatch(/stationery: Invalid option: expected one of /);
     for (const theme of STATIONERY_THEMES) expect(said, theme).toContain(`\\"${theme}\\"`);
   });
 
