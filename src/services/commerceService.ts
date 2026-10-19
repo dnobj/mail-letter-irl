@@ -3699,7 +3699,7 @@ async function applyRecoveredDisputes(
     }
   }
   if (losses.length > 0) await blockAccountSends(client, order.user_id, 'payment_disputed');
-  for (const dispute of disputes) {
+  for (const dispute of losses) {
     const closed = dispute.resolved_at !== null;
     await client.query(
       `INSERT INTO commerce_operational_alerts (
