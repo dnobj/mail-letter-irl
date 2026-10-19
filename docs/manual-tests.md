@@ -1955,13 +1955,31 @@ Not run: step 1 (two photos, with the dev CLI), step 2 (the four-photo case), st
 
 ### CERTIFIED-01 — The important letter: USPS Certified Mail (#625)
 
-**Status:** Run in part on development on 2026-10-18 (UTC), through the dev CLI as testlirl02 and ChatGPT (DEV) as 4dm1n.
+**Status:** Run on development on 2026-10-18 (UTC), through the dev CLI, the development website and Claude on the web as testlirl02, and ChatGPT (DEV) as 4dm1n.
 
-- **Passed:** steps 2 to 5. Step 2 by the dev CLI's list: the three letter previews take `mailService` and the postcard preview does not.
-- **Step 1** passed but for its tool-list checks, which wait on a run with the list refreshed: with the flag off, `mailService` was refused with "Certified mail is not available right now" and no draft was made, and `set_mail_service` was not found.
-- **Step 13** passed for a previewed letter (to `certified` and back to `standard`, the step's words) and for a postcard (refused). The sent, paying and gift drafts wait on a certified send, the Stripe test card and a gift letter, and the flag-off tool list with step 1's.
-- **Step 16** passed for a one-page letter in ChatGPT: **Certified** turned the cost to "Pay & Send USD 11.99", the summary to certified mail and the Delivery line to USPS Certified Mail with the signed-for disclaimer, and **First-Class** put it all back. The two-page, gift and flag-off cases and the Claude run wait on a run.
-- **Steps 6 and 14** wait on a run in Claude, **steps 7 to 11** on the Stripe test card, **step 12** on a certified letter sent, and **step 15** on PostGrid's production time.
+- **Passed:** steps 1 to 5, 7, 12, 13 and 14. Step 2 by the dev CLI's list: the three letter previews take `mailService` and the postcard preview does not.
+- **Step 1:** with the flag off, `mailService` was refused with "Certified mail is not available right now" and no draft was made, and `set_mail_service` was not found. The live list, read by a fresh `claude -p`, had no `mailService` on the three letter previews, no certified mail in their descriptions, and no `set_mail_service`.
+- **Step 13:** a previewed letter (to `certified` and back to `standard`, the step's words) and a postcard (refused). A gift letter preview was refused with "A gift letter does not pay for certified mail. Make a new preview with mailService certified: it is paid with Pay & Send, not by a gift letter." A sent draft got "This letter has already been sent, so how it travels can't change. list_orders shows it." (said too of a paid letter waiting for its date). A draft with a Pay & Send checkout open got "This preview is tied to a Pay & Send payment, so how it travels can't change now. Finish or let that payment lapse, or make a new preview." With the flag off, the tool was gone, and an old list's call answered "Tool set_mail_service not found".
+- **Step 16** passed for a one-page letter in ChatGPT: **Certified** turned the cost to "Pay & Send USD 11.99", the summary to certified mail and the Delivery line to USPS Certified Mail with the signed-for disclaimer, and **First-Class** put it all back. In Claude (v96) **First-Class** and **Certified** did the same, with the cost as in step 6. The two-page, gift and flag-off cases wait on a run.
+- **Step 6** (Claude, v96) passed but for the price.
+  - The pill read "Certified mail is paid with Pay & Send." and the summary "certified mail".
+  - The Delivery line read "USPS Certified Mail" with the signed-for disclaimer.
+  - The button read **Pay & Send on** the website, and the note under it named Pay & Send, not a pack.
+  - The cost read "Paid when you send it": an app that takes no purchases gets no price in the preview (#475), and the confirmation page names it.
+- **Step 7** (the development website) passed. The page named USPS Certified Mail, the signed-for note and the price ($11.99, or $14.99 with the return receipt), and paying with the test card sent it. `list_orders` gave `mailService` `certified` and `certified_return_receipt`.
+- **Step 8** passed but for the number. `get_order_status` gave `mailService`, the note that USPS's number is not here yet, and `trackingSupport: estimated_only`. The number waits on the status sync, and PostGrid's test mode may never set one.
+- **Steps 9 and 10:** in PostGrid's test dashboard the two letters carried `extraService` `certified` and `certified_return_receipt` (First-Class, a double-window envelope, `ready`). **Recorded:**
+  - The test-mode PDF draws no certified markings: the address zone is clear and the return address is there. The markings' risk stays open until a live print, or an answer from PostGrid.
+  - The dashboard says nothing of where or when the return receipt is delivered.
+- **Step 11:** a certified letter to arrive by Oct 31 waits in the outbox (it mails Oct 21 and is not cancellable).
+  - `cancel_scheduled_mail` answered "A Pay & Send order can't be cancelled here. Email support@letterirl.com from the email on your Letter IRL account, quoting the order id; refunds are decided by a person."
+  - The confirmation page and the dashboard both name support, and say a person decides any refund.
+  - Its reaching PostGrid with the service is still to check, on 2026-10-21.
+- **Step 12** passed. With the flag off, the sent letters still showed their service in `get_order_status`, `list_orders` and the website's letters ("Certified mail"), the one waiting for its date included.
+- **Step 14** (Claude, v96) passed, with the cost as in step 6.
+  - Changed to `standard` in the chat and reopened, the card was ordinary throughout: First-Class, "USPS First-Class Mail", "1 letter", **Send Letter**.
+  - Changed back to `certified` in the chat, pressing Monogram on the open card brought it to certified mail, and it stayed so when reopened.
+- **Step 15** waits on PostGrid's production time.
 
 **Preconditions:** Development. The Stripe test prices of the two certified products (`jit-letter-certified` and `jit-letter-certified-receipt`, made by the owner's script from #624) set on the API **and** the maintenance service. Pay & Send on. `LETTER_IRL_CERTIFIED_MAIL_ENABLED` on in the API and the maintenance service, only once both run the send (an older build prints certified mail as an ordinary letter). A client with the (DEV) connector, or the dev CLI's tools, with its tool list refreshed; a saved return address; the Stripe test card 4242 for Pay & Send (the owner's step unless they have said the loop may pay). `npm run admin:provision-access` re-run on development after migration 053.
 
@@ -1969,10 +1987,10 @@ Not run: step 1 (two photos, with the dev CLI), step 2 (the four-photo case), st
 
 1. [ ] With the flag off, list the tools. Verify the three letter previews have no `mailService` input and their descriptions do not offer certified mail (their output fields and the order tools' fields are declared either way), and a call that passes `mailService: "certified"` anyway is refused with "Certified mail is not available right now" and creates no draft.
 2. [ ] Turn the flag on and refresh the tool list. Verify the three letter previews take `mailService` (`standard`, `certified`, `certified_return_receipt`), and the postcard preview does not.
-3. [ ] Preview a one-page letter with `mailService: "certified"`. Verify the answer says it is sent as USPS Certified Mail, `canSendNow` is false, the cost reads as Pay & Send at the certified price, and no gift letter is offered. Try `sendAsGift: true` with it: refused, saying a gift letter does not pay for certified mail.
+3. [ ] Preview a one-page letter with `mailService: "certified"`. Verify the answer says it is sent as USPS Certified Mail, `canSendNow` is false, the cost reads as Pay & Send at the certified price (in an app that takes no purchases, such as Claude, the answer carries no price and the card reads "Paid when you send it"), and no gift letter is offered. Try `sendAsGift: true` with it: refused, saying a gift letter does not pay for certified mail.
 4. [ ] Try `"Certified"` (capital C) and `"express"` as the service. Verify each is refused by the tool's input check, with an error that lists the valid services, before anything is created. Verify that `null`, `""` and `"standard"` give an ordinary letter.
 5. [ ] Ask for the send link (`request_send`) for the certified preview. Verify the answer carries `mailService`, and its words say Pay & Send pays for it, never a letter pack or a gift letter.
-6. [ ] On the letter card (in Claude or VS Code, where the card sends the person to the page), verify the summary line says "certified mail" (or "with a return receipt"), the Delivery line says "USPS Certified Mail" and the disclaimer says it is signed for at delivery, the cost reads Pay & Send at the certified price, and the note under the button does not say a pack pays for one-page letters.
+6. [ ] On the letter card (in Claude or VS Code, where the card sends the person to the page), verify the summary line says "certified mail" (or "with a return receipt"), the Delivery line says "USPS Certified Mail" and the disclaimer says it is signed for at delivery, the cost reads Pay & Send at the certified price ("Paid when you send it" in an app that takes no purchases, which gets no price: #475), and the note under the button does not say a pack pays for one-page letters.
 7. [ ] (The words after the website part.) Open the link and read the confirmation page. Verify it names certified mail and the price, press Send on the page (the owner's step unless the loop may), and pay with the test card. Verify the letter is paid for the certified product and `letters.mail_service` is certified.
 8. [ ] Right after the send, `get_order_status`. Verify `mailService`, the note that USPS's number is not here yet, and `trackingSupport: estimated_only`. After the provider status sync (every six hours, or run it from the admin panel), verify the number appears with a USPS link, `trackingSupport: carrier_tracking`, and `list_orders` and `GET /api/letters` say the same, with `trackingNumber` still PostGrid's letter id. **PostGrid's test mode may never set a number** (the research does not say): if none comes, set one by hand on the development branch (`UPDATE letters SET carrier_tracking_number = '9407 1000 0000 0000 0000 00' WHERE letter_id = ...`, an owner step) and verify the readers from there; record which happened.
 9. [ ] In PostGrid's test dashboard, verify the letter shows the extra service; decode its PDF with the decode probe and verify the certified markings leave the address zone clear and the return address is there. **Record what the page shows: it settles the open risk of the markings.**
@@ -1990,13 +2008,13 @@ Not run: step 1 (two photos, with the dev CLI), step 2 (the four-photo case), st
 
 ### STUDIO-01 — The studio card: the letter's Style, Words and Delivery tabs, and the postcard maker (#580)
 
-**Status:** Run on development on 2026-10-18 (UTC), through ChatGPT (DEV) as 4dm1n and Claude on the web as testlirl02.
+**Status:** Run on development on 2026-10-18 (UTC), through ChatGPT (DEV) as 4dm1n and testlirl02, and Claude on the web as testlirl02.
 
-- **Passed:** steps 1, 2, 4, 5, 9, 10 and 11 (ChatGPT, widgets v94; step 11's flag off showed the classic rows with the row labelled "Style", and a postcard with Front/Back and no maker); step 3 in ChatGPT (it called `set_letter_words` for "roses", where the 2026-10-17 run called nothing; its no-editor case, "To change the words, ask in the chat.", was seen with stationery off in STATIONERY-01 step 11) and in Claude on steering r54 (below).
+- **Passed:** steps 1, 2, 4, 5, 7, 9, 10 and 11 (ChatGPT, widgets v94; step 11's flag off showed the classic rows with the row labelled "Style", and a postcard with Front/Back and no maker); step 3 in ChatGPT (it called `set_letter_words` for "roses", where the 2026-10-17 run called nothing; its no-editor case, "To change the words, ask in the chat.", was seen with stationery off in STATIONERY-01 step 11) and in Claude on steering r54 (below).
 - **Step 3 in Claude** failed on r53: Claude called nothing and said the letter had no roses; asked, with no tool call, what the card had shared, it said "none" (the share does not reach Claude's model, as HOME-02 found). On r54 (#809, the preview's own text) Claude called `set_letter_words` with the words it had seen, was refused with the card's words, then changed roses to sunflowers.
 - **Step 6** passed but for its cancel label: on v94 the button still read "Letter Scheduled" after **Cancel this letter**; fixed by #809 (widgets v95), where it read **Letter Cancelled** (ENVELOPE-01 step 4's cancel).
-- **Step 7** passed on v94 but for Enlarge spreading the page, which came with v95 and waits on a run.
-- **Step 8** (Claude, v94): the layout passed with no inner scroll bar, and reopening the conversation read the resource and called `get_draft_status`. The card was 694 px tall at 734 px wide, taller than the step's 580 px because it showed "Not enough letters in your balance.", the website note and **Buy letters on the website** in place of **Send Letter**; the height and the send wait on a funded testlirl02.
+- **Step 7:** on v94, Enlarge did not spread the page. On widgets v96 (ChatGPT, testlirl02), a two-page letter read "Page 1 of 2" with **Next page**, "2 pages, both sides" and "Pay & Send USD 5.99". **Enlarge** spread the page from about 200 px to about 447 px across the card and turned to **Show smaller**, which put it back.
+- **Step 8** (Claude, v94): the layout passed with no inner scroll bar, and reopening the conversation read the resource and called `get_draft_status`. The card was 694 px tall at 734 px wide, taller than the step's 580 px because it showed "Not enough letters in your balance.", the website note and **Buy letters on the website** in place of **Send Letter**; the height and the send waited on a funded testlirl02. On v96 with letters (a 684 px wide card in the test browser), the card was 563 px tall, and **Send Letter** sent it: "Letter Sent!", "With the printer", the order. Found: an inner scroll bar whose thumb filled its track on every unsealed card, and none on the sealed one. #812 (widgets v97) ran the two-pixel guard of #706 in Claude too, and the bar stayed. The cause, found in a fake MCP Apps host at 684 px: the card measured its height while a scroll bar narrowed it, and the narrower studio page is shorter (563 px against 571 px without the bar), so the frame it asked for kept the bar. Fixed by #813 (widgets v99), which measures the card with the bar hidden: on v99 (2026-10-19) the same dated card was 572 px tall at 684 px, with no scroll bar.
 
 The studio rearranges both preview cards. The letter card becomes a header, the page beside three tabs, and a footer with the cost and Send. The postcard card becomes a "postcard maker". The studio adds no control of its own: every button is one the card already had, and it calls the same tool a model would. Nothing prints or sends differently.
 
@@ -2029,6 +2047,8 @@ Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v98, s
    - With the editor offered: verify two boxes, "The letter" and "Signed" (labels shown in capitals), holding the words, with a line under them, "About N characters left on this page.", and no fit line or buttons. Type: verify the line counts down, **Update the page** and **Put back** appear, and **Send Letter** waits. Press **Put back**: verify the words come back, the buttons go and focus is in the letter's box. Change a word again and press **Update the page**. Verify the call is `set_letter_words`, the page is drawn again, the note says the words are changed and nothing has been sent, and the buttons go.
    - Catching up: ask in the chat to change a word of the letter. Click the card (or its Words tab). Verify the boxes and the page show the chat's words. Then type in the boxes, ask the chat to change another word, and click the card: verify your words stay in the boxes, the page shows the chat's, and the note says "The words were changed in the chat. What you typed is kept here, and the page shows the chat's: Update the page to use yours instead, or Put back to take the chat's."
    - The chat hears of the card's changes (letter home on, so the card shares its draft): on the card, add "Come and see the roses when you can." and press **Update the page**. Then ask the chat "change 'roses' to 'sunflowers'" without naming a tool. Verify ChatGPT calls `set_letter_words` (a first call refused with the words as they are now is expected), the letter then says sunflowers, and it never says the letter has no "roses". Click the card: verify the boxes show the chat's words and the message under the boxes ("The letter's words are changed...") is gone. The sentence the card shares with the chat about its change is expected to stay for the draft's life. Repeat in Claude, where the card's share does not reach the model (HOME-02) and the preview's own text says to call `set_letter_words` first (steering r54; on 2026-10-18, on r53, Claude called nothing and said the letter had no roses). On 2026-10-17 (widgets v89, before this check) ChatGPT called nothing and answered from the preview's words that there were no roses; it worked only when told to call `get_draft_status` first, and the message under the boxes stayed after the catch-up.
+
+     **Run 2026-10-18, ChatGPT web (DEV), after #795 (merge `1836ccf`, widgets v90, steering r52):** passed. Connector "Letter IRL (DEV) v8 no-OIDC", tools refreshed after the deploy, 4dm1n account, Medium effort; draft `d406a1b4-db68-4b34-a13a-550a07540a52` to the test-mode recipient (350 Fifth Avenue). On the card the sentence went in twice ("...roses when you can.Come and see the roses when you can."), and **Update the page** said "The letter's words are changed and its page is drawn again. Nothing has been sent." The composer's Context chip then carried the card's share with the new sentence: "The person changed this letter's words on its Letter IRL card (draft d406a1b4-...) on 2026-10-18 at 03:26:03 UTC, ..., call set_letter_words with the words and wordsVersion last seen ...", and no letter words. Asked "change 'roses' to 'sunflowers'", ChatGPT called `set_letter_words` (its step: "Updated letter words by replacing both "Roses" occurrences with "Sunflowers"") and answered that both occurrences were replaced: words only the card had. Whether a first call was refused is not shown in ChatGPT's step list. Clicking the card: the boxes and the page showed both sunflowers, and the message under the boxes was gone. The later runs, ChatGPT on widgets v94 and Claude on r54, are in the status above.
 4. [ ] On **Delivery**, verify, in order: the Arrives by row (**As soon as possible** pressed; the row labels show in capitals), the Mail row (**First-Class** pressed, while certified mail is on), the Delivery line "USPS First-Class Mail - Mailed in 1-2 business days; usually arrives in 1-2 weeks - USPS timing varies and can take longer.", and the Draft id. Then ask in the chat for a new preview with an arrival date. Verify the new card opens on Delivery, and the summary says "held until <the mail date>".
 5. [ ] Keyboard: Tab into the tabs. Verify the tabs take only one stop in the tab order, the arrow keys move between them, and Home and End jump to Style and Delivery.
 6. [ ] Press **Send Letter**. Verify:
@@ -2066,11 +2086,11 @@ Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v98, s
 
 **Status:** Run on development on 2026-10-18 (UTC), through ChatGPT (DEV) as 4dm1n (no saved signature) and the dev CLI as testlirl02. STATIONERY-02 covers saved designs (#649).
 
-- **Passed:** steps 1 to 5, 7 and 10.
+- **Passed:** steps 1 to 5, 7, 8, 10 and 11.
 - **Step 6** was not run as written: room to write is on in development, so PAGES-01 step 7 stands in for it.
-- **Step 8:** the confirmation page showed the Botanical page, and Monogram (JMS), Celebration ("Happy Birthday, Sam!") and Handwritten letters were sent in test mode. The print checks wait on the owner's PostGrid sign-in.
+- **Step 8:** the confirmation page showed the Botanical page, and the Monogram (JMS), Celebration ("Happy Birthday, Sam!") and Handwritten letters sent in test mode printed as previewed in PostGrid's test PDFs: the JMS ring, the ruled lines, and the confetti right of both address blocks with the headline and the date line. **Recorded:** the test PDF shows the confetti in four distinct tones (black, dark, mid and light grey); how they look on paper needs a physical print.
 - **Step 9** waits: a dated Celebration letter (order 7cdce209) mails on 2026-10-19, and its print's date line is still to read.
-- **Step 11** passed but for two checks: with the flag off, botanical was refused with the step's sentence, classic was accepted, a new preview was Classic though Typewriter was remembered, the card showed no Style row ("Printed in black and white."), `set_stationery` from an old tool list answered "Tool set_stationery not found", Claude's refreshed list had no "Change the stationery", and a Typewriter letter previewed before the switch sent. Not checked: the refreshed previews' inputs (no `stationery`, `monogram` or `headline`); the Typewriter letter's print waits with step 8's.
+- **Step 11:** with the flag off, botanical was refused with the step's sentence, classic was accepted, a new preview was Classic though Typewriter was remembered, the card showed no Style row ("Printed in black and white."), `set_stationery` from an old tool list answered "Tool set_stationery not found", Claude's refreshed list had no "Change the stationery", and a Typewriter letter previewed before the switch sent and printed in Typewriter. The live list, read by a fresh `claude -p` (Claude Code loads a connector's tools when it starts), had no `stationery`, `monogram` or `headline` on the three letter previews and no `set_stationery`.
 - **Found:** ChatGPT drew one card for a reply that made two previews (as observed, the card of the turn's last call; ChatGPT's behaviour, not ours, and not filed); and a letter sealed in the studio collapsed to a dot (fixed by #809, widgets v95; ENVELOPE-01 step 3 then passed).
 
 **Preconditions:** Development, with `LETTER_IRL_STATIONERY_ENABLED` on (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf` in the API: only our renderer draws a theme. `LETTER_IRL_STUDIO_CARD_ENABLED` is optional (the Style row shows either way). Refresh the ChatGPT (DEV) and Claude connectors so `set_stationery` is listed.
@@ -2196,11 +2216,25 @@ For lengths, use short numbered lines, one to a line with no blank lines. Page 1
 
 ### POSTCARD-01 — Postcard sizes and fronts: 4x6, 11x6, border and greetings (#594)
 
-**Status:** Run on development on 2026-10-18 (UTC), through ChatGPT (DEV) as 4dm1n and the dev CLI as testlirl02. COLLAGE-01 covers collages.
+**Status:** Run on development on 2026-10-18 (UTC), through ChatGPT (DEV) as 4dm1n, and the dev CLI and the development website as testlirl02. COLLAGE-01 covers collages.
 
-- **Passed:** steps 1 to 8. Step 7's caption case now starts from an 11x6: the 6x9 and 4x6 fronts share the same 3:2 proportion, so no caption fits a 6x9 but not a 4x6, while an 11x6 is wider for the same height; 28 W fit an 11x6, and `set_postcard_style` to `6x9` answered "The postcard's caption is too long for its line on the front of a 6x9 postcard: about 24 of its 28 characters fit. To change the size, give layout border and a shorter caption with it."
-- **Step 9:** the 4x6 gift refusal passed. The rest waits on a gift letter (a 6x9 gift postcard's maker and its `6x4` refusal, and the gift fronts): 4dm1n's was sent in ENVELOPE-01 step 6 and testlirl02 has none, so the next run needs a new grant.
-- **Step 10** waits on the Stripe test card, and **step 11** follows it.
+- **Passed:** steps 1 to 8 and 10. Step 7's caption case now starts from an 11x6: the 6x9 and 4x6 fronts share the same 3:2 proportion, so no caption fits a 6x9 but not a 4x6, while an 11x6 is wider for the same height; 28 W fit an 11x6, and `set_postcard_style` to `6x9` answered "The postcard's caption is too long for its line on the front of a 6x9 postcard: about 24 of its 28 characters fit. To change the size, give layout border and a shorter caption with it."
+- **Step 9** passed through the tools, using testlirl02's gift letter.
+  - The 4x6 gift refusal matched.
+  - A 6x9 gift postcard previewed with a border front and took a greetings front.
+  - `set_postcard_style` to `6x4` answered the step's sentence.
+  - Not checked: the gift maker's plain size line, on a card.
+- **Step 10:** two postcards were paid on the development website as testlirl02, and the balance stayed at 5.
+  - A 4x6 greetings ("LEES SUMMIT") at USD 3.99, and an 11x6 border ("The hills, October 2026") at USD 5.99.
+  - In PostGrid's test dashboard both were `ready`, sizes `6x4` and `11x6`, two pages from our PDF.
+  - The fronts matched their previews. The message sat in the back's left part, with PostGrid's address block on the right.
+  - The pages measured 1.47:1 and 1.8:1 (6.25 x 4.25 in and 11.25 x 6.25 in).
+  - The orders' products are not logged by name; the Stripe amounts stand for them.
+- **Step 11** passed through the tools, the live list read by a fresh `claude -p`. Both flags were turned back on.
+  - Sizes off on the API and maintenance: `size` took `6x9` alone, a `6x4` sent anyway was refused by the input check, and `set_postcard_style` to `6x4` said "The size must be 6x9.".
+  - Layouts off as well: `layout`, `caption`, `place` and `set_postcard_style` were gone.
+  - A layout sent anyway got the step's sentence, and the old list's call answered "Tool set_postcard_style not found".
+  - Not run: the maker without size buttons, on a card, and a postcard paid before the switch (none was held).
 
 **Preconditions:** Development.
 - **API and maintenance:** `LETTER_IRL_POSTCARD_SIZES_ENABLED` (off unless set), `JIT_PURCHASE_ENABLED=true`, and `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and `STRIPE_JIT_POSTCARD_11X6_PRICE_ID` set to the Stripe test prices from `scripts/create-option-prices.ts` (USD 3.99 and USD 5.99).
@@ -2269,14 +2303,25 @@ The tools name sizes the PostGrid way: `6x4` is the 4x6 and `6x11` is the 11x6.
 
 ### ENVELOPE-01 — The envelope reveal on the letter card and the confirmation page (#576)
 
-**Status:** Run on development on 2026-10-18 (UTC) in ChatGPT (DEV) as 4dm1n on widgets v95.
+**Status:** Run on development on 2026-10-18 (UTC) in ChatGPT (DEV) as 4dm1n on widgets v95, then in Claude on the web (v96) and on the development website as testlirl02.
 
-- **Passed:** steps 3 to 6. Step 3: the sealed card shows a cream envelope with both addresses in its windows, a stamp outline and **Show the letter**; on v94 it collapsed to a dot in the studio (fixed by #809).
+- **Passed:** steps 3 to 6, 8, 10 and 11. Step 3: the sealed card shows a cream envelope with both addresses in its windows, a stamp outline and **Show the letter**; on v94 it collapsed to a dot in the studio (fixed by #809).
 - **Steps 1 and 2** wait on someone watching: the opening takes under a second and was not caught in screenshots, though the settled card was right.
 - **Step 7** (reduced motion) waits on a run with the system setting changed.
-- **Step 8** and **step 10** wait on a funded testlirl02.
+- **Step 8** (Claude, v96) passed.
+  - **Send Letter** sealed the card: both addresses, the stamp outline, **Show the letter**.
+  - **Schedule Letter** sealed a dated one, with **Scheduled** and **Cancel this letter**.
+  - The postcard card loads no envelope script, so a postcard has none.
+- **Step 10** (website, testlirl02, at desktop width and at 375 px) passed.
+  - The page sat in its envelope box.
+  - A send refused after a word change in the chat said the letter had changed, and did not play the opening again.
+  - **Send this letter** sealed the envelope, showing the return address and both of the recipient's address lines ("350 5TH AVE", "SUITE 3300").
+  - A dated letter sealed on **Schedule this letter** at 375 px, with no sideways scroll.
+  - Opened again, the pages read "This letter has already been sent." and "This letter is already scheduled.", with no envelope.
+  - A Pay & Send letter showed its envelope box before paying, and none on the return from Stripe. A postcard's page has none.
+  - Not watched: the sub-second opening (steps 1 and 2), and reduced motion (step 7).
 - **Step 9:** a reopened conversation shows the kept-order card ("With the printer", the order, "This letter was sent to the printer from this card."), unsealed. The paid case waits on the Stripe test card.
-- **Step 11** passed but for its PDF comparison, which waits on PostGrid: with the flag off, a new letter preview in ChatGPT showed its page and, sent from the card, stayed a page (no seal); the confirmation page was opened and its `/api/sends` answer carried no `envelopeReveal`, so the page's envelope was not turned on (its sub-second opening was not watched either way). With the flag back on, `envelopeReveal: true` returned.
+- **Step 11** passed. The Botanical letter sent with the reveal on printed as previewed in PostGrid's test PDF. With the flag off, a new letter preview in ChatGPT showed its page and, sent from the card, stayed a page (no seal); the confirmation page was opened and its `/api/sends` answer carried no `envelopeReveal`, so the page's envelope was not turned on (its sub-second opening was not watched either way). With the flag back on, `envelopeReveal: true` returned.
 
 The envelope is drawn on the letter card and on the website's confirmation page (website #77): nothing prints differently, and postcards have none.
 
@@ -2859,9 +2904,10 @@ code and an audit row.
 
 ### SCHEDULE-01 — An arrival date on the card, scheduled, then cancelled (#535)
 
-**Status:** Run on development on 2026-10-18 (UTC) in ChatGPT (DEV) as 4dm1n.
+**Status:** Run on development on 2026-10-18 (UTC) in ChatGPT (DEV) as 4dm1n and testlirl02, and in Claude on the web and on
+the development website as testlirl02.
 
-- **Passed:** steps 1, 2, 4, 5, 6 and 8. Step 2: on v95 the date was set from the chat (the card caught up when
+- **Passed:** steps 1, 2 and 4 to 9, and step 3 but for the picker opened from the keyboard. Step 2: on v95 the date was set from the chat (the card caught up when
   clicked) and **As soon as possible** on the card put the note and the button back; on v96 a typed date changed
   the note ("Mails Tue, Oct 27 · cancel free until then") and the Delivery line. Steps 4 and 5: scheduling took one
   letter from the balance (38 to 36 credits in the API log, two credits to a letter) and cancelling gave it back.
@@ -2869,9 +2915,29 @@ code and an audit row.
 - **Step 3** failed on widgets v95: a typed date could not be set. Chrome sent the dates typing makes on the way
   (0002-11-05, 2026-01-05), which the card set and the server refused, and in ChatGPT the card's redraw at each key
   wiped the parts typed. Fixed by #810 (widgets v96). On v96, 11/05/2026 typed part by part and Enter set the date
-  once (one `set_arrival_date`). The rest of step 3 waits on a run: a typed date before the earliest, the picker
-  opened from the keyboard, and typing then clicking Send.
-- **Steps 7 and 9** wait on a funded testlirl02.
+  once (one `set_arrival_date`). Also on v96 (ChatGPT, testlirl02):
+  - 10/20/2026, before the earliest, typed key by key then Enter: the card said "That date can't be met any more.
+    The earliest on offer is now Wed, Oct 28." and kept its dates.
+  - A date typed, then **As soon as possible** clicked at once: the first click set the typed date, and the second
+    put As soon as possible back.
+  - Not run: the picker opened from the keyboard. Alt+Down opened it, but the test browser passes neither clicks
+    nor keys to Chrome's picker, so it needs someone at a real browser.
+- **Step 7** (Claude, v96) passed.
+  - The dated card opened on Delivery with 11/06/2026, "Mails Wed, Oct 28 · cancel free until then" and
+    **Schedule Letter**, and scheduled.
+  - Reopened, it showed **Scheduled**, **Cancel this letter** and the order.
+  - Found: cancelled there, its note still said "This letter has already been sent, to go to the printer on its
+    mail date." Fixed by #812 (widgets v97): on v97 (2026-10-19), once cancelled, the reopened card's note read "This letter was sent with a date, then cancelled. Nothing will be mailed."
+- **Step 9** (website) passed.
+  - The dashboard row read "Mails Thu, Oct 29 · aims to arrive by Mon, Nov 9" with **Cancel**.
+  - **Your Letters** showed it as Scheduled, with its dates, **Cancel**, and the journey at **Scheduled to mail**.
+  - **Cancel**, then **Yes, cancel it**, answered "Cancelled. The letter it cost is back in the balance. You have
+    4 letters and 1 gift letter."
+  - The dated confirm page named the mail date, "cancel free until it goes to the printer" and **Schedule this
+    letter**. Opened again, it read "This letter is already scheduled.", and after a cancel "This letter was
+    cancelled."
+  - Found: a Pay & Send letter held for its date read "This letter is already scheduled." straight back from
+    Stripe. Fixed by website #79: "Paid. We'll print your letter Wed, Oct 21 and mail it."
 
 Before that: not run end to end. Each scheduled send uses a letter of the development balance (or a gift
 letter) and gives it back on cancel; a send left scheduled goes to PostGrid test mode on its mail date.
