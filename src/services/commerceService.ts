@@ -2073,7 +2073,7 @@ async function processCheckoutSessionEvent(
       );
       // After the resolution above: the alerts this raises are keyed on the
       // same events, and stay open.
-      const applied = isDispute
+      const applied = false && isDispute
         ? await applyRecoveredDisputes(client, order, committedIntent, unmatchedMoney.rows)
         : undefined;
       await recordOrderEvent(client, order.order_id, 'stripe.money_event_recovered',
