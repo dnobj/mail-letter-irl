@@ -217,4 +217,8 @@
 // can change the words on the card unseen, and to call set_letter_words with the words and wordsVersion last seen
 // before saying a word is or is not in the letter (STUDIO-01, DEV 2026-10-18: Claude answered from the preview's words,
 // which r52's description alone did not stop; what the card shares does not reach Claude's model).
-export const STEERING_COPY_REV = 54;
+// r55: where the app shows our cards, set_postcard_style's description says the person can change the size and front
+// on the postcard card, unseen by the model, so it gives only what is to change (a size or front given again as last
+// seen would undo theirs), and each answer says the style the postcard has now. The postcard card, like the letter
+// card, now tells the model of its own changes in what it shares. Apps without our cards keep the words they had.
+export const STEERING_COPY_REV = 55;
