@@ -2060,6 +2060,9 @@ async function processCheckoutSessionEvent(
          WHERE order_id = $1`,
         [order.order_id, session.id, intentId, blockedStatus]
       );
+      const applied = isDispute
+        ? await applyRecoveredDisputes(client, order, committedIntent, unmatchedMoney.rows)
+        : undefined;
       await client.query(
         `UPDATE stripe_webhook_events SET order_id = $2, processing_status = 'processed',
            resolved_at = NOW() WHERE event_id = ANY($1::varchar[])`,
@@ -2071,11 +2074,6 @@ async function processCheckoutSessionEvent(
          WHERE source_event_id = ANY($1::varchar[]) AND status <> 'resolved'`,
         [unmatchedMoney.rows.map(row => row.event_id)]
       );
-      // After the resolution above: the alerts this raises are keyed on the
-      // same events, and stay open.
-      const applied = isDispute
-        ? await applyRecoveredDisputes(client, order, committedIntent, unmatchedMoney.rows)
-        : undefined;
       await recordOrderEvent(client, order.order_id, 'stripe.money_event_recovered',
         order.status, blockedStatus, { eventCount: unmatchedMoney.rows.length, ...applied });
       return { duplicate: false, orderId: order.order_id, status: blockedStatus };
