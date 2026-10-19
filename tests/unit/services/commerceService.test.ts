@@ -2459,6 +2459,8 @@ describe('commerceService', () => {
       } as any)).rejects.toMatchObject({ diagnosticClass: 'dispute_order_committed_meanwhile' });
       const prior = all().findIndex(([sql]) => sql.includes('SELECT status, resolved_at, user_id FROM stripe_disputes'));
       const recheck = all().findIndex(([sql]) => sql.includes('SELECT 1 FROM orders WHERE stripe_payment_intent_id = $1'));
+      // After the dispute's row is locked: that is what makes the order visible.
+      expect(prior).toBeGreaterThan(-1);
       expect(recheck).toBeGreaterThan(prior);
       expect(all()[recheck][1]).toEqual(['pi-1']);
       expect(calls('INSERT INTO stripe_disputes')).toHaveLength(0);
