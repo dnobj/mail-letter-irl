@@ -361,6 +361,112 @@ describe('the bridge in an MCP Apps host', () => {
     without.window.close();
   });
 
+  /**
+   * A page in a 684 px frame whose scroll bar, while there, narrows it to 669 px; the studio's page then lays out
+   * shorter, as Claude's letter card did (563 px with the bar, 571 px without; STUDIO-01, DEV 2026-10-18).
+   */
+  function barredPage(window: any, state: { bar: boolean; scrollTop?: number }) {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 684 });
+    const barShown = () => state.bar && window.document.documentElement.style.overflowY !== 'hidden';
+    Object.defineProperty(window.Element.prototype, 'clientWidth', { configurable: true, get: () => (barShown() ? 669 : 684) });
+    // A page scrolled down, as a home card capped by its host can be: laid out with the bar hidden, the page is
+    // shorter here, and the browser clamps the scroll position to it.
+    Object.defineProperty(window.Element.prototype, 'scrollTop', {
+      configurable: true,
+      get: () => state.scrollTop ?? 0,
+      // A position set while the bar is hidden is clamped to the shorter page too.
+      set: (value: number) => { state.scrollTop = !barShown() && state.bar ? Math.min(value, 8) : value; }
+    });
+    window.Element.prototype.getBoundingClientRect = () => {
+      if (!barShown() && state.bar) state.scrollTop = Math.min(state.scrollTop ?? 0, 8);
+      return { height: barShown() ? 562.53 : 571.27 } as DOMRect;
+    };
+  }
+
+  /** How many times the page's style changed since the last call. */
+  function styleChanges(window: any): () => number {
+    let count = 0;
+    const observer = new window.MutationObserver((records: unknown[]) => { count += records.length; });
+    observer.observe(window.document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    return () => {
+      count += observer.takeRecords().length;
+      const seen = count;
+      count = 0;
+      return seen;
+    };
+  }
+
+  it('tells an MCP Apps host the height the page needs with no scroll bar, and puts the overflow back', async () => {
+    let observed: (() => void) | undefined;
+    const state = { bar: true, scrollTop: 40 };
+    const sent: Message[] = [];
+    const parent = { postMessage: (message: Message) => sent.push(JSON.parse(JSON.stringify(message))) };
+    const dom = new JSDOM(bridgePage('<div></div>'), {
+      runScripts: 'dangerously',
+      beforeParse(window: any) {
+        Object.defineProperty(window, 'parent', { value: parent, configurable: true });
+        window.ResizeObserver = class {
+          constructor(callback: () => void) { observed = callback; }
+          observe() {}
+        };
+        barredPage(window, state);
+      }
+    });
+    const window = dom.window as any;
+    const root = window.document.documentElement;
+    const changes = styleChanges(window);
+    const sizes = () => sent.filter(message => message.method === 'ui/notifications/size-changed').map(message => message.params.height);
+    const init = sent.find(message => message.method === 'ui/initialize')!;
+    window.dispatchEvent(new window.MessageEvent('message', { data: { jsonrpc: '2.0', id: init.id, result: { hostContext: {} } }, source: parent }));
+    await flush();
+    // 571.27 rounded up, not the 563 it measures with the bar; the bar hidden to measure, then shown again.
+    expect(sizes()).toEqual([572]);
+    expect(root.style.overflowY).toBe('');
+    expect(changes()).toBe(2);
+    // Scrolled down, it stays where it was.
+    expect(state.scrollTop).toBe(40);
+    // With no bar, the page is measured as it is, and its style is left alone.
+    state.bar = false;
+    observed!();
+    expect(sizes()).toEqual([572]);
+    expect(changes()).toBe(0);
+    dom.window.close();
+  });
+
+  it('tells ChatGPT the height the page needs with no scroll bar, and leaves a hidden overflow hidden', () => {
+    let observed: (() => void) | undefined;
+    const told: number[] = [];
+    const state = { bar: true };
+    const dom = new JSDOM(bridgePage('<div></div>'), {
+      runScripts: 'dangerously',
+      beforeParse(window: any) {
+        window.openai = { notifyIntrinsicHeight: (height: number) => { told.push(height); return Promise.resolve(); } };
+        window.ResizeObserver = class {
+          constructor(callback: () => void) { observed = callback; }
+          observe() {}
+        };
+        barredPage(window, state);
+        // No overflow for the guard of #706 to hide here.
+        Object.defineProperty(window.Element.prototype, 'scrollHeight', { configurable: true, get: () => 0 });
+        Object.defineProperty(window.Element.prototype, 'clientHeight', { configurable: true, get: () => 0 });
+      }
+    });
+    const window = dom.window as any;
+    const root = window.document.documentElement;
+    expect(told).toEqual([572]);
+    expect(root.style.overflowY).toBe('');
+    // Hidden already (the guard's own doing): measured as it is, and not shown again.
+    root.style.overflowY = 'hidden';
+    const changes = styleChanges(window);
+    told.length = 0;
+    window.Element.prototype.getBoundingClientRect = () => ({ height: 580.2 }) as DOMRect;
+    observed!();
+    expect(told).toEqual([581]);
+    expect(root.style.overflowY).toBe('hidden');
+    expect(changes()).toBe(0);
+    dom.window.close();
+  });
+
   it("hides an overflow of a pixel or two in ChatGPT's frame, and keeps a real one scrollable (#692)", () => {
     let observed: (() => void) | undefined;
     let scrollHeight = 699;
