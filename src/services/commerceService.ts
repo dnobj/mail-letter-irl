@@ -3710,7 +3710,7 @@ async function applyRecoveredDisputes(
         latestEvent.get(dispute.dispute_id),
         order.order_id,
         closed ? 'stripe_dispute_closed' : 'stripe_dispute_created',
-        closed ? (dispute.status === 'lost' ? 'critical' : dispute.status === 'won' ? 'info' : 'warning') : 'warning',
+        'warning',
         JSON.stringify({
           disputeStatus: dispute.status,
           reason: dispute.reason,
