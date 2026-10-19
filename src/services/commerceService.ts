@@ -3708,7 +3708,7 @@ async function applyRecoveredDisputes(
        ON CONFLICT (source_event_id, alert_type) DO NOTHING`,
       [
         latestEvent.get(dispute.dispute_id),
-        order.order_id,
+        null,
         closed ? 'stripe_dispute_closed' : 'stripe_dispute_created',
         closed ? (dispute.status === 'lost' ? 'critical' : dispute.status === 'won' ? 'info' : 'warning') : 'warning',
         JSON.stringify({
