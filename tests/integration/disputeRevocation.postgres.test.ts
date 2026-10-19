@@ -1101,6 +1101,7 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(result).toMatchObject({ orderId, status: 'disputed' });
       expect((await readAccount(userId)).sends_blocked_reason).toBe('payment_disputed');
       expect((await readDispute(disputeId)).user_id).toBe(userId);
+      expect(await readAlertFunded(orderId)).toEqual(['false']);
     }, 60_000);
 
     it("owns a closed dispute on an order whose intent was committed", async () => {
@@ -1118,6 +1119,7 @@ describePostgres('dispute and refund pack revocation', () => {
       expect(await readDisputeAlerts(orderId)).toEqual([
         { alert_type: 'stripe_dispute_closed', severity: 'critical', status: 'open', resolution_code: null }
       ]);
+      expect(await readAlertFunded(orderId)).toEqual(['false']);
     }, 60_000);
 
     it('leaves a dispute whose own event already matched the order as that event left it', async () => {

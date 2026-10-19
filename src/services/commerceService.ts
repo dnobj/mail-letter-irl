@@ -3611,8 +3611,8 @@ async function blockAccountSends(
  * here, as the matched path would run them: its row takes the order's account,
  * which processDisputeEvent reads as "its effects ran" (its next loss event
  * records only, and unblockAccountSends and countStandingDisputes count it).
- * An order still at Checkout with no intent committed has had nothing granted
- * or queued, so the block is the whole of it. Any other order may hold funded
+ * An order still at Checkout has had nothing granted or queued, so the block
+ * is the whole of it. Any other order may hold funded
  * mail and a pack's lots, which the matched path's own steps take. A dispute
  * already the account's had them run when an event of its own matched this
  * order, or when an earlier checkout event recovered it.
@@ -3681,7 +3681,9 @@ async function applyRecoveredDisputes(
   await client.query('UPDATE orders SET stripe_dispute_status = $2 WHERE order_id = $1', [
     order.order_id, shown.status
   ]);
-  const nothingFunded = committedIntent === null && order.status === 'checkout_pending';
+  // Read under the order's lock. A checkout records the intent before it grants,
+  // so an order still at Checkout has had nothing granted, intent or not.
+  const nothingFunded = order.status === 'checkout_pending';
   if (!nothingFunded) {
     for (const dispute of disputes) {
       await stopFundedMailBeforeFinancialReversal(
