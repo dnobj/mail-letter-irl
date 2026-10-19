@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-plugin-extensions="on-request">
   <head>
     <meta charset="utf-8" />
     <title>PostcardPreviewCard</title>
@@ -324,7 +324,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t40</p>
+      <p class="rev">postcard t41</p>
     </div>
 
     <!-- The postcard maker (#580): widgets/shared/studio.js lays the card out
@@ -415,6 +415,19 @@
       // Claude and VS Code. Data may not be available immediately, so the
       // card re-renders on host.onChange.
       const host = window.letterIrlHost;
+      // The draft last told to the conversation, and the queue of those updates (#650: shareSelection).
+      let sharedDraftId = "";
+      let shareChain = Promise.resolve();
+      let sharedAt = 0;
+      // The card's changes the last share told (cardEditFor), so a new one is shared at once.
+      let sharedEdit = "";
+      // A share asked for by a use of the card too soon after the last, made when the wait is over.
+      let shareLater = false;
+      let lastUseAt = 0;
+      // The time the last share carried, so a delayed share never goes back in time.
+      let carriedAt = 0;
+      // The draft get_draft_status last answered "ready" for (#650 review round 1).
+      let statusReadyFor = null;
       // Our renderer's pages, and the cleaner that keeps the card safe from
       // them (widgets/shared/pages.js, #534). Were that script not to run, the
       // card shows no page, never an uncleaned one, and falls back to its own.
@@ -511,6 +524,7 @@
         },
         onChange(change) {
           arrivalChange = change;
+          cardEdited(change?.draftId, "arrival date");
           render();
         },
         onBusy() {
@@ -897,6 +911,8 @@
             }
             const page = result?._meta?.previewHtml;
             adoptMakerChange(draftId, data, page, true);
+            // Page or no page, the draft has it: the model, which never sees the card's own calls, is told.
+            cardEdited(draftId, frontChange ? "front" : "size");
             // Its version once its page is drawn (#695), and only when made to the version the card shows; without a page
             // the card shows the last, and keeps its version.
             if (typeof page === "string" && page) takeEditVersion(draftId, data.contentVersion, data.contentVersionBefore);
@@ -1282,7 +1298,8 @@
       // second postcard, so what this card has done is kept in widgetState,
       // and a card that sent its postcard or started paying for it never
       // offers the preview again (the pack card learned this in PAY-05). Only
-      // identifiers are kept.
+      // identifiers are kept, and what the person changed on the card
+      // (changedOnCard).
       const SAVED_STATE_VERSION = 1;
       // This card's own copy of what it keeps, so consecutive saves build on
       // each other even when the host applies widgetState asynchronously.
@@ -1311,11 +1328,58 @@
 
       function keep(patch) {
         saved = { ...(saved || readSaved() || {}), ...patch, v: SAVED_STATE_VERSION };
+        // A send or a payment this card made takes the draft back from the conversation (#650).
+        shareSelection();
         if (typeof host.setWidgetState !== "function") return;
         const snapshot = saved;
         Promise.resolve()
           .then(() => host.setWidgetState(snapshot))
           .catch(() => {});
+      }
+
+      // ---- Changes made on the card, told to the model --------------------
+      //
+      // The model sees none of the card's own calls: the letter card's words changed there went unseen, and ChatGPT
+      // answered from the preview's (DEV, 2026-10-17, #795). A postcard's size, front and arrival date are changed here
+      // the same way, so each change the server accepts is kept as changedOnCard, { draftId, what, at, note }: what was
+      // changed (never the message, a caption or a place, nor an address), when (the latest change), and in note a
+      // sentence for the model. It goes in widgetState, which ChatGPT may show the model, and in the draft this card
+      // shares (shareSelection). It is kept for the draft's life, a reopened card's too, as the letter card's is: taking
+      // part of it out once the chat had caught up was tried there and taken out again, as each of three review rounds
+      // found a way it went wrong (#795).
+      const CARD_EDITS = ["size", "front", "arrival date"];
+      function cardEditNote(draftId, what, at) {
+        const named = what.length > 1 ? what.slice(0, -1).join(", ") + " and " + what[what.length - 1] : what[0];
+        const stamp = at.slice(0, 10) + " at " + at.slice(11, 19) + " UTC";
+        // One time for all of them: the latest change's.
+        let note =
+          "The person changed this postcard's " + named + " on its Letter IRL card (draft " + draftId + ")" +
+          (what.length > 1 ? ", most recently on " : " on ") + stamp +
+          ", and the chat does not see the card's changes: what it last saw of them may be out of date.";
+        if (what.includes("size") || what.includes("front")) {
+          // set_postcard_style keeps what it is not given: given again as last seen, a size or front undoes the change.
+          note +=
+            " To change its style, give set_postcard_style only what is to change, since a size or front given again as " +
+            "last seen would undo the person's change; its answer says the style the postcard has.";
+        }
+        return note;
+      }
+      function cardEdited(draftId, kind) {
+        if (typeof draftId !== "string" || !draftId || !CARD_EDITS.includes(kind)) return;
+        const before = saved?.changedOnCard?.draftId === draftId && Array.isArray(saved.changedOnCard.what) ? saved.changedOnCard.what : [];
+        // In one order whatever the order of the changes, so the note reads the same for the same changes.
+        const what = CARD_EDITS.filter((edit) => edit === kind || before.includes(edit));
+        const at = new Date().toISOString();
+        keep({ changedOnCard: { draftId, what, at, note: cardEditNote(draftId, what, at) } });
+      }
+      // The note for this draft, or none: written afresh from what was changed and when, so a reopened card's kept
+      // change is said in this card's words.
+      function cardEditFor(draftId) {
+        const edit = saved?.changedOnCard;
+        if (!edit || edit.draftId !== draftId || !Array.isArray(edit.what)) return "";
+        const what = CARD_EDITS.filter((kind) => edit.what.includes(kind));
+        const at = typeof edit.at === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(edit.at) ? edit.at : "";
+        return what.length && at ? cardEditNote(draftId, what, at) : "";
       }
 
       function keptOrderId(kept) {
@@ -1544,20 +1608,20 @@
         return sendPage !== null && sendPage.draftId === currentDraftId;
       }
 
-      // What the server says became of the host's draft (#474), in a host
-      // that keeps no state for this card: MCP Apps has no widgetState, and
-      // Claude hands a reopened card the preview's result again, which would
-      // offer Send for mail that has gone. ChatGPT keeps the card's own state
-      // instead, so the card never asks there. {draftId, status, orderId,
-      // schedule, orderStatus, cancellable} once the draft turns out to be
-      // sent or expired.
+      // What the server says became of the host's draft (#474): MCP Apps has
+      // no widgetState, and Claude hands a reopened card the preview's result
+      // again, which would offer Send for mail that has gone. ChatGPT keeps
+      // the card's own state, but with the Plugin Extensions handshake open it
+      // gave a reopened letter card none (#676), and this card opens it too to
+      // share its draft (shareSelection), so it asks in every host, as the
+      // letter card does. {draftId, status, orderId, schedule, orderStatus,
+      // cancellable} once the draft turns out to be sent or expired.
       let draftState = null;
       const draftStateAsked = new Set();
 
       // force (#695): asked again after a send refused for a change since, in every host, the answer is taken
       // whatever this card has set, and its version with it.
       function askDraftState(draftId, force) {
-        if (!force && typeof host.setWidgetState === "function") return;
         if (typeof host.callTool !== "function") return;
         if (typeof draftId !== "string" || !draftId || (!force && draftStateAsked.has(draftId))) return;
         draftStateAsked.add(draftId);
@@ -1576,6 +1640,7 @@
             // A draft still ready keeps its preview, with the dates it has
             // now: this card may have changed them since that preview (#535).
             if (answer.status === "ready") {
+              statusReadyFor = draftId;
               // The size and front it has now, with its page and price
               // (#594): the maker may have changed them since this preview.
               const statusPage = result?._meta?.previewHtml;
@@ -1773,6 +1838,7 @@
           sendButton.disabled = false;
           document.getElementById("send-button-text").textContent = ANOTHER_COPY_SEND_LABEL;
           sendInProgress = false;
+          shareSelection();
         } else {
           const payButton = document.getElementById("pay-send-button");
           payButton.classList.remove("loading");
@@ -2090,7 +2156,13 @@
         pane.appendChild(page);
       }
 
+      // Draws the card, then tells the conversation which draft it shows (#650).
       function render() {
+        renderCard();
+        shareSelection();
+      }
+
+      function renderCard() {
         applyTheme();
         adoptKeptState();
         if (keptOrderShown()) {
@@ -2688,6 +2760,8 @@
 
           sendInProgress = false;
         } finally {
+          // A send that did not go out shares its draft again; one that did has taken it back (#650).
+          shareSelection();
           // The maker's header and footer say what the send did (#580).
           refreshStudio();
         }
@@ -3340,6 +3414,86 @@
           if (!settled) scheduleStatusPoll();
         });
       });
+
+      // The draft this card shows, told to the conversation by itself (#650), as the letter card tells its own: only
+      // where the host takes model context and the preview is flagged for it (the home's selection context), and only a
+      // draft known to be ready, which is after get_draft_status says "ready": a reopened card may show a preview long
+      // since sent. A draft this card made itself (a retry preview) is ready by its making. The share is taken back (an
+      // empty update) once the draft stops being ready, and it is made again, with a later time, when the person uses the
+      // card: each card is its own instance, so several cards may share at once, and the time tells the model which one
+      // the person showed or touched last. What the person changed on the card is said with the draft (cardEditFor), and
+      // a change shares again at once. Each update replaces this card's last (ui/update-model-context is idempotent);
+      // they go one after another, each given up after 10 seconds so a host that never answers cannot hold the rest
+      // back. Failures say nothing on the card: there is nothing the person could do about them.
+      const SHARE_TIMEOUT_MS = 10000;
+      const RESHARE_AFTER_MS = 10000;
+      function shareSelection(touched = false, usedAt = 0, immediate = false) {
+        const flagged = currentMeta().modelContextEnabled === true;
+        const asks = typeof host.callTool === "function";
+        const confirmed = !asks || statusReadyFor === currentDraftId || retryResult?.output?.draftId === currentDraftId;
+        // Not while a send is out or after it (sendInProgress stays set once sent), nor once a checkout is tracked, nor
+        // for a reopened card's kept order, nor once the person was sent to the confirmation page. A draft the server
+        // says was sent or expired is never confirmed ready: get_draft_status answers once, and finally.
+        const ready =
+          flagged && typeof currentDraftId === "string" && currentDraftId && confirmed &&
+          cardIsShowingDraft() && !keptOrderShown() && !sendPageShown();
+        // In ChatGPT what carries model context opens only when there is a draft to share and no other way to share it;
+        // its answer redraws the card, which shares then (#665, #675).
+        if (ready && typeof host.updateModelContext !== "function" && typeof host.openPluginExtensions === "function") {
+          host.openPluginExtensions();
+        }
+        if (typeof host.updateModelContext !== "function") return;
+        const draftId = ready ? currentDraftId : "";
+        const edit = draftId ? cardEditFor(draftId) : "";
+        const now = Date.now();
+        // The time a share carries is the time of the use that asked for it, so a share that waited still says when.
+        if (touched && !usedAt) lastUseAt = now;
+        const at = touched ? usedAt || now : now;
+        const same = draftId === sharedDraftId && edit === sharedEdit;
+        const again = touched && draftId && same && (immediate || now - sharedAt >= RESHARE_AFTER_MS);
+        // A use too soon after the last share is not lost: one share follows when the wait is over, so the card the
+        // latest use always carries the latest time.
+        if (touched && draftId && same && !again) {
+          if (!shareLater) {
+            shareLater = true;
+            setTimeout(() => {
+              shareLater = false;
+              // A share made meanwhile already carries this use, or a later one.
+              if (lastUseAt > carriedAt) shareSelection(true, lastUseAt);
+            }, Math.max(0, RESHARE_AFTER_MS - (now - sharedAt)));
+          }
+          return;
+        }
+        if (same && !again) return;
+        sharedDraftId = draftId;
+        sharedEdit = edit;
+        sharedAt = now;
+        carriedAt = at;
+        // A sentence, not JSON: ChatGPT shows what a card shares to the person, in a chip in the message box (#668). The
+        // time is UTC to the second, written out, so the model can still tell which card shared last. It does not say the
+        // draft is ready: it may have been sent from another card, or on the confirmation page, since.
+        const stamp = new Date(at).toISOString();
+        const content = draftId
+          ? [{ type: "text", text:
+              "Shared by a Letter IRL postcard card on " + stamp.slice(0, 10) + " at " + stamp.slice(11, 19) + " UTC: the " +
+              "card shows the postcard draft " + draftId + ". Several Letter IRL cards may each share a draft; the one " +
+              "shared latest is most likely the one the person means, so ask if unsure. It may have been sent or have " +
+              "expired since: a Letter IRL tool given this draftId says so." + (edit ? " " + edit : "") }]
+          : [];
+        shareChain = shareChain
+          .then(() => Promise.race([
+            host.updateModelContext({ content }),
+            new Promise((resolve) => setTimeout(resolve, SHARE_TIMEOUT_MS)),
+          ]))
+          .catch(() => {});
+      }
+      // Using the card shows which draft the person means.
+      // A click, not a pointer going down: scrolling past a card on a phone is not a use of it. A click shares at once,
+      // since clicks are few; keys, which come many at a time while someone types, wait their turn. Both are heard as
+      // they bubble, after the card's own handler: a press of Send has already started the send, so it takes the
+      // draft back rather than sharing it again.
+      document.addEventListener("click", () => shareSelection(true, 0, true));
+      document.addEventListener("keydown", () => shareSelection(true));
 
       // Initial render (will show loading state)
       render();

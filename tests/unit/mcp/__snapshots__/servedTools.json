@@ -3,902 +3,902 @@
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "all on": {
-    "manifest": "b281ff02377d0764",
+    "manifest": "17919a8b083bab74",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "dc9dc34a41d6a9a2"
+      "digest": "2056883012e9e159"
     },
     "claude": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status upload_photo_chunk set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "ffcdbfce024ada1e"
+      "digest": "662890d236d2d664"
     },
     "claude_code": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "a72f2dbc4ab2f93a"
+      "digest": "ff573690aa127e3c"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "5c2ffba18797eb88"
+      "digest": "7d6f3b7f715f12ca"
     },
     "token": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "59066b2b39e4eee1"
+      "digest": "0771f4d451f83524"
     }
   },
   "all on, image generation off": {
-    "manifest": "4b8595ec5fe2dfb7",
+    "manifest": "e1b41907a58fa01b",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "edd1a96035cac3c5"
+      "digest": "e69ebcd501a41d4f"
     },
     "claude": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status upload_photo_chunk set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "ffcdbfce024ada1e"
+      "digest": "662890d236d2d664"
     },
     "claude_code": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "a72f2dbc4ab2f93a"
+      "digest": "ff573690aa127e3c"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "a72f2dbc4ab2f93a"
+      "digest": "ff573690aa127e3c"
     },
     "token": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "68bd476b4a1dc11a"
+      "digest": "21f5610dac580258"
     }
   },
   "only LETTER_IRL_SEND_CONFIRMATION_ENABLED": {
     "manifest": "e7552b2e8fb55af5",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d2ac70aa8c63109e"
+      "digest": "758064d70d1a422c"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_send get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "794cd95e9ff18f3d"
+      "digest": "6c848981ea780978"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_send get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "8172b642ebe49750"
+      "digest": "707f3f484fd171b5"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "af01e63fd65af8c1"
+      "digest": "4a6c48ad6233ffc6"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "af01e63fd65af8c1"
+      "digest": "4a6c48ad6233ffc6"
     }
   },
   "only LETTER_IRL_CARD_UPLOAD_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status upload_photo_chunk set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "39790dd7ee5f0ada"
+      "digest": "f672398e02a55dce"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_ARRIVE_BY_ENABLED": {
     "manifest": "9fbb2dbdac09629c",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "ff98bd5b31226f98"
+      "digest": "16e05bea848e881a"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "c5b8d62743049f8e"
+      "digest": "9e056802e2db0874"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "c5b8d62743049f8e"
+      "digest": "9e056802e2db0874"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "8007419a3b017530"
+      "digest": "859854d856c8bd90"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "8007419a3b017530"
+      "digest": "859854d856c8bd90"
     }
   },
   "only LETTER_IRL_STATIONERY_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_PRINT_RENDERER": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_CERTIFIED_MAIL_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only JIT_PURCHASE_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_WORDS_EDITOR_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_ROOM_TO_WRITE_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_POSTCARD_SIZES_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_POSTCARD_LAYOUTS_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_POSTCARD_COLLAGES_ENABLED": {
     "manifest": "4d2a95f9ea44687f",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "71939066b4b78682"
+      "digest": "9f0107b9fa0acc83"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "13998afa3ed7cd7e"
+      "digest": "634cf0886412ae59"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "13998afa3ed7cd7e"
+      "digest": "634cf0886412ae59"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "a2be4b0782337dac"
+      "digest": "f61bc3b51e14ed09"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "a2be4b0782337dac"
+      "digest": "f61bc3b51e14ed09"
     }
   },
   "only LETTER_IRL_ADDRESS_REQUESTS_ENABLED": {
     "manifest": "bb7c3d2aa7d6e210",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_address get_address_request cancel_address_request get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "764dad135df71609"
+      "digest": "513d3819be2b8056"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_address get_address_request cancel_address_request get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "7d8ddc107a19752e"
+      "digest": "b68d80d8a4ba9910"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_address get_address_request cancel_address_request get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "7d8ddc107a19752e"
+      "digest": "b68d80d8a4ba9910"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_address get_address_request cancel_address_request get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "bac7898ca73f15ce"
+      "digest": "5e6f346c4b806802"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_address get_address_request cancel_address_request get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "bac7898ca73f15ce"
+      "digest": "5e6f346c4b806802"
     }
   },
   "only LETTER_IRL_SIGNATURES_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_CUSTOM_STATIONERY_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_HOME_ENABLED": {
     "manifest": "6da322916a19c456",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "04c9a213d42f2634"
+      "digest": "01c4131a19cb9a1c"
     },
     "claude": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "686be99ae8114100"
+      "digest": "2a1f22b730c49591"
     },
     "claude_code": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "686be99ae8114100"
+      "digest": "2a1f22b730c49591"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "72208e5b82d79d4e"
+      "digest": "468de2457af82da7"
     },
     "token": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "72208e5b82d79d4e"
+      "digest": "468de2457af82da7"
     }
   },
   "only LETTER_IRL_GIFT_LETTERS_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_STUDIO_CARD_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "only LETTER_IRL_ENVELOPE_REVEAL_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "claude": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "claude_code": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "32ed29c82c175016"
+      "digest": "aa3e6e60e26e4871"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     },
     "token": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_SEND_CONFIRMATION_ENABLED": {
     "manifest": "e7552b2e8fb55af5",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d2ac70aa8c63109e"
+      "digest": "758064d70d1a422c"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "af01e63fd65af8c1"
+      "digest": "4a6c48ad6233ffc6"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_CARD_UPLOAD_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_ARRIVE_BY_ENABLED": {
     "manifest": "9fbb2dbdac09629c",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "ff98bd5b31226f98"
+      "digest": "16e05bea848e881a"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "8007419a3b017530"
+      "digest": "859854d856c8bd90"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_STATIONERY_ENABLED": {
     "manifest": "b5fd36abef7aff32",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_stationery get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "1259fc6c02117dde"
+      "digest": "3031f8e90a677107"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_stationery get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "0358a799b0f45398"
+      "digest": "1214c1a5bf37d243"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_CERTIFIED_MAIL_ENABLED": {
     "manifest": "73575f78840ebfc0",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_mail_service get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "ce71381639b59169"
+      "digest": "3fa5b1d5db173828"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_mail_service get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "5e7a7d626db13acf"
+      "digest": "19d2b6bc26754878"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_WORDS_EDITOR_ENABLED": {
     "manifest": "a54bca5ab6d2c1a0",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_letter_words get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d4e58cf9be7f6338"
+      "digest": "b49a01dcd0751cbc"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_letter_words get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "bde4410031566820"
+      "digest": "66a348e56cbd0db6"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_ROOM_TO_WRITE_ENABLED": {
     "manifest": "4f9d327281efa15e",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_letter_words get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "b643894e912a4d9c"
+      "digest": "b36165f09498bbb7"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_letter_words get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "c7843696e6d6d3e6"
+      "digest": "c995d59c7daae687"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_POSTCARD_SIZES_ENABLED": {
-    "manifest": "6d38c2b2662b7c32",
+    "manifest": "aaad415d06b17fe8",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_postcard_style get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "aec262e79233a6e0"
+      "digest": "a8373e2928dae1f4"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_postcard_style get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "fed249a23f9cbeec"
+      "digest": "4eb37397e97b7c95"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_POSTCARD_LAYOUTS_ENABLED": {
-    "manifest": "f4977e651817eed6",
+    "manifest": "591527825c61b8d5",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_postcard_style get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "b6b6064823da7c14"
+      "digest": "1791da0fa12a3995"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_postcard_style get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "90c9cd3671072536"
+      "digest": "7890707eea24fb7c"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_POSTCARD_COLLAGES_ENABLED": {
     "manifest": "4d2a95f9ea44687f",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "71939066b4b78682"
+      "digest": "9f0107b9fa0acc83"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "a2be4b0782337dac"
+      "digest": "f61bc3b51e14ed09"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_ADDRESS_REQUESTS_ENABLED": {
     "manifest": "bb7c3d2aa7d6e210",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_address get_address_request cancel_address_request get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "764dad135df71609"
+      "digest": "513d3819be2b8056"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard request_address get_address_request cancel_address_request get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "bac7898ca73f15ce"
+      "digest": "5e6f346c4b806802"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_SIGNATURES_ENABLED": {
     "manifest": "3da204fc15f51f4e",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_signature get_signature clear_signature set_letter_signature get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "c33a875d1abbdea7"
+      "digest": "074a03407c84509e"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_signature get_signature clear_signature set_letter_signature get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "1cb4e9dbe6f58de0"
+      "digest": "9102a877aae1e025"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_CUSTOM_STATIONERY_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_HOME_ENABLED": {
     "manifest": "6da322916a19c456",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "04c9a213d42f2634"
+      "digest": "01c4131a19cb9a1c"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "72208e5b82d79d4e"
+      "digest": "468de2457af82da7"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_GIFT_LETTERS_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_STUDIO_CARD_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "renderer and Pay & Send, and LETTER_IRL_ENVELOPE_REVEAL_ENABLED": {
     "manifest": "f45f9d1166286a40",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "48df1ffcc9589691"
+      "digest": "4b4ab5e9a8abe7c0"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d333f3314ba86706"
+      "digest": "e28bb4a29b5716dd"
     }
   },
   "all on but LETTER_IRL_SEND_CONFIRMATION_ENABLED": {
-    "manifest": "5627b5ce15b6f67f",
+    "manifest": "38f153579115fcc4",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "e06fbf95e26371aa"
+      "digest": "656793d81ef87793"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "977844d72c083ff7"
+      "digest": "5dd41ba27d5c743a"
     }
   },
   "all on but LETTER_IRL_CARD_UPLOAD_ENABLED": {
-    "manifest": "b281ff02377d0764",
+    "manifest": "17919a8b083bab74",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "dc9dc34a41d6a9a2"
+      "digest": "2056883012e9e159"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "5c2ffba18797eb88"
+      "digest": "7d6f3b7f715f12ca"
     }
   },
   "all on but LETTER_IRL_ARRIVE_BY_ENABLED": {
-    "manifest": "b69ebe3794e92623",
+    "manifest": "215c63605243fbf7",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "8baec9432e851425"
+      "digest": "f7a1308e2f869d4e"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "8c7e9d4cfc3a12f6"
+      "digest": "0497fbfcaed8494f"
     }
   },
   "all on but LETTER_IRL_STATIONERY_ENABLED": {
-    "manifest": "85c08efb366a6ff8",
+    "manifest": "ee57eaad91569452",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "266caecca15b7739"
+      "digest": "0ca68fb773d9ab3f"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "ae1f0b5cee78cdd2"
+      "digest": "cf0765601579358e"
     }
   },
   "all on but LETTER_IRL_PRINT_RENDERER": {
     "manifest": "4007358996a89ec0",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_mail_service request_address get_address_request cancel_address_request request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "60e4f942fb3449d6"
+      "digest": "cdfaec03ac854c28"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_mail_service request_address get_address_request cancel_address_request request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "3268fd93ac3c37b4"
+      "digest": "a0dc1b251f815680"
     }
   },
   "all on but LETTER_IRL_CERTIFIED_MAIL_ENABLED": {
-    "manifest": "d300c49bfe1712b0",
+    "manifest": "e507bf05b89399cd",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "3f11f9657c799956"
+      "digest": "8f5acfc303503798"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "6950c00021507929"
+      "digest": "1fa509ec49de1f5d"
     }
   },
   "all on but JIT_PURCHASE_ENABLED": {
-    "manifest": "e8466e72d477dd37",
+    "manifest": "efbe9084c39c2af0",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "426304b32e5c13e9"
+      "digest": "cb76468f37e14e5e"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "a9f5b88d1100fd24"
+      "digest": "8a834957c29028ed"
     }
   },
   "all on but LETTER_IRL_WORDS_EDITOR_ENABLED": {
-    "manifest": "b281ff02377d0764",
+    "manifest": "17919a8b083bab74",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "dc9dc34a41d6a9a2"
+      "digest": "2056883012e9e159"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "5c2ffba18797eb88"
+      "digest": "7d6f3b7f715f12ca"
     }
   },
   "all on but LETTER_IRL_ROOM_TO_WRITE_ENABLED": {
-    "manifest": "aa0f6a6be3dce9db",
+    "manifest": "e6a54930da9003d3",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "3853ae3d06e45550"
+      "digest": "897fac9b2f62252e"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "5a3573af40fb0823"
+      "digest": "0c4fc0f3085ece65"
     }
   },
   "all on but LETTER_IRL_POSTCARD_SIZES_ENABLED": {
-    "manifest": "0e2b069f48560fb9",
+    "manifest": "770316b4a766bd14",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "fe6223f9a5f31a0d"
+      "digest": "a85f54234dfb13c5"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d4bc2cc9dfe6892f"
+      "digest": "a2fbcb1a69a5920b"
     }
   },
   "all on but LETTER_IRL_POSTCARD_LAYOUTS_ENABLED": {
-    "manifest": "689eaa2268396080",
+    "manifest": "ea344677f48d78e7",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "36dd4bed6d150a96"
+      "digest": "15b330fca70899b8"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "e9c466faace56e26"
+      "digest": "50a586d31a0e0276"
     }
   },
   "all on but LETTER_IRL_POSTCARD_COLLAGES_ENABLED": {
-    "manifest": "8418bfdf17589e32",
+    "manifest": "8e1980b2640dc9bf",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "210fb579767b3b6e"
+      "digest": "4d5f40525811d137"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "40bcd660fa8b402d"
+      "digest": "4354b5323a3babe0"
     }
   },
   "all on but LETTER_IRL_ADDRESS_REQUESTS_ENABLED": {
-    "manifest": "eed5236a36926604",
+    "manifest": "8780a26d469c8080",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "d0559e600099d9b2"
+      "digest": "b386f6972f0a7af1"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "ab9f52c796cb1892"
+      "digest": "c4fea518c969159d"
     }
   },
   "all on but LETTER_IRL_SIGNATURES_ENABLED": {
-    "manifest": "c60a36fe6a2d53b3",
+    "manifest": "8a2753a5d25241de",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "fe7e4993f92ec0c0"
+      "digest": "358a4d65ec64b80b"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "6af22dae26179ba3"
+      "digest": "12ce85af9b2e33ab"
     }
   },
   "all on but LETTER_IRL_CUSTOM_STATIONERY_ENABLED": {
-    "manifest": "74ddfb54a376e170",
+    "manifest": "0e19f897ac4ffee9",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "6cff94adbf9ee760"
+      "digest": "2d9f74ae8f306237"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "696ef9605dc28913"
+      "digest": "2bea4e19af8ebbbe"
     }
   },
   "all on but LETTER_IRL_HOME_ENABLED": {
-    "manifest": "26324af13be9357b",
+    "manifest": "9c0883e0fae7b3cd",
     "chatgpt": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "ffe73e3b537e8518"
+      "digest": "8da850c9925dac08"
     },
     "vscode": {
       "names": "quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "07743b202c9ae276"
+      "digest": "3a3343abc0cc8cad"
     }
   },
   "all on but LETTER_IRL_GIFT_LETTERS_ENABLED": {
-    "manifest": "b281ff02377d0764",
+    "manifest": "17919a8b083bab74",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "dc9dc34a41d6a9a2"
+      "digest": "2056883012e9e159"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "5c2ffba18797eb88"
+      "digest": "7d6f3b7f715f12ca"
     }
   },
   "all on but LETTER_IRL_STUDIO_CARD_ENABLED": {
-    "manifest": "b281ff02377d0764",
+    "manifest": "17919a8b083bab74",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "dc9dc34a41d6a9a2"
+      "digest": "2056883012e9e159"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "5c2ffba18797eb88"
+      "digest": "7d6f3b7f715f12ca"
     }
   },
   "all on but LETTER_IRL_ENVELOPE_REVEAL_ENABLED": {
-    "manifest": "b281ff02377d0764",
+    "manifest": "17919a8b083bab74",
     "chatgpt": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter create_mail_checkout create_pack_checkout list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "dc9dc34a41d6a9a2"
+      "digest": "2056883012e9e159"
     },
     "vscode": {
       "names": "open_letter_home quote_and_preview_letter quote_and_preview_letter_with_header_image quote_and_preview_letter_with_image send_letter list_letter_packs redeem_promo_code get_purchase_status get_order_status get_account_balance list_orders quote_and_preview_postcard send_postcard set_arrival_date cancel_scheduled_mail set_stationery set_mail_service set_letter_words set_postcard_style request_address get_address_request cancel_address_request set_signature get_signature clear_signature set_letter_signature save_stationery_design list_stationery_designs delete_stationery_design request_send get_draft_status generate_image_for_mail set_return_address get_return_address clear_return_address submit_feature_request get_profile get_started upload_image confirm_uploaded_image",
-      "digest": "5c2ffba18797eb88"
+      "digest": "7d6f3b7f715f12ca"
     }
   }
 }

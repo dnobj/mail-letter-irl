@@ -2008,7 +2008,7 @@ The studio rearranges both preview cards. The letter card becomes a header, the 
 - For step 7: `LETTER_IRL_ROOM_TO_WRITE_ENABLED` on the maintenance service too, and `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` set to the Stripe test prices (as in PAGES-01).
 - `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 9 (without one, `sendAsGift` is refused).
 
-Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v96, steering r54). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
+Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v98, steering r55). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
 
 **Steps:**
 
@@ -2054,6 +2054,8 @@ Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v96, s
     - the footer reads "1 letter" and "6 x 9 in · mailed in …".
 
     On a gift postcard, verify the count reads "beside the gift card, the back holds 11 lines".
+
+    The chat hears of the maker's changes (letter home and postcard sizes on): on the card, choose **4 x 6 in**, then ask the chat "add the caption 'Cape Cod' in a border" without naming a size. Verify `set_postcard_style` is called without a size, and the postcard stays a 4x6. Repeat in Claude, where the card's share does not reach the model (HOME-02, step 3 above): there only `set_postcard_style`'s description (steering r55) carries it.
 11. [ ] Turn `LETTER_IRL_STUDIO_CARD_ENABLED` off and deploy the API. Verify a new letter preview and a new postcard preview are laid out as before: no tabs, and the row labelled "Style". Turn the flag back on.
 
 **Pass criteria:** Both cards lay themselves out as a studio only while the flag is on. Every control in a tab calls the tool it called before, and the header, cost and summary match the draft. With the flag off, the cards are exactly as before.
@@ -3748,6 +3750,7 @@ Needs HOME-01, a host advertising text model context, and development arrive-by 
 1. Select a draft in the home: the selected recipient and draft ID appear. Ask to revise it; verify the model uses this ID and rechecks draft status. Select an order; the model must not edit it as a draft. Clear selection and verify prior selection is removed.
 2. On the letter card, while home is enabled, in a host that takes model context natively (Claude, VS Code), the card tells the conversation which draft it shows by itself, with no button (#650): ask "make it warmer" without naming the draft and check the model acts on that draft. After the card sends the draft, the selection is taken back. With home off or unsupported context, nothing is shared and no button appears.
    **With the home off, in ChatGPT,** the letter card now asks `get_draft_status` too (#676): check Send, Pay & Send, a restyle and setting a date behave as before, and a reopened card shows a sent letter as sent; after a started checkout, its Pay & Send reopens the same checkout.
+   **The postcard card shares the same way (widgets v98):** repeat the checks below on a postcard card, whose sentence says "postcard card" and "postcard draft".
    **In ChatGPT (web and Android) the letter card opens the handshake to share (#675, #676, widget v82).** Refresh the connector's tools first: the card's `get_draft_status` call comes with them. **Before the home goes on in production**, with the home on and a home card opened in the same chat first, check with it open: the composer's chip reads as the sentence (no JSON); the card keeps its height; **Send** sends once; **Pay & Send** opens checkout and the card follows the payment; reopen the chat and check a sent card stays sent (no second Send: the card asks the server, #676), and that after a started checkout its Pay & Send reopens the same checkout, never a second payment; the console shows `letterIrlHost: Plugin Extensions handshake answered`.
 3. Deep-link acceptance belongs to the subsequent #643 slice; this selection/cancellation PR does not expose share links or navigate from deep-link routes.
 4. Select scheduled prepaid or gift mail. Cancel must ask first; Keep scheduled changes nothing. Confirm cancellation once and verify the returned-funding sentence agrees with the tool response and balance; the order stays in view, open, reading Cancelled; not mailed. Refresh: the order is cancelled and Cancel is absent. A duplicate request must return no second refund.
