@@ -19,7 +19,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 
-/** The launch cut on #816: groups 1 and 2 on, group 3 off. */
+/**
+ * The launch cut as proposed on #816 (update 2, issuecomment-6271510222): group 1 on; group 2 (certified mail,
+ * signatures, card upload) on, as each is once its step is done; group 3 off. Not yet the owner's final word: when
+ * the cut is decided, set these to it and re-record (vitest -u), so this file is the list the submission scan reads.
+ */
 const LAUNCH: Record<string, string> = {
   LETTER_IRL_PRINT_RENDERER: 'pdf',
   JIT_PURCHASE_ENABLED: 'true',
