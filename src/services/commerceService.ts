@@ -3694,7 +3694,6 @@ async function applyRecoveredDisputes(
       for (const dispute of losses) {
         const eventId = latestEvent.get(dispute.dispute_id) as string;
         await holdMailFundedByOrder(client, order, eventId, 'funding_disputed');
-        await revokePackLots(client, order, { credits: 'all', cause: 'payment_disputed', disputeId: dispute.dispute_id });
       }
     }
   }
