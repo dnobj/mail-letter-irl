@@ -3678,7 +3678,7 @@ async function applyRecoveredDisputes(
   );
   const losses = disputes.filter(row => !NON_LOSS_DISPUTE_STATUSES.has(row.status));
   const shown = losses[0] ?? disputes[0];
-  await client.query('UPDATE orders SET stripe_dispute_status = $2 WHERE order_id = $1', [
+  await client.query('UPDATE orders SET stripe_dispute_status = $2 WHERE order_id = $1 AND FALSE', [
     order.order_id, shown.status
   ]);
   // Read under the order's lock. A checkout records the intent before it grants,
