@@ -151,7 +151,7 @@ describe("a file object's link (#730)", () => {
     const client = await connected({ LETTER_IRL_ARRIVE_BY_ENABLED: '' });
     const served = (await client.listTools()).tools.find(tool => tool.name === 'quote_and_preview_letter_with_image');
     // The shape a withheld field gives: unknown keys pass through (registerTools.ts).
-    expect(served?.inputSchema.additionalProperties).toBe(true);
+    expect(served?.inputSchema.additionalProperties).toEqual({});
     const said = await call(client, 'quote_and_preview_letter_with_image', { ...LETTER, image: file(link(FILE_LIMIT + 1)) });
     expect(said).toContain(`A file's link can be at most ${FILE_LIMIT} characters`);
     const linkSaid = await call(client, 'quote_and_preview_postcard', { ...POSTCARD, imageUrl: link(LIMIT + 1) });

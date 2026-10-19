@@ -177,7 +177,10 @@ const noneForNullOrEmpty = (value: unknown): unknown => (value === null || value
  * SDK 1.31 a missing field is refused as "Required" alone, which left the model nothing to go on.
  */
 function requiredChoice<T extends string>(values: readonly [T, ...T[]]) {
-  return z.enum(values as [T, ...T[]], { required_error: `Required: one of ${values.join(", ")}` });
+  return z.enum(values as [T, ...T[]], {
+    // Missing only: a wrong value keeps zod's own message, which names the options.
+    error: (issue) => (issue.input === undefined ? `Required: one of ${values.join(", ")}` : undefined),
+  });
 }
 
 const previewMailServiceZ = z.preprocess(noneForNullOrEmpty, z.enum(MAIL_SERVICES).optional()).describe(PREVIEW_MAIL_SERVICE_DESCRIPTION);
@@ -230,7 +233,7 @@ export const quoteAndPreviewInputZ = z.object({
 
 // Image file param schema - THIS IS THE SERVED LAYER. registerTools builds
 // the MCP tools/list input schemas from these zod objects (zodInputSchemas),
-// so what zod-to-json-schema emits here is exactly what ChatGPT's tool scan
+// so what the SDK's JSON Schema conversion emits here is exactly what ChatGPT's tool scan
 // reads. The scan enforces the Apps SDK file-param contract - an object
 // declaring all four of download_url/file_id/mime_type/file_name with only
 // the first two required - and STRIPS any deviating property schema to {},

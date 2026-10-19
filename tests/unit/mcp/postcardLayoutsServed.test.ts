@@ -105,7 +105,7 @@ describe('the postcard front in tools/list', () => {
     offer('', 'pdf');
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
     // Open to unknown keys while the front is withheld, arrival dates on or not.
-    expect((await listedTools()).get('quote_and_preview_postcard')!.additionalProperties).toBe(true);
+    expect((await listedTools()).get('quote_and_preview_postcard')!.additionalProperties).toEqual({});
     const client = await connected();
     await client.callTool({ name: 'quote_and_preview_postcard', arguments: { ...POSTCARD, layout: 'border', caption: 'Cape Cod' } });
     expect(received).toHaveLength(1);
@@ -121,7 +121,7 @@ describe('the postcard front in tools/list', () => {
       .callTool({ name: 'quote_and_preview_postcard', arguments: { ...POSTCARD, layout: 'collage' } })
       .catch(error => error);
     expect(received).toHaveLength(1);
-    expect(JSON.stringify(result)).toContain("received 'collage'");
+    expect(JSON.stringify(result)).toMatch(/Invalid option: expected one of .* at layout/);
   });
 });
 

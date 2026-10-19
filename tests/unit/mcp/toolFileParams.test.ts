@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js';
 import { getZodInputShape } from '../../../src/mcp/registerTools.js';
 import { UNRESOLVED_IMAGE_FILE_ID } from '../../../src/utils/imageFileParam.js';
 
@@ -14,6 +14,13 @@ import { UNRESOLVED_IMAGE_FILE_ID } from '../../../src/utils/imageFileParam.js';
  * layer ChatGPT actually reads; the manifest snapshot test cannot see it.
  */
 
+/** The input schema as the SDK converts it for tools/list (server/mcp.js). */
+function served(shape: z.ZodRawShape) {
+  return toJsonSchemaCompat(z.object(shape), { strictUnions: true, pipeStrategy: 'input' }) as {
+    properties?: Record<string, Record<string, unknown>>;
+  };
+}
+
 const IMAGE_TOOLS = [
   'quote_and_preview_letter_with_header_image',
   'quote_and_preview_letter_with_image',
@@ -21,9 +28,7 @@ const IMAGE_TOOLS = [
 ] as const;
 
 function servedImageSchema(tool: (typeof IMAGE_TOOLS)[number]): Record<string, unknown> {
-  const converted = zodToJsonSchema(z.object(getZodInputShape(tool)!) as never) as {
-    properties?: Record<string, Record<string, unknown>>;
-  };
+  const converted = served(getZodInputShape(tool)!);
   return converted.properties?.image ?? {};
 }
 
@@ -35,9 +40,7 @@ describe('SERVED file-param schemas via registerTools (the layer that mattered)'
   it.each(IMAGE_TOOLS)('%s serves the four-property file object through getZodInputShape', tool => {
     const shape = getZodInputShape(tool);
     expect(shape).toBeDefined();
-    const converted = zodToJsonSchema(z.object(shape)) as {
-      properties?: Record<string, Record<string, unknown>>;
-    };
+    const converted = served(shape!);
     const image = converted.properties?.image ?? {};
     expect(image.type, `${tool} image must not serialize to {}`).toBe('object');
     expect(image.anyOf).toBeUndefined();

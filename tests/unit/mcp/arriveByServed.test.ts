@@ -129,12 +129,12 @@ describe('arriveBy in tools/list', () => {
     vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
     const on = await listedTools();
     for (const name of PREVIEWS) {
-      expect((off.get(name)?.inputSchema as { additionalProperties?: unknown }).additionalProperties, name).toBe(true);
-      expect((on.get(name)?.inputSchema as { additionalProperties?: unknown }).additionalProperties, name).toBe(false);
+      expect((off.get(name)?.inputSchema as { additionalProperties?: unknown }).additionalProperties, name).toEqual({});
+      expect((on.get(name)?.inputSchema as { additionalProperties?: unknown }).additionalProperties, name).toBeUndefined();
     }
     for (const [name, tool] of off) {
       if (PREVIEWS.includes(name)) continue;
-      expect((tool.inputSchema as { additionalProperties?: unknown }).additionalProperties, name).not.toBe(true);
+      expect((tool.inputSchema as { additionalProperties?: unknown }).additionalProperties, name).not.toEqual({});
     }
   });
 

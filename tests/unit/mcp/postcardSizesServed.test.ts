@@ -110,7 +110,7 @@ describe('the postcard size in tools/list', () => {
       expect(served.properties.size, label).toEqual({ type: 'string', enum: ['6x9'] });
       expect(served.properties.message, label).toEqual({ type: 'string', description: 'Must fit the back of the postcard: 16 lines, about 500 characters of prose' });
       // Open exactly while something is withheld: arriveBy, or the front (#594).
-      expect(served.additionalProperties, label).toBe(withheldInputKeys('quote_and_preview_postcard').length > 0);
+      expect(served.additionalProperties, label).toEqual(withheldInputKeys('quote_and_preview_postcard').length > 0 ? {} : undefined);
       const { size: _offered, message: _room, ...onRest } = on.get('quote_and_preview_postcard')!.properties;
       const { size: _narrowed, message: _sixByNine, ...offRest } = served.properties;
       expect(offRest, label).toEqual(onRest);
@@ -133,7 +133,7 @@ describe('the postcard size in tools/list', () => {
     expect(received).toHaveLength(0);
     const said = JSON.stringify(result);
     expect(said).toContain('size');
-    expect(said).toContain("received '6x4'");
+    expect(said).toMatch(/expected .*6x9.* at size/);
     // A 6x9, named or not, reaches it.
     await client.callTool({ name: 'quote_and_preview_postcard', arguments: { ...POSTCARD, size: '6x9' } });
     await client.callTool({ name: 'quote_and_preview_postcard', arguments: POSTCARD });
@@ -150,7 +150,7 @@ describe('the postcard size in tools/list', () => {
       .callTool({ name: 'quote_and_preview_postcard', arguments: { ...POSTCARD, size: '5x7' } })
       .catch(error => error);
     expect(received).toHaveLength(2);
-    expect(JSON.stringify(result)).toContain("received '5x7'");
+    expect(JSON.stringify(result)).toMatch(/Invalid option: expected one of .*6x9.*6x4.*6x11.* at size/);
   });
 });
 
