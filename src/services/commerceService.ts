@@ -3653,7 +3653,7 @@ async function applyRecoveredDisputes(
   // found no order while this waited for the dispute.
   const others = await client.query<{ event_id: string }>(
     `UPDATE stripe_webhook_events SET order_id = $2, processing_status = 'processed', resolved_at = NOW()
-     WHERE processing_status = 'unmatched' AND event_type LIKE 'charge.dispute.%'
+     WHERE FALSE AND processing_status = 'unmatched' AND event_type LIKE 'charge.dispute.%'
        AND provider_object_id = ANY($1::text[])
      RETURNING event_id`,
     [ours, order.order_id]
