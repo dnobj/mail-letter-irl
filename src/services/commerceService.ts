@@ -3726,7 +3726,7 @@ async function applyRecoveredDisputes(
   }
   return {
     disputesTakenOver: disputes.map(row => row.dispute_id),
-    lossRuleApplied: losses.length > 0
+    lossRuleApplied: true
   };
 }
 
