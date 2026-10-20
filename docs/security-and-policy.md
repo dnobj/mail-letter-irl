@@ -1,6 +1,6 @@
 # Security, Privacy, and Policy Requirements
 
-**Last Updated:** September 16, 2026
+**Last Updated:** October 19, 2026
 **Purpose:** Consent, personal data, abuse prevention, retention, and payment security rules
 
 ## Consent and Confirmation
@@ -48,9 +48,15 @@
   `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (7, at most 30) days after it closes, or after its link expires
   unanswered (`address-requests-sweep`); the policy's wording for it is the owner's, and production
   waits for it. A saved signature (#608) is account data: kept until the person removes it or the
-  account is erased, which the policy does not yet say; its wording is the owner's too, and production
-  waits for it. A letter's own copy of it, taken when the letter is previewed, is that letter's content,
-  and goes with it on the content's clock. The maintenance retention sweep (`src/services/retentionService.ts`,
+  account is erased, as the policy's Saved Signature row says. A letter's own copy of it, taken when
+  the letter is previewed, is that letter's content, and goes with it on the content's clock. Mail
+  held to arrive by a date (#535) waits at most 60 days after the send
+  (`LETTER_IRL_SCHEDULE_HORIZON_DAYS`, capped at 60, the limit the policy's Scheduled Mail row
+  states), then follows the 90-day content schedule from when the provider accepted it. Held mail the
+  customer cancels before it is printed has its content emptied 4 days after the cancel and
+  quarantined 3 more, so it is gone within 7 days, and its sent draft is deleted at 7 days (#701).
+  Held mail an operator cancels (#696) follows the 90-day schedule instead, as possible dispute
+  evidence. The maintenance retention sweep (`src/services/retentionService.ts`,
   migration 026) clears the content columns and quarantines what it clears in
   `redacted_content_quarantine` for a bounded restore window. Rows, status, timestamps and
   identifiers remain. A copy leaves the quarantine when the published period ends, counted on the
