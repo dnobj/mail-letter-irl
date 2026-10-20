@@ -1294,8 +1294,12 @@ Rehearse on development first, then production. In order:
 
 1. **Auth0** - Branding → Custom Domains: add the domain with Auth0-managed certificates, add the CNAME record it
    shows at the DNS provider, and verify. Turn on "use custom domain in emails".
-2. **Social connections** - add `https://<custom domain>/login/callback` beside the tenant's own callback in the
-   Google and GitHub apps. Keep the old one: anything that starts at the tenant address still returns there.
+2. **Social connections** - for every social connection enabled on the tenant, add
+   `https://<custom domain>/login/callback` beside the tenant's own callback at the provider: the Google OAuth
+   client, the GitHub app, the Azure app for Microsoft, the Services ID return URLs for Apple. Keep the old one:
+   anything that starts at the tenant address still returns there. Auth0's developer keys do not work through a
+   custom domain, so a connection still on them must get its own credentials, or be turned off on that tenant,
+   before step 3.
 3. **API** - in one change, so one redeploy:
    - `LETTER_IRL_OAUTH_ISSUER`, `LETTER_IRL_OAUTH_AUTH_ENDPOINT`, `LETTER_IRL_OAUTH_TOKEN_ENDPOINT` and
      `LETTER_IRL_OAUTH_JWKS_URI` move to the custom domain. This is what the API publishes.
@@ -1314,7 +1318,7 @@ Rehearse on development first, then production. In order:
 These stay on the tenant's own `*.auth0.com` address: the linking Action's `AUTH0_DOMAIN` secret and the tenant
 check below, because the Management API's audience is the tenant address.
 
-Check afterwards: sign in on the website, connect a new ChatGPT connector (its sign-in page should show the custom
+Check afterwards: sign in on the website once through each connection the tenant offers, connect a new ChatGPT connector (its sign-in page should show the custom
 domain), and use a connector made before the move after its access token has expired, which proves the refresh at
 the old address still works.
 
