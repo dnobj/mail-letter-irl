@@ -54,7 +54,8 @@
   (`LETTER_IRL_SCHEDULE_HORIZON_DAYS`, capped at 60, the limit the policy's Scheduled Mail row
   states), then follows the 90-day content schedule from when the provider accepted it. Held mail the
   customer cancels before it is printed has its content emptied 4 days after the cancel and
-  quarantined 3 more, so it is gone within 7 days, and its sent draft is deleted at 7 days (#701).
+  quarantined 3 more, so it is gone within 7 days, and its sent draft is deleted 4 days after the
+  cancel (`CANCELLED_HELD_DRAFT_DAYS`, so the sweep meets the 7 however its runs fall; #701, #730).
   Held mail an operator cancels (#696) follows the 90-day schedule instead, as possible dispute
   evidence. The maintenance retention sweep (`src/services/retentionService.ts`,
   migration 026) clears the content columns and quarantines what it clears in
