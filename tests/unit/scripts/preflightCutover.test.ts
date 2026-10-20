@@ -536,6 +536,9 @@ describe('OAuth coverage (issue #270)', () => {
       'LETTER_IRL_OAUTH_SCOPES',
       'LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS',
       'LETTER_IRL_MCP_PATH',
+      // Empty unless the tenant has moved to a custom domain; when set, the
+      // validator holds every entry to the environment's issuer allowlist.
+      'LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS',
       // Mode switches, not configuration: they select which rules apply.
       'LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY',
       'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT',

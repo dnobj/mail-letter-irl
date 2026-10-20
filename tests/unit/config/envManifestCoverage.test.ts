@@ -39,6 +39,7 @@ const NOT_IN_MANIFEST: Record<string, string> = {
   LETTER_IRL_OAUTH_EMAIL_CLAIM: 'with a default',
   LETTER_IRL_OAUTH_EMAIL_VERIFIED_CLAIM: 'with a default',
   LETTER_IRL_OAUTH_LEGACY_AUDIENCES: 'empty unless an audience is being retired',
+  LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS: 'empty unless the tenant serves sign-in from a custom domain as well',
   LETTER_IRL_DEFAULT_ORIGIN: 'with a default',
   LETTER_IRL_WIDGET_DOMAIN: 'with a default',
   LETTER_IRL_API_URL: 'with a default',

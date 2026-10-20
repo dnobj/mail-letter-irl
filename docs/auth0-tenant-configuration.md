@@ -1284,6 +1284,40 @@ LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 ```
 
+### Moving a tenant to a custom domain
+
+Auth0's custom domain is free (Auth0-managed certificate; the dashboard asks for a card to verify the account and
+does not charge it). It changes the address people see on the sign-in page, and the `iss` on tokens issued through
+it. One tenant either way: the same users, applications and signing keys.
+
+Rehearse on development first, then production. In order:
+
+1. **Auth0** - Branding → Custom Domains: add the domain with Auth0-managed certificates, add the CNAME record it
+   shows at the DNS provider, and verify. Turn on "use custom domain in emails".
+2. **Social connections** - add `https://<custom domain>/login/callback` beside the tenant's own callback in the
+   Google and GitHub apps. Keep the old one: anything that starts at the tenant address still returns there.
+3. **API** - in one change, so one redeploy:
+   - `LETTER_IRL_OAUTH_ISSUER`, `LETTER_IRL_OAUTH_AUTH_ENDPOINT`, `LETTER_IRL_OAUTH_TOKEN_ENDPOINT` and
+     `LETTER_IRL_OAUTH_JWKS_URI` move to the custom domain. This is what the API publishes.
+   - `LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS` names the tenant's own address. Apps that connected before the move
+     keep the authorization server they found then and refresh there, so their tokens still carry the old `iss`.
+     The API accepts both and publishes only the first.
+   - `LETTER_IRL_OAUTH_PROD_ISSUER` (or `_DEV_ISSUER`) lists both addresses, comma or space separated. The API
+     refuses to start if the issuer or any additional issuer is missing from it, so the other environment's
+     tenant can never be accepted.
+4. **Website** - `AUTH0_DOMAIN` moves to the custom domain (`@auth0/nextjs-auth0` derives the issuer from it). Its
+   callback and logout URLs are on the website's own domain and do not change. The API accepts tokens with either
+   `iss`, so a session from before the change keeps reaching it; the rehearsal checks that it also keeps refreshing.
+5. **Manifest** - regenerate `manifest.json` against the new issuer, and change the production fallback in
+   `src/mcp/manifest.ts`.
+
+These stay on the tenant's own `*.auth0.com` address: the linking Action's `AUTH0_DOMAIN` secret and the tenant
+check below, because the Management API's audience is the tenant address.
+
+Check afterwards: sign in on the website, connect a new ChatGPT connector (its sign-in page should show the custom
+domain), and use a connector made before the move after its access token has expired, which proves the refresh at
+the old address still works.
+
 ### Applying Branding to Production
 
 When ready to apply branding to production, switch to the production tenant and run these commands:

@@ -64,6 +64,12 @@ export const DEFAULT_OAUTH_SCOPES = [
 
 export interface OAuthConfig {
   issuer: string;
+  /**
+   * Issuers accepted on tokens beside `issuer`, never published. A tenant moving to a custom domain stamps new tokens
+   * with the new address while apps that connected before keep refreshing at the old one, so for a while both are
+   * real. Each must be on the environment's allowlist, as `issuer` must.
+   */
+  additionalIssuers: string[];
   authorizationEndpoint: string;
   tokenEndpoint: string;
   jwksUri: string;
@@ -101,8 +107,13 @@ export function getOAuthConfig(env: NodeJS.ProcessEnv = process.env): OAuthConfi
   // the /mcp resource. Nothing needs a second audience.
   const audience = parseList(env.LETTER_IRL_OAUTH_AUDIENCE);
 
+  const issuer = env.LETTER_IRL_OAUTH_ISSUER ?? "";
+
   return {
-    issuer: env.LETTER_IRL_OAUTH_ISSUER ?? "",
+    issuer,
+    additionalIssuers: [...new Set(parseList(env.LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS))].filter(
+      (extra) => extra !== issuer
+    ),
     authorizationEndpoint: env.LETTER_IRL_OAUTH_AUTH_ENDPOINT ?? "",
     tokenEndpoint: env.LETTER_IRL_OAUTH_TOKEN_ENDPOINT ?? "",
     jwksUri: env.LETTER_IRL_OAUTH_JWKS_URI ?? "",
@@ -167,6 +178,12 @@ export function validateOAuthConfig(
       }
     }
   }
+  for (const extra of config.additionalIssuers) {
+    const extraUrl = requireHttpsUrl("LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS", extra, errors);
+    if (extraUrl && !extra.endsWith("/")) {
+      errors.push("Each LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS entry must end with /");
+    }
+  }
   if (resourceUrl && !resourceUrl.pathname.endsWith("/mcp")) {
     errors.push("LETTER_IRL_MCP_RESOURCE must be the exact canonical /mcp endpoint");
   }
@@ -206,22 +223,31 @@ export function validateOAuthConfig(
     );
   }
 
+  // The allowlist may name more than one issuer: a tenant's own address and its custom domain. Every issuer this
+  // deployment accepts, published or not, must be on it, so a token from the other environment's tenant can never be.
   const deploymentEnvironment = env.LETTER_IRL_DEPLOYMENT_ENVIRONMENT;
-  const expectedIssuer =
+  const allowlist =
     deploymentEnvironment === "development"
-      ? env.LETTER_IRL_OAUTH_DEV_ISSUER
+      ? parseList(env.LETTER_IRL_OAUTH_DEV_ISSUER)
       : deploymentEnvironment === "production"
-        ? env.LETTER_IRL_OAUTH_PROD_ISSUER
+        ? parseList(env.LETTER_IRL_OAUTH_PROD_ISSUER)
         : undefined;
   if (
     (deploymentEnvironment === "development" || deploymentEnvironment === "production") &&
-    !expectedIssuer
+    (!allowlist || allowlist.length === 0)
   ) {
     errors.push(
       `LETTER_IRL_OAUTH_${deploymentEnvironment === "development" ? "DEV" : "PROD"}_ISSUER is required for environment isolation`
     );
-  } else if (expectedIssuer && config.issuer !== expectedIssuer) {
-    errors.push(`OAuth issuer does not match the ${deploymentEnvironment} issuer allowlist`);
+  } else if (allowlist && allowlist.length > 0) {
+    if (!allowlist.includes(config.issuer)) {
+      errors.push(`OAuth issuer does not match the ${deploymentEnvironment} issuer allowlist`);
+    }
+    for (const extra of config.additionalIssuers) {
+      if (!allowlist.includes(extra)) {
+        errors.push(`An additional OAuth issuer is not on the ${deploymentEnvironment} issuer allowlist`);
+      }
+    }
   }
   if (
     deploymentEnvironment === "production" &&

@@ -30,7 +30,7 @@ let publicKey: Awaited<ReturnType<typeof generateKeyPair>>["publicKey"];
 
 async function token(
   claims: Record<string, unknown> = {},
-  options: { algorithm?: string; expiresIn?: string; notBefore?: string } = {}
+  options: { algorithm?: string; expiresIn?: string; notBefore?: string; issuer?: string } = {}
 ) {
   const algorithm = options.algorithm ?? "RS256";
   let builder = new SignJWT({
@@ -39,7 +39,7 @@ async function token(
     ...claims
   })
     .setProtectedHeader({ alg: algorithm })
-    .setIssuer(issuer)
+    .setIssuer(options.issuer ?? issuer)
     .setAudience(audience)
     .setIssuedAt()
     .setExpirationTime(options.expiresIn ?? "5m");
@@ -77,6 +77,26 @@ describe("production JWT validator", () => {
   it("rejects a wrong issuer", async () => {
     vi.stubEnv("LETTER_IRL_OAUTH_ISSUER", "https://wrong.auth0.com/");
     await expect(validateJWTToken(await token(), keySet)).rejects.toThrow();
+  });
+
+  it("accepts a token from an additional issuer, and still none from an issuer not named", async () => {
+    // A tenant moving to a custom domain: the published issuer is the new address, and apps that connected
+    // before keep refreshing at the old one. Both stamp tokens the API must accept; nothing else may pass.
+    const customDomain = "https://auth.example.com/";
+    vi.stubEnv("LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS", customDomain);
+    await expect(validateJWTToken(await token({}, { issuer: customDomain }), keySet)).resolves.toMatchObject({
+      userId: "auth0|user-1"
+    });
+    await expect(validateJWTToken(await token(), keySet)).resolves.toMatchObject({ userId: "auth0|user-1" });
+    await expect(
+      validateJWTToken(await token({}, { issuer: "https://other.example.com/" }), keySet)
+    ).rejects.toThrow();
+  });
+
+  it("refuses a token from the custom domain until it is configured", async () => {
+    await expect(
+      validateJWTToken(await token({}, { issuer: "https://auth.example.com/" }), keySet)
+    ).rejects.toThrow();
   });
 
   it("rejects a wrong audience", async () => {
