@@ -129,7 +129,9 @@ export async function validateJWTToken(
   }
 
   const options: JWTVerifyOptions = {
-    issuer: config.issuer,
+    // The published issuer, and any the tenant still stamps on tokens for apps that connected before a move to a
+    // custom domain (LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS). One tenant either way: the same signing keys.
+    issuer: config.additionalIssuers.length > 0 ? [config.issuer, ...config.additionalIssuers] : config.issuer,
     audience: config.audience[0],
     algorithms: config.algorithms
   };

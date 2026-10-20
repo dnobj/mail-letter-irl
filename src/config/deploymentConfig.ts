@@ -302,8 +302,10 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     checkedBy: 'oauth.config_required'
   },
   {
-    // Environment isolation: validateOAuthConfig pins the issuer against the
-    // matching allowlist and errors without it. Production has never had it set.
+    // Environment isolation: validateOAuthConfig pins the issuer, and every
+    // LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS entry, against the matching allowlist
+    // and errors without it. A list: the tenant's own address and its custom
+    // domain both belong on it once the custom domain is live.
     name: 'LETTER_IRL_OAUTH_PROD_ISSUER',
     requiredIn: 'production',
     secret: false,
