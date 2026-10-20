@@ -37,6 +37,7 @@ Physical mail is handled by multiple third parties (printing facilities, postal 
 | **Account Info** | Email, name, login provider | Create and manage your account |
 | **Letter Content** | Letter text, recipient names, addresses | Print and mail your letters |
 | **Return Address** | Your name and mailing address | Include sender info on letters |
+| **Signature** | A picture of your handwritten signature | Print it on letters you choose |
 | **Support Requests** | Emails, feedback | Respond to your inquiries |
 
 ### Information from Third Parties
@@ -101,7 +102,9 @@ We may disclose information if required by law (e.g., subpoena, court order) or 
 | Data Type | Retention Period |
 |-----------|-----------------|
 | **Letter Content** | 90 days after sending (for delivery verification and disputes) |
+| **Scheduled Mail** | A letter you schedule to arrive by a date is kept until it goes to the printer, at most 60 days after you send it, and then follows the letter-content schedule above. If you cancel it before it is printed, its content is deleted within 7 days of cancelling. |
 | **Letter Drafts** | Unsent drafts expire after 24 hours, and their content is deleted within 7 days. Drafts you have paid for follow the letter-content schedule above. |
+| **Saved Signature** | A picture of your signature that you save is kept until you remove it, on the website's Settings page or in the chat, or until you delete your account. A letter previewed with it keeps its own copy, which follows the letter schedules above. |
 | **Uploaded Image Links** | Deleted within 48 hours of your last upload. An image you use in a draft or letter follows the schedules above. |
 | **Feature Requests** | Deleted 12 months after you submit them. |
 | **Account Data** | Retained while your account is active |
