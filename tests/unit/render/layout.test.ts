@@ -148,7 +148,8 @@ describe('wrapping paragraphs (#534)', () => {
     const shapings = vi.mocked(shape).mock.calls.length;
     // About 10 a line today (a search over the line's breaks, then the line drawn): 12 is the gate.
     expect(shapings).toBeLessThan(lines * 12);
-  });
+    // About 2.5 s alone, and past the suite's 10 s under load: room as the line-search tests below have.
+  }, 60_000);
 
   it('stops at the budget exactly when the text is many short paragraphs (#694)', () => {
     const layout = layoutLetter({ text: Array.from({ length: 500 }, (_, index) => `Line ${index + 1}`).join('\n'), layoutType: 'text_only' });
