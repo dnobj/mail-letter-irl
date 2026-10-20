@@ -238,8 +238,11 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
 
 ## Stage A: the website
 
-1. Merge the website's `dev` into `main` (a pull request, the owner's merge).
-2. Check: the home and dashboard pages load signed in and signed out, the session cookie carries
+1. Set **Last Updated** to the promotion date (owner's choice, 2026-10-19) in both copies of the privacy
+   policy: `docs/privacy-policy.md` here and the website's `app/(marketing)/privacy/page.tsx`. The
+   Scheduled Mail and Saved Signature rows (#825, website #83) go live with this promotion.
+2. Merge the website's `dev` into `main` (a pull request, the owner's merge).
+3. Check: the home and dashboard pages load signed in and signed out, the session cookie carries
    `Secure`, and the Connect page lists only ChatGPT (`LETTER_IRL_CONNECT_APPS` unset) until each
    other app passes its production gate.
 
