@@ -95,8 +95,8 @@ Use this table to verify each application has the correct settings:
 | DCR Enabled | Settings → Advanced | Rollback inventory only |
 | Friendly Name | Settings → General | `Letter IRL` |
 | Google Connection | Connections | `is_domain_connection: true` |
-| Microsoft Connection | Connections | `is_domain_connection: true` |
-| Apple Connection | Connections | `is_domain_connection: true` |
+| Microsoft Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered, off on development since 2026-10-20 |
+| Apple Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered, off on development since 2026-10-20 |
 | GitHub Connection | Connections | `is_domain_connection: true` |
 | Username-Password | Connections | `is_domain_connection: true` |
 | Consent screen shows the scope descriptions | No dashboard page. Tenant flag `use_scope_descriptions_for_consent`, set through the Management API | `true`. Development set on 2026-09-28; production at the launch promotion (#267) |
@@ -205,8 +205,8 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 
 **Credentials (development, since 2026-10-20):** the "Auth0 Development" OAuth client in the `mail-letter-irl`
 Google Cloud project, beside production's "Auth0 Production" client. It replaced a client in another project, which
-had no consent screen in Google's Auth Platform and so could not be edited. Google gives one person the same
-subject across clients of one project, so the move kept every account.
+had no consent screen in Google's Auth Platform and so could not be edited. Google's subject identifier belongs to
+the Google account, the same whichever client or project asks, so the move keeps every account.
 
 ### 2. Microsoft (windowslive)
 
@@ -228,8 +228,10 @@ subject across clients of one project, so the move kept every account.
 
 > **Note:** This connection supports Microsoft **personal accounts** only. For work/organizational accounts, use an Enterprise connection with Azure AD.
 
-**Turned off on development, 2026-10-20,** for every application: it ran on Auth0's developer keys. Offering it
-again needs our own Azure app, with the custom domain's callback.
+**Turned off on development, 2026-10-20,** for every application listed on its Applications tab: it ran on Auth0's
+developer keys. That does not reach third-party clients (the connected apps); only its domain-level promotion
+does, and that promotion must be off too. Offering it again needs our own Azure app, with the custom domain's
+callback.
 
 ### 3. Apple
 
@@ -245,8 +247,10 @@ again needs our own Azure app, with the custom domain's callback.
 
 **Provider Type:** Social (Sign in with Apple)
 
-**Turned off on development, 2026-10-20,** for every application: it ran on Auth0's developer keys. Offering it
-again needs our own Services ID, with the custom domain's return URL.
+**Turned off on development, 2026-10-20,** for every application listed on its Applications tab: it ran on Auth0's
+developer keys. That does not reach third-party clients (the connected apps); only its domain-level promotion
+does, and that promotion must be off too. Offering it again needs our own Services ID, with the custom domain's
+return URL.
 
 ### 4. GitHub
 
@@ -1375,9 +1379,10 @@ Check afterwards:
 | Emails on the custom domain, default domain switched | yes | yes |
 | Google callback | both, on the new "Auth0 Development" client | both, on "Auth0 Production" |
 | GitHub | new GitHub App, both callbacks | new GitHub App, both callbacks, swapped in and tested |
-| Apple, Microsoft | turned off (developer keys) | not offered |
+| Apple, Microsoft | turned off on every listed application (developer keys); domain-level promotion off: to confirm | not offered |
 | Steps 3 and 4 | done (#826 at `e2b230d`) | after the API promotion ([launch-promotion.md](launch-promotion.md), stage B) |
-| Checks | website sign-in with Google, GitHub and email and password, sign-out, and a connection made before the move: passed | after stage B |
+| Checks passed | website sign-in with Google, GitHub and email and password; sign-out; one call on a connection made before the move | after stage B |
+| Checks outstanding | that connection again after its access token expires; sign-out of a session from before step 4; a new ChatGPT connector | all |
 
 ### Applying Branding to Production
 
