@@ -62,8 +62,9 @@ everything"). Feature freeze since 2026-10-19: only launch-blocking fixes until 
   designs, the separate words-editor flag (room to write turns the editor on), and image
   generation (`off`).
 - **The submission's tool set is the cut:** 34 tools in ChatGPT, pinned by
-  `tests/unit/mcp/__snapshots__/tools-list.chatgpt-launch.json`. A group 2 feature switched off
-  shrinks it, so the submission waits until every group 2 step has its answer. Turning a flag on
+  `tests/unit/mcp/__snapshots__/tools-list.chatgpt-launch.json`. Certified mail or signatures
+  switched off shrinks it (card upload's tool is never served to ChatGPT), so the submission waits
+  until every group 2 step has its answer. Turning a flag on
   after approval changes the tools, which goes back to review.
 - **Prices**, approved 2026-10-20: 2-page letter $5.99, 3-page $6.99, 4x6 postcard $3.99, 11x6
   $5.99, certified $11.99, certified with return receipt $14.99. The live Stripe prices exist and
@@ -79,9 +80,10 @@ Taken on 2026-10-16 (recorded on #680), and still standing:
 - Sign-in methods: what has passed on DEV (Google, GitHub, email and password; Microsoft only after
   LINK-02 with it), with our own OAuth applications.
 
-Still the owner's, before the stage that needs it: the terms for the paid options, if they change
-(#579; drafted for the owner, never published by an agent), and the certified-mail live check
-above. The privacy rows for saved designs and address requests, and the home's sharing (#651), wait
+Still the owner's, before the stage that needs it (stage G): the terms for the paid options (#579;
+drafted for the owner, never published by an agent), and PostGrid's confirmation of certified mail.
+The live certified letter above is a check on top of that confirmation, not a replacement for it,
+unless the owner waives the confirmation, in which case stage G and the flags table say so. The privacy rows for saved designs and address requests, and the home's sharing (#651), wait
 with those features until after the launch.
 
 ### Manual tests on DEV (owner, with an agent driving)
@@ -104,7 +106,8 @@ Owed before stage A, on DEV at the head being promoted:
 - **The other app gates:** CLIENT-02, CLIENT-04 (Codex), CLIENT-06, and the Hermes and VS Code gates.
 - **Group 2's DEV steps:** SIGNATURE-01's remaining steps (the card in ChatGPT, a test-mode send,
   the website's signature page), and the photo pick in Claude Desktop and on Android (card upload).
-  A step not done by stage A leaves its feature off at launch.
+  A step not done before the submission leaves its feature off: set it off in the launch golden
+  and re-record.
 - **The custom domain's open checks on DEV** (the tenant doc's state table): a new ChatGPT
   connector, signing out of a session from before the switch, and a connection made before it,
   used again after its access token has expired.
@@ -511,12 +514,14 @@ mail it would mishandle, so:
 
 ## Before the submission: the live checks
 
-After stage G and before the ChatGPT submission, with every group 1 and group 2 flag on in
-production: mail one real piece of each kind and check it on arrival. That means a 2-page and a
+After stage G and before the ChatGPT submission, with every group 1 flag on in production, and
+each group 2 flag whose step passed: mail one real piece of each kind and check it on arrival. That means a 2-page and a
 3-page letter (double-sided show-through), a 4x6 and an 11x6 postcard (postage), a letter with
 stationery and a signature, a collage, and a certified letter with a return receipt (the markings,
-where the receipt goes). A feature whose live piece fails is switched off before the submission, so
-the tool set OpenAI reviews is the one that works; re-record the launch golden to match.
+where the receipt goes). Certified mail whose live letter fails is switched off before the submission;
+for any other feature whose piece fails, switching it off is the owner's call. Whatever is off at
+the submission is off in the launch golden too (re-record it), so the tool set OpenAI reviews is the
+one that works.
 
 ## After the promotion
 
