@@ -394,9 +394,8 @@ tools and an input.
 ## Stage G: the paid options
 
 One per deploy, each after its live prices exist, its terms are published and its test has passed
-on DEV: room to write (two and three pages), postcard sizes, certified mail (also its live letter,
-its follow-ups from #625 in production, the website's part and a provisioning
-re-run). All three are sold by Pay & Send, so
+on DEV: room to write (two and three pages), postcard sizes, certified mail (also its follow-ups from #625 in production, the website's part and a
+provisioning re-run; its live letter follows, in the live checks below). All three are sold by Pay & Send, so
 they need `JIT_PURCHASE_ENABLED=true`; room to write and the postcard sizes also need the renderer
 (stage D). For each option, in this order:
 
