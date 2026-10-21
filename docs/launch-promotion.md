@@ -81,9 +81,10 @@ Taken on 2026-10-16 (recorded on #680), and still standing:
   LINK-02 with it), with our own OAuth applications.
 
 Still the owner's, before the stage that needs it (stage G): the terms for the paid options (#579;
-drafted for the owner, never published by an agent), and PostGrid's confirmation of certified mail.
-The live certified letter above is a check on top of that confirmation, not a replacement for it,
-unless the owner waives the confirmation, in which case stage G and the flags table say so. The privacy rows for saved designs and address requests, and the home's sharing (#651), wait
+drafted for the owner on 2026-10-20, never published by an agent). PostGrid's written confirmation
+of certified mail was **waived by the owner on 2026-10-20**: the live certified letter above answers
+the same questions (the markings clear of the address window, where the return receipt goes, the
+production time), and certified mail goes off before the submission if it fails. The privacy rows for saved designs and address requests, and the home's sharing (#651), wait
 with those features until after the launch.
 
 ### Manual tests on DEV (owner, with an agent driving)
@@ -393,9 +394,8 @@ tools and an input.
 ## Stage G: the paid options
 
 One per deploy, each after its live prices exist, its terms are published and its test has passed
-on DEV: room to write (two and three pages), postcard sizes, certified mail (also PostGrid's
-confirmation, its follow-ups from #625 in production, the website's part and a provisioning
-re-run). All three are sold by Pay & Send, so
+on DEV: room to write (two and three pages), postcard sizes, certified mail (also its follow-ups from #625 in production, the website's part and a
+provisioning re-run; its live letter follows, in the live checks below). All three are sold by Pay & Send, so
 they need `JIT_PURCHASE_ENABLED=true`; room to write and the postcard sizes also need the renderer
 (stage D). For each option, in this order:
 
@@ -422,7 +422,7 @@ stage B allows (see "Rollback").
 | `LETTER_IRL_ARRIVE_BY_ENABLED` | API | stage F | #697 and #726 in production, #697's object storage, SCHEDULE-01, ADMIN-CMD-04, its privacy row | held mail still goes out with it off |
 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` | API, maintenance | stage G | its two prices, terms, PAGES-01 | under the renderer floor |
 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` | API, maintenance | stage G | its two prices, terms, POSTCARD-01 | not below #596's build while such postcards are live |
-| `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage G (group 2; off before the submission if its live letter fails) | its prices, terms, PostGrid's confirmation, CERTIFIED-01, provisioning | certified letters must be sent before rolling back |
+| `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage G (group 2; off before the submission if its live letter fails) | its prices, terms, CERTIFIED-01, provisioning; its live letter before the submission (PostGrid's written confirmation waived 2026-10-20) | certified letters must be sent before rolling back |
 | `LETTER_IRL_STATIONERY_ENABLED`, `..._CUSTOM_STATIONERY_ENABLED` | API | stationery stage E; saved designs off at launch | STATIONERY-01; saved designs STATIONERY-02, with stationery on and their privacy row | `pdf-2` mail must be gone before rolling back |
 | `LETTER_IRL_SIGNATURES_ENABLED` | API | stage E (group 2) | SIGNATURE-01, its privacy row | `pdf-4` mail |
 | `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` | API | stage E | POSTCARD-01 | `pdf-3` postcards |
