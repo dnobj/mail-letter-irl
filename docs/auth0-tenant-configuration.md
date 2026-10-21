@@ -95,8 +95,8 @@ Use this table to verify each application has the correct settings:
 | DCR Enabled | Settings → Advanced | Rollback inventory only |
 | Friendly Name | Settings → General | `Letter IRL` |
 | Google Connection | Connections | `is_domain_connection: true` |
-| Microsoft Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered; on development, unticked on every listed application since 2026-10-20, promotion off to confirm (see "State on 2026-10-20") |
-| Apple Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered; on development, unticked on every listed application since 2026-10-20, promotion off to confirm (see "State on 2026-10-20") |
+| Microsoft Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered; off on development since 2026-10-20 |
+| Apple Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered; off on development since 2026-10-20 |
 | GitHub Connection | Connections | `is_domain_connection: true` |
 | Username-Password | Connections | `is_domain_connection: true` |
 | Consent screen shows the scope descriptions | No dashboard page. Tenant flag `use_scope_descriptions_for_consent`, set through the Management API | `true`. Development set on 2026-09-28; production at the launch promotion (#267) |
@@ -230,7 +230,7 @@ the Google account, the same whichever client or project asks, so the move keeps
 
 **Turned off on development, 2026-10-20,** for every application listed on its Applications tab: it ran on Auth0's
 developer keys. That does not reach third-party clients (the connected apps); only its domain-level promotion
-does, and that promotion must be off too. Offering it again needs our own Azure app, with the custom domain's
+does, and that promotion was turned off too. Offering it again needs our own Azure app, with the custom domain's
 callback.
 
 ### 3. Apple
@@ -249,7 +249,7 @@ callback.
 
 **Turned off on development, 2026-10-20,** for every application listed on its Applications tab: it ran on Auth0's
 developer keys. That does not reach third-party clients (the connected apps); only its domain-level promotion
-does, and that promotion must be off too. Offering it again needs our own Services ID, with the custom domain's
+does, and that promotion was turned off too. Offering it again needs our own Services ID, with the custom domain's
 return URL.
 
 ### 4. GitHub
@@ -1379,7 +1379,7 @@ Check afterwards:
 | Emails on the custom domain, default domain switched | yes | yes |
 | Google callback | both, on the new "Auth0 Development" client | both, on "Auth0 Production" |
 | GitHub | new GitHub App, both callbacks | new GitHub App, both callbacks, swapped in and tested |
-| Apple, Microsoft | turned off on every listed application (developer keys); domain-level promotion off: to confirm | not offered |
+| Apple, Microsoft | turned off on every listed application and domain-level promotion off (developer keys) | not offered |
 | Steps 3 and 4 | done (#826 at `e2b230d`) | after the API promotion ([launch-promotion.md](launch-promotion.md), stage B) |
 | Checks passed | website sign-in with Google, GitHub and email and password; sign-out; one call on a connection made before the move | after stage B |
 | Checks outstanding | that connection again after its access token expires; sign-out of a session from before step 4; a new ChatGPT connector | all |
