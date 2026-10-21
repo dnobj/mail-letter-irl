@@ -326,10 +326,12 @@ and stays out when it should not (precision).
 
 ## Tool Annotations Verification
 
-With every launch switch on (stages E to G of [launch-promotion.md](../launch-promotion.md)) and
-image generation off, ChatGPT is served 41 tools: every row below but `generate_image_for_mail`
-and `upload_photo_chunk`. ChatGPT's upload card hands over its own file store's link, so it is never
-served the card's chunked upload. Four of the 41 are card-only: listed, but hidden from the model
+At the launch cut (approved 2026-10-20, [launch-promotion.md](../launch-promotion.md)), ChatGPT is
+served 34 tools, pinned by `tests/unit/mcp/__snapshots__/tools-list.chatgpt-launch.json`: every row
+below but `generate_image_for_mail`, `upload_photo_chunk`, the home's `open_letter_home`, the
+address requests' three tools and the saved designs' three, all off at launch. With every switch on
+and image generation off it would be 41. ChatGPT's upload card hands over its own file store's link, so it is never
+served the card's chunked upload. Four of the 34 are card-only: listed, but hidden from the model
 and called only by the card (`send_letter`, `send_postcard`,
 `create_mail_checkout` and `get_draft_status`). At production's defaults before those stages, 24
 are served. Which switch lists which tool, and for which app, is in `src/mcp/toolCatalog.ts`.
