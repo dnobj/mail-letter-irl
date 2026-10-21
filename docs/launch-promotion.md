@@ -129,6 +129,9 @@ must be ready before the API deploys against it
 8. The applications: remove legacy entries within the tenant's application limit, then import the
    apps chosen for launch, keeping one slot for OpenClaw: its client document is served by the
    production website, so it is imported after stage A.
+9. The custom domain `auth.letterirl.com`, steps 1 and 2 of the tenant doc's "Moving a tenant to a custom
+   domain": verified, emails switched, Google and GitHub callbacks in place. Done 2026-10-20; steps 3 and 4
+   wait for stage B.
 
 ### Production variables set ahead (owner, or an agent with approval)
 
@@ -273,6 +276,12 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
      offering exactly the chosen methods; sign out on the website between methods, so a remembered
      session does not skip the sign-in page;
    - the maintenance and admin services are on the new build.
+   Then move sign-in to the custom domain (owner; the tenant doc's "Moving a tenant to a custom domain", steps 3
+   and 4): the production script's `--only api`; wait until the API's protected-resource metadata names
+   `https://auth.letterirl.com/` and `/readyz` answers 200; then `--only website`. Repeat the sign-ins above,
+   each sign-in page now on `auth.letterirl.com`, with that doc's checks: sign out of a session from before the
+   switch, a new connector, and a connection made before it. `--rollback` undoes either step. Step 5, the
+   manifest snapshot, is a PR to `dev` afterwards.
 4. Re-run the admin provisioning for production **from a checkout at the promoted commit**, never
    from an older one: it applies the grants of the code it runs (`038`, `053` and `063` need it).
    The command is `npx tsx scripts/provisionAdminDatabaseAccess.ts --environment production

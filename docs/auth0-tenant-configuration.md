@@ -1,6 +1,6 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** September 28, 2026
+**Last Updated:** October 20, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
 
@@ -52,10 +52,12 @@ so that application's callbacks must stay OpenAI's alone.
 
 ## Tenants Overview
 
-| Environment | Tenant Domain | Account |
-|-------------|---------------|---------|
-| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | the organization account |
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | the production account |
+| Environment | Tenant Domain | Custom domain | Account |
+|-------------|---------------|---------------|---------|
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | `auth-dev.letterirl.com`, in use since 2026-10-20 | the organization account |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | `auth.letterirl.com`, verified 2026-10-20; the API and website move to it after the promotion | the production account |
+
+How the custom domains were set up, and their state, is in "Moving a tenant to a custom domain" below.
 
 ---
 
@@ -93,8 +95,8 @@ Use this table to verify each application has the correct settings:
 | DCR Enabled | Settings → Advanced | Rollback inventory only |
 | Friendly Name | Settings → General | `Letter IRL` |
 | Google Connection | Connections | `is_domain_connection: true` |
-| Microsoft Connection | Connections | `is_domain_connection: true` |
-| Apple Connection | Connections | `is_domain_connection: true` |
+| Microsoft Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered; off on development since 2026-10-20 |
+| Apple Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered; off on development since 2026-10-20 |
 | GitHub Connection | Connections | `is_domain_connection: true` |
 | Username-Password | Connections | `is_domain_connection: true` |
 | Consent screen shows the scope descriptions | No dashboard page. Tenant flag `use_scope_descriptions_for_consent`, set through the Management API | `true`. Development set on 2026-09-28; production at the launch promotion (#267) |
@@ -142,7 +144,8 @@ either way - a checklist that guesses is worse than one that admits a gap.
 This Auth0 tenant is configured to support:
 - **ChatGPT MCP Server** with OAuth 2.1 + PKCE authentication
 - **Manual CIMD registration** for ChatGPT apps
-- **5 Authentication Methods**: Google, Microsoft, Apple, GitHub, Email/Password
+- **Authentication Methods**: Google, GitHub, Email/Password. Microsoft and Apple are configured but turned off
+  on development since 2026-10-20: both ran on Auth0's developer keys, which do not work through a custom domain
 - **Audited eligible connections** for strict third-party CIMD clients
 
 ---
@@ -179,7 +182,7 @@ https://dev-ky21dxn3qmi71hjl.us.auth0.com/oidc/register
 
 ## Connections (Identity Providers)
 
-All connections are configured as **domain-level connections** (`is_domain_connection: true`) to support ChatGPT's dynamically registered OAuth clients.
+Every connection offered is a **domain-level connection** (`is_domain_connection: true`), so the connected apps (third-party clients) can use it. Microsoft and Apple are not offered, and their promotion is off (below).
 
 ### 1. Google (google-oauth2)
 
@@ -200,6 +203,11 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 **Provider Type:** Social (OAuth 2.0)
 **Scopes:** `email`, `profile`
 
+**Credentials (development, since 2026-10-20):** the "Auth0 Development" OAuth client in the `mail-letter-irl`
+Google Cloud project, beside production's "Auth0 Production" client. It replaced a client in another project, which
+had no consent screen in Google's Auth Platform and so could not be edited. Google's subject identifier belongs to
+the Google account, the same whichever client or project asks, so the move keeps every account.
+
 ### 2. Microsoft (windowslive)
 
 ```json
@@ -207,7 +215,7 @@ All connections are configured as **domain-level connections** (`is_domain_conne
   "id": "con_yXECqXNAc3kuLPYs",
   "name": "Microsoft",
   "strategy": "windowslive",
-  "is_domain_connection": true,
+  "is_domain_connection": false,
   "options": {
     "signin": true,
     "scope": ["wl.signin"]
@@ -220,6 +228,11 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 
 > **Note:** This connection supports Microsoft **personal accounts** only. For work/organizational accounts, use an Enterprise connection with Azure AD.
 
+**Turned off on development, 2026-10-20,** for every application listed on its Applications tab: it ran on Auth0's
+developer keys. That does not reach third-party clients (the connected apps); only its domain-level promotion
+does, and that promotion was turned off too. Offering it again needs our own Azure app, with the custom domain's
+callback.
+
 ### 3. Apple
 
 ```json
@@ -227,12 +240,17 @@ All connections are configured as **domain-level connections** (`is_domain_conne
   "id": "con_FxgZyyw39YHjWKiM",
   "name": "Apple",
   "strategy": "apple",
-  "is_domain_connection": true,
+  "is_domain_connection": false,
   "options": {}
 }
 ```
 
 **Provider Type:** Social (Sign in with Apple)
+
+**Turned off on development, 2026-10-20,** for every application listed on its Applications tab: it ran on Auth0's
+developer keys. That does not reach third-party clients (the connected apps); only its domain-level promotion
+does, and that promotion was turned off too. Offering it again needs our own Services ID, with the custom domain's
+return URL.
 
 ### 4. GitHub
 
@@ -249,6 +267,13 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 ```
 
 **Provider Type:** Social (OAuth 2.0)
+
+**Credentials (since 2026-10-20):** a GitHub **App** on each tenant ("Letter IRL (dev)" on development, "Letter IRL"
+on production), with Email addresses read-only and both callbacks. Development ran on Auth0's developer keys
+before; production ran on a GitHub OAuth App, which allows only one callback URL and so could not serve the tenant
+address and the custom domain at once. The old OAuth App stays in GitHub, unused, as the rollback until after
+launch. GitHub user ids do not change between apps, so existing users kept their accounts (checked in production's
+log: a login, no signup).
 
 ### 5. Username-Password-Authentication
 
@@ -1000,7 +1025,7 @@ subjects, and only the surviving primary subject counts afterwards.
    (docs/letter-send-flow.md).
 
 3. **Domain-Level Connections**
-   - **Every connection offered** must have `is_domain_connection: true` (all 5 on development)
+   - **Every connection offered** must have `is_domain_connection: true` (on development: Google, GitHub and email and password since 2026-10-20)
    - **Why:** Third-party clients (like dynamically registered ChatGPT apps) can only use domain-level connections
    - **And so the reverse:** a connection not offered in production (Apple, and Microsoft until LINK-02 passes with it; [launch-promotion.md](launch-promotion.md), stage 0 step 6) has its domain-level promotion turned off and is unticked on the website's application. Unticking it on an app does not reach third-party clients. Never delete one: Auth0 deletes its users with it
 
@@ -1088,7 +1113,7 @@ the script prints, and its verdict.
 | Date | Tenant | link-verified-email.js | email-claim.js | Verdict |
 | --- | --- | --- | --- | --- |
 | | development | | | not yet run |
-| | production | | | not yet run |
+| 2026-10-20 | production | `6e05eb8f1668` | `6b920b7e89b7` | all checks passed |
 
 ## Management via CLI
 
@@ -1214,7 +1239,7 @@ auth0 api get connections/CONNECTION_ID | jq '{name, is_domain_connection}'
 **Check:**
 1. Auth0 logs: Auth0 Dashboard → Monitoring → Logs
 2. MCP server logs: Check terminal output or `/debug/logs` endpoint
-3. Verify every connection offered is domain-level (all 5 on development; production's are decided in [launch-promotion.md](launch-promotion.md), stage 0 step 6)
+3. Verify every connection offered is domain-level (on development: Google, GitHub and email and password since 2026-10-20; production's are decided in [launch-promotion.md](launch-promotion.md), stage 0 step 6)
 
 ### Issue: Social login not appearing in Auth0 Universal Login
 
@@ -1263,7 +1288,7 @@ Letter IRL uses separate Auth0 tenants for complete environment isolation:
 
 When updating development, ensure production is also updated:
 
-1. **Connections** - Every identity provider offered with `is_domain_connection: true` (all 5 on development; production offers the ones decided in [launch-promotion.md](launch-promotion.md), stage 0 step 6, and has the others' promotion off)
+1. **Connections** - Every identity provider offered with `is_domain_connection: true` (on development: Google, GitHub and email and password since 2026-10-20; production offers the ones decided in [launch-promotion.md](launch-promotion.md), stage 0 step 6, and has the others' promotion off)
 2. **DCR** - Off; rollback inventory only (CIMD registration on)
 3. **Default Audience** - The MCP API identifier (both tenants repointed 2026-09-14)
 4. **Applications** - Create equivalent apps with appropriate callbacks; authorize the website application for the MCP API
@@ -1293,13 +1318,21 @@ it. One tenant either way: the same users, applications and signing keys.
 Rehearse on development first, then production. In order:
 
 1. **Auth0** - Branding → Custom Domains: add the domain with Auth0-managed certificates, add the CNAME record it
-   shows at the DNS provider, and verify. Turn on "use custom domain in emails".
+   shows at the DNS provider (letterirl.com's DNS is at DreamHost), and verify; Auth0 also verifies on its own
+   once the record resolves. Then, on the domain's page, turn on "Enable custom domains for email and phone
+   notifications" and press **Switch To Custom** beside "Default domain", so emails sent through the Management
+   API, such as the linking Action's re-sent verification, carry the custom domain too (expected; not yet seen in
+   a real email). Both are safe before step 3:
+   they change links in emails, which open Auth0's own pages, and nothing about sign-in.
 2. **Social connections** - for every social connection enabled on the tenant, add
    `https://<custom domain>/login/callback` beside the tenant's own callback at the provider: the Google OAuth
    client, the GitHub app, the Azure app for Microsoft, the Services ID return URLs for Apple. Keep the old one:
    anything that starts at the tenant address still returns there. Auth0's developer keys do not work through a
    custom domain, so a connection still on them must get its own credentials, or be turned off on that tenant,
-   before step 3.
+   before step 3. A GitHub **OAuth App** allows one callback URL; use a GitHub App, which allows ten, and swap
+   its Client ID and secret into the connection while testing a GitHub sign-in straight after. A Google client
+   in a project without a consent screen in Google's Auth Platform cannot be edited; make a new client in a
+   project that has one.
 3. **API** - in one change, so one redeploy:
    - `LETTER_IRL_OAUTH_ISSUER`, `LETTER_IRL_OAUTH_AUTH_ENDPOINT`, `LETTER_IRL_OAUTH_TOKEN_ENDPOINT` and
      `LETTER_IRL_OAUTH_JWKS_URI` move to the custom domain. This is what the API publishes.
@@ -1312,15 +1345,44 @@ Rehearse on development first, then production. In order:
 4. **Website** - `AUTH0_DOMAIN` moves to the custom domain (`@auth0/nextjs-auth0` derives the issuer from it). Its
    callback and logout URLs are on the website's own domain and do not change. The API accepts tokens with either
    `iss`, so a session from before the change keeps reaching it; the rehearsal checks that it also keeps refreshing.
-5. **Manifest** - regenerate `manifest.json` against the new issuer, and change the production fallback in
-   `src/mcp/manifest.ts`.
+   Run step 3 before step 4, never the other way: a website moved first gets tokens with the custom domain's
+   `iss`, which an API not yet moved refuses.
+5. **Manifest (production only)** - the served `/manifest.json` follows `LETTER_IRL_OAUTH_ISSUER` on its own. The
+   checked-in `manifest.json` snapshot and the fallback in `src/mcp/manifest.ts` (repeated in
+   `tests/unit/mcp/manifest.test.ts`) name production's issuer: change all three to the custom domain in a PR
+   after the production switch. Development has nothing to change here.
+
+Steps 3 and 4 are scripted, with `--dry-run`, `--rollback` and `--only api|website`, in the owner's scripts folder
+(`railway-auth-custom-domain-dev.mjs` and `railway-auth-custom-domain-prod.mjs`). The production script refuses the
+API step unless the running production build contains `LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS` (#826), and the website
+step until the production API publishes the custom domain. A rollback puts the tenant address back as the issuer
+and keeps the custom domain accepted, so tokens minted through it meanwhile still work.
 
 These stay on the tenant's own `*.auth0.com` address: the linking Action's `AUTH0_DOMAIN` secret and the tenant
-check below, because the Management API's audience is the tenant address.
+check above ("Checking a tenant"), because the Management API's audience is the tenant address.
 
-Check afterwards: sign in on the website once through each connection the tenant offers, connect a new ChatGPT connector (its sign-in page should show the custom
-domain), and use a connector made before the move after its access token has expired, which proves the refresh at
-the old address still works.
+Check afterwards:
+
+- sign in on the website once through each connection the tenant offers, and sign out after one of them;
+- sign out of a website session that began before step 4, which sends that session's ID token, issued by the
+  tenant address, to the custom domain's logout;
+- connect a new ChatGPT connector: its sign-in page should show the custom domain;
+- use a connector made before the move, at once and again after its access token has expired, which proves the
+  refresh at the old address still works.
+
+**State on 2026-10-20:**
+
+| | Development | Production |
+| --- | --- | --- |
+| Custom domain | `auth-dev.letterirl.com`, verified | `auth.letterirl.com`, verified |
+| Discovery checked | issuer, endpoints and JWKS on the custom domain, the same key ids as the tenant address | the same |
+| Emails on the custom domain, default domain switched | yes | yes |
+| Google callback | both, on the new "Auth0 Development" client | both, on "Auth0 Production" |
+| GitHub | new GitHub App, both callbacks | new GitHub App, both callbacks, swapped in and tested |
+| Apple, Microsoft | turned off on every listed application and domain-level promotion off (developer keys) | not offered |
+| Steps 3 and 4 | done (#826 at `e2b230d`) | after the API promotion ([launch-promotion.md](launch-promotion.md), stage B) |
+| Checks passed | website sign-in with Google, GitHub and email and password; sign-out; one call on a connection made before the move | after stage B |
+| Checks outstanding | that connection again after its access token expires; sign-out of a session from before step 4; a new ChatGPT connector | all |
 
 ### Applying Branding to Production
 
