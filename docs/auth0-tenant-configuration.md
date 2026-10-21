@@ -182,7 +182,7 @@ https://dev-ky21dxn3qmi71hjl.us.auth0.com/oidc/register
 
 ## Connections (Identity Providers)
 
-All connections are configured as **domain-level connections** (`is_domain_connection: true`) to support ChatGPT's dynamically registered OAuth clients.
+Every connection offered is a **domain-level connection** (`is_domain_connection: true`), so the connected apps (third-party clients) can use it. Microsoft and Apple are not offered, and their promotion is off (below).
 
 ### 1. Google (google-oauth2)
 
@@ -215,7 +215,7 @@ the Google account, the same whichever client or project asks, so the move keeps
   "id": "con_yXECqXNAc3kuLPYs",
   "name": "Microsoft",
   "strategy": "windowslive",
-  "is_domain_connection": true,
+  "is_domain_connection": false,
   "options": {
     "signin": true,
     "scope": ["wl.signin"]
@@ -240,7 +240,7 @@ callback.
   "id": "con_FxgZyyw39YHjWKiM",
   "name": "Apple",
   "strategy": "apple",
-  "is_domain_connection": true,
+  "is_domain_connection": false,
   "options": {}
 }
 ```
