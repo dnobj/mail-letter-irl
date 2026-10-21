@@ -161,7 +161,9 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
       ([Tool Annotations Verification](./openai-test-cases.md#tool-annotations-verification) says
       which are left out), with the card-only `send_letter`, `send_postcard`,
       `create_mail_checkout` and `get_draft_status` among them. If a group 2 feature stayed off,
-      that file was re-recorded to match and is the count to expect. Production serves 24 before
+      that file was re-recorded to match and is the count to expect, and the feature is out of
+      [openai-test-cases.md](./openai-test-cases.md) (the app description, its launch feature case,
+      and the count and list under Tool Annotations Verification). Production serves 24 before
       stages C to G, and each switch adds its tools, so scan only after the last switch and a
       connector refresh. Record any warning, and give each tool's three hint
       justifications from [Justifications for the portal](./openai-test-cases.md#justifications-for-the-portal).

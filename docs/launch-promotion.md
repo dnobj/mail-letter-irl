@@ -106,8 +106,8 @@ Owed before stage A, on DEV at the head being promoted:
 - **The other app gates:** CLIENT-02, CLIENT-04 (Codex), CLIENT-06, and the Hermes and VS Code gates.
 - **Group 2's DEV steps:** SIGNATURE-01's remaining steps (the card in ChatGPT, a test-mode send,
   the website's signature page), and the photo pick in Claude Desktop and on Android (card upload).
-  A step not done before the submission leaves its feature off: set it off in the launch golden
-  and re-record.
+  A step not done before the submission leaves its feature off: set it off in the launch golden,
+  re-record, and take it out of the reviewer materials (below).
 - **The custom domain's open checks on DEV** (the tenant doc's state table): a new ChatGPT
   connector, signing out of a session from before the switch, and a connection made before it,
   used again after its access token has expired.
@@ -517,11 +517,13 @@ mail it would mishandle, so:
 After stage G and before the ChatGPT submission, with every group 1 flag on in production, and
 each group 2 flag whose step passed: mail one real piece of each kind and check it on arrival. That means a 2-page and a
 3-page letter (double-sided show-through), a 4x6 and an 11x6 postcard (postage), a letter with
-stationery and a signature, a collage, and a certified letter with a return receipt (the markings,
+stationery and a signature (the signature only if signatures are on), a collage, and a certified letter with a return receipt (the markings,
 where the receipt goes). Certified mail whose live letter fails is switched off before the submission;
 for any other feature whose piece fails, switching it off is the owner's call. Whatever is off at
-the submission is off in the launch golden too (re-record it), so the tool set OpenAI reviews is the
-one that works.
+the submission is off in the launch golden too (re-record it), and out of
+[openai-test-cases.md](app-submission/openai-test-cases.md): its line in the app description, its
+launch feature case, and the count and list under Tool Annotations Verification. So the tool set
+and the materials OpenAI reviews are the ones that work.
 
 ## After the promotion
 
