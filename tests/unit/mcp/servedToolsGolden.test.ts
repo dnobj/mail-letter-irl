@@ -21,9 +21,9 @@ import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { buildManifest } from '../../../src/mcp/manifest.js';
 
 /**
- * The launch cut as proposed on #816 (update 2, issuecomment-6271510222): group 1 on; group 2 (certified mail,
- * signatures, card upload) on, as each is once its step is done; group 3 off. Not yet the owner's final word: when
- * the cut is decided, set these to it and re-record (vitest -u), so this file is the list the submission scan reads.
+ * The launch cut, approved by the owner on 2026-10-20 (#816): group 1 on; group 2 (certified mail, signatures, card
+ * upload) on, as each is once its step is done; group 3 off. This file is the list the submission scan reads: when a
+ * group 2 feature stays off, or a live check turns one off, set it here and re-record (vitest -u).
  */
 const LAUNCH: Record<string, string> = {
   LETTER_IRL_PRINT_RENDERER: 'pdf',

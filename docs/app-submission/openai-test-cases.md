@@ -15,11 +15,11 @@ Reviewers test the production app, at one endpoint: `https://api.letterirl.com/m
 
 Two preconditions, both gates in [owner-checklist.md](./owner-checklist.md):
 
-- **Production runs the launch build, with every launch switch on.** These cases describe the
-  development branch as of 2026-10-17, with stages E to G of [launch-promotion.md](../launch-promotion.md)
-  done: every studio feature, arrival dates, certified mail and the paid options. Production must
-  carry them, with its connector refreshed after the last switch, before the reviewer account is
-  prepared.
+- **Production runs the launch build, with the launch cut on** (approved 2026-10-20, #816, and
+  set out in [launch-promotion.md](../launch-promotion.md)): the studio features, arrival dates and
+  the paid options, certified mail once its live letter passes, and the live checks done. The home,
+  address requests, saved designs and image generation are off. Production must carry the cut, with
+  its connector refreshed after the last switch, before the reviewer account is prepared.
 - **Pay & Send is on** (`JIT_PURCHASE_ENABLED=true` on the production API, as it was on
   2026-09-23). With it off, `get_started` offers packs only, and the Pay & Send cases below do not
   apply.
@@ -61,10 +61,9 @@ The setup itself:
 >
 > **Features:**
 > - Text-only letters, letters with header images (letterhead), or letters with enclosed photos, up to three pages
-> - Stationery themes, your own saved designs, and your signature
+> - Stationery themes and your signature
 > - Postcards in 4×6, 6×9 and 11×6, with a border, a greeting or a collage of photos
 > - Mail timed to arrive by a date you choose (USPS does not guarantee First-Class dates), and USPS Certified Mail
-> - A private link that asks someone for their address
 > - Address validation to ensure deliverability
 > - Saved return address for convenience
 > - Preview before sending — no surprises
@@ -144,7 +143,7 @@ pass (see [owner-checklist.md](./owner-checklist.md)). Reviewers may run the one
 
 ## Launch Feature Cases
 
-Every studio feature is on at launch (#680, decision D1). Most are tools above; some are inputs of the previews (collages, letters of more pages) or what the cards draw (the studio card, and the envelope, which the website's confirmation page draws too).
+The launch cut is on at launch (#816; the home, address requests and saved designs are not). Most are tools above; some are inputs of the previews (collages, letters of more pages) or what the cards draw (the studio card, and the envelope, which the website's confirmation page draws too).
 The portal takes only the eight cases above, so these are for the owner's final pass and for a
 reviewer who asks. Each starts from a preview on the reviewer account, and nothing is mailed until
 the person presses **Send** or **Pay & Send** on the card. The full checks are the manual tests named
@@ -152,18 +151,20 @@ in the last column ([manual-tests.md](../manual-tests.md)).
 
 | Case | Prompt | Expected | Manual test |
 |------|--------|----------|-------------|
-| Home (*reviewer*) | "Show me my Letter IRL home." | `open_letter_home` shows open previews, recent mail with its status, and recent recipients. Nothing changes. | HOME-01 |
 | Arrive by a date (*reviewer*) | After a preview: "Make it arrive by [a date two weeks out]." | `set_arrival_date` sets the date on the draft and the card shows when it goes to the printer. After **Send**, the card says it is scheduled. | SCHEDULE-01 |
 | Cancel scheduled mail (*reviewer*) | After a scheduled send: "Cancel that letter." | ChatGPT asks first; `cancel_scheduled_mail` then cancels it, with `confirm: true`, and says what came back to the balance. | SCHEDULE-01 |
 | Stationery (*reviewer*) | "Put it on the botanical stationery." | `set_stationery` draws the letter again on the theme, with the date line; the next preview remembers it. | STATIONERY-01 |
-| Saved design | "Save this look as 'Thank-you notes'." | `save_stationery_design` saves it; `list_stationery_designs` lists it, and a later preview can use it. | STATIONERY-02 |
 | Signature | "Sign my letters with this signature" and a photo of it | `set_signature` keeps it; `set_letter_signature` draws it on the letter under the sign-off. `clear_signature` asks first. | SIGNATURE-01 |
 | Words and room to write | "Add a paragraph about our trip." | `set_letter_words` draws the page again with the new words. A letter that runs to two or three pages prints on both sides and is paid only with Pay & Send. After the person changes the words on the card's Words tab, a request to change a word still calls `set_letter_words`, whose refusal gives the card's words, rather than answering from the words ChatGPT saw last. | PAGES-01, STUDIO-01 |
 | Certified mail | "Send it certified, with a return receipt." | `set_mail_service` makes the draft USPS Certified Mail, paid only with Pay & Send, at its own price. | CERTIFIED-01 |
 | Postcard sizes and fronts (*reviewer*) | "Make the postcard 4x6 with a white border and the caption 'Cape Cod'." | `set_postcard_style` draws it again at the size, with the front. Sizes other than 6x9 are paid only with Pay & Send. | POSTCARD-01 |
 | Collage (*reviewer*) | "Make a postcard of these three photos." | `quote_and_preview_postcard` draws the photos as one front. | COLLAGE-01 |
-| Address request (*reviewer*) | "I don't know my aunt's address. Can she send it to me?" | `request_address` makes a private link for the person to share. `get_address_request` says when she has answered; `cancel_address_request` closes the link. No one is contacted by Letter IRL. | ADDRESS-01 |
-| Not an address lookup (*reviewer*, negative) | "Look up my friend Sam Rivera's home address." | Letter IRL does not look addresses up: it may offer `request_address`, a link for Sam to answer, and never guesses or searches for one. | ADDRESS-01 |
+| Not an address lookup (*reviewer*, negative) | "Look up my friend Sam Rivera's home address." | Letter IRL does not look addresses up: it asks the person for the address, and never guesses or searches for one. | the server instructions |
+
+Not at launch, so not listed and not reviewed: the home (`open_letter_home`, HOME-01), saved designs
+(`save_stationery_design` and the two beside it, STATIONERY-02) and address requests
+(`request_address` and the two beside it, ADDRESS-01). Each comes back after the launch, as a tool
+change that goes to review.
 
 **Paid options and the reviewer.** Certified mail, letters of two or three pages, and 4x6 and 11x6
 postcards are paid only with Pay & Send: letter packs and gift letters pay for one-page letters and
@@ -326,12 +327,14 @@ and stays out when it should not (precision).
 
 ## Tool Annotations Verification
 
-With every launch switch on (stages E to G of [launch-promotion.md](../launch-promotion.md)) and
-image generation off, ChatGPT is served 41 tools: every row below but `generate_image_for_mail`
-and `upload_photo_chunk`. ChatGPT's upload card hands over its own file store's link, so it is never
-served the card's chunked upload. Four of the 41 are card-only: listed, but hidden from the model
+At the launch cut (approved 2026-10-20, [launch-promotion.md](../launch-promotion.md)), ChatGPT is
+served 34 tools, pinned by `tests/unit/mcp/__snapshots__/tools-list.chatgpt-launch.json`: every row
+below but `generate_image_for_mail`, `upload_photo_chunk`, the home's `open_letter_home`, the
+address requests' three tools and the saved designs' three, all off at launch. With every switch on
+and image generation off it would be 41. ChatGPT's upload card hands over its own file store's link, so it is never
+served the card's chunked upload. Four of the 34 are card-only: listed, but hidden from the model
 and called only by the card (`send_letter`, `send_postcard`,
-`create_mail_checkout` and `get_draft_status`). At production's defaults before those stages, 24
+`create_mail_checkout` and `get_draft_status`). At production's defaults before stages C to G of the promotion, 24
 are served. Which switch lists which tool, and for which app, is in `src/mcp/toolCatalog.ts`.
 
 | Tool | readOnlyHint | openWorldHint | idempotentHint | destructiveHint |

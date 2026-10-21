@@ -1,20 +1,20 @@
 # Launch Promotion Plan
 
-**Last Updated:** October 16, 2026
+**Last Updated:** October 20, 2026
 
 The plan for promoting the launch version to production (#702, part of #680; tracker #158). It says
 what is pending, in what order it goes, what each system needs and when, how to check each stage,
 and how far back each stage can be rolled. Steps that need credentials or a dashboard are the
 owner's; everything else can be driven by an agent with the owner's approval at each change.
 
-Revalidate before acting: numbers below are as of `dev` at `3db2f57` (2026-10-16).
+Revalidate before acting: numbers below are as of `dev` at `789a0f5` (2026-10-20).
 
 ## What is pending
 
 | Repository | Production | Development | Pending |
 | --- | --- | --- | --- |
-| API (`mail-letter-irl`) | `master` at `27e160a` (#416, 2026-09-16) | `dev` | 248 pull requests (#336, #415 to #782), migrations `033` to `065` |
-| Website (`mail-letter-irl-website`) | `main` at `bc81767` (2026-09-16) | `dev` | 31 commits (#31 to #72) |
+| API (`mail-letter-irl`) | `master` at `27e160a` (#416, 2026-09-16) | `dev` | 285 pull requests (#336, #415 to #827), migrations `033` to `065` |
+| Website (`mail-letter-irl-website`) | `main` at `bc81767` (2026-09-16) | `dev` | 42 commits (#31 to #83) |
 
 [status.md](status.md) summarises what the launch version adds.
 
@@ -29,6 +29,7 @@ Revalidate before acting: numbers below are as of `dev` at `3db2f57` (2026-10-16
 6. **Stage E, the studio features without a price,** one per deploy.
 7. **Stage F, arrive-by.**
 8. **Stage G, the paid options,** one per deploy.
+9. **The live checks,** one real piece of each kind, then the submission.
 
 **The website goes first.** The API no longer boots in production without the send rule
 (`LETTER_IRL_SEND_CONFIRMATION_ENABLED=true`, #731), and the send rule sends people to the
@@ -45,12 +46,33 @@ run at :00 must not overlap it (see "Migrations").
 
 ### Decisions (owner)
 
-Taken on 2026-10-16 (recorded on #680):
+**The launch cut, approved 2026-10-20** (#816; it replaces 2026-10-16's "the launch set is
+everything"). Feature freeze since 2026-10-19: only launch-blocking fixes until launch.
 
-- **The launch set is everything** (D1 widened): every studio feature goes on at launch, each after
-  its test passes on DEV and its prerequisites below, in stages C to G. Any can be switched off
-  afterwards. The ChatGPT submission describes the whole set (41 tools), so it is submitted after
-  the set is fixed.
+- **Group 1, on at launch:** the print renderer (`pdf`), the studio card, stationery, room to
+  write, postcard sizes and layouts, collages, arrive-by, the envelope reveal, gift letters, and the
+  send confirmation.
+- **Group 2, on once its step is done** (otherwise off at submission):
+  - certified mail: one live certified letter after stage B, checking the markings and where the
+    return receipt goes; off before the submission if they fail;
+  - signatures: SIGNATURE-01's remaining steps on DEV; its privacy rows are published with the
+    promotion (#825, website #83);
+  - card upload (Claude): the owner's photo pick in Claude Desktop and on Android.
+- **Group 3, off at launch, for after it:** the home (#651, #665, #644), address requests, saved
+  designs, the separate words-editor flag (room to write turns the editor on), and image
+  generation (`off`).
+- **The submission's tool set is the cut:** 34 tools in ChatGPT, pinned by
+  `tests/unit/mcp/__snapshots__/tools-list.chatgpt-launch.json`. Certified mail or signatures
+  switched off shrinks it (card upload's tool is never served to ChatGPT), so the submission waits
+  until every group 2 step has its answer. Turning a flag on
+  after approval changes the tools, which goes back to review.
+- **Prices**, approved 2026-10-20: 2-page letter $5.99, 3-page $6.99, 4x6 postcard $3.99, 11x6
+  $5.99, certified $11.99, certified with return receipt $14.99. The live Stripe prices exist and
+  their ids are set on the production API and maintenance services (2026-10-20).
+- **The promotion date:** as soon as stage 0 is done.
+
+Taken on 2026-10-16 (recorded on #680), and still standing:
+
 - D2 to D8 as written on #680. The scheduled-mail privacy row (D6, #701) is approved; it is
   published with arrive-by.
 - `CONTENT_RETENTION_MODE`: `report` through the promotion, `enforce` in stage C (see "Rollback").
@@ -58,9 +80,11 @@ Taken on 2026-10-16 (recorded on #680):
 - Sign-in methods: what has passed on DEV (Google, GitHub, email and password; Microsoft only after
   LINK-02 with it), with our own OAuth applications.
 
-Still the owner's, before the stage that needs it: the option prices (#578) and their terms (#579),
-PostGrid's confirmation of certified mail, the privacy rows for signatures, saved designs and
-address requests, and the home's sharing (#651).
+Still the owner's, before the stage that needs it (stage G): the terms for the paid options (#579;
+drafted for the owner, never published by an agent), and PostGrid's confirmation of certified mail.
+The live certified letter above is a check on top of that confirmation, not a replacement for it,
+unless the owner waives the confirmation, in which case stage G and the flags table say so. The privacy rows for saved designs and address requests, and the home's sharing (#651), wait
+with those features until after the launch.
 
 ### Manual tests on DEV (owner, with an agent driving)
 
@@ -80,6 +104,13 @@ Owed before stage A, on DEV at the head being promoted:
 - **LINK-02** with each sign-in method chosen for production.
 - **ERASE-01**'s alert steps, and the admin order page's held-refund note (needs elevation).
 - **The other app gates:** CLIENT-02, CLIENT-04 (Codex), CLIENT-06, and the Hermes and VS Code gates.
+- **Group 2's DEV steps:** SIGNATURE-01's remaining steps (the card in ChatGPT, a test-mode send,
+  the website's signature page), and the photo pick in Claude Desktop and on Android (card upload).
+  A step not done before the submission leaves its feature off: set it off in the launch golden,
+  re-record, and take it out of the reviewer materials (below).
+- **The custom domain's open checks on DEV** (the tenant doc's state table): a new ChatGPT
+  connector, signing out of a session from before the switch, and a connection made before it,
+  used again after its access token has expired.
 
 [manual-tests.md](manual-tests.md) has each test.
 
@@ -152,7 +183,7 @@ Also before stage B:
 
 - **Image generation.** `LETTER_IRL_IMAGE_GEN_MODE` changes meaning: on the current code `off`
   shows a redirect card; on the new code `off` removes the tool and `redirect` is the old behaviour.
-  Check the production value, and set the one the launch wants (`off`, 24 tools).
+  Check the production value, and set the one the launch wants (`off`).
 - **Option flags stay unset, never `false`.** The preflight reads names, so a flag present as
   `false` still demands its prices.
 - **Values the preflight cannot see.** It reads names only, so check these values by hand:
@@ -327,25 +358,30 @@ rollback target.
 
 ## Code owed before stages E to G
 
-Several features still need code that is not in the head promoted at stage B (#680, 2026-10-16):
-approved-PDF storage for held mail (#697), the address-request retention cap and delete (#701 part
-2), the collage decode budget (#622), the arrive-by checkout fixes (#726), the certified mail
-follow-ups (#625), and the home's fixes (#651, #665). A feature goes on only once its code is **in
-production**, not only on `dev`: each needs a later promotion of `dev` to `master`, run like stage
-B (the merge window, the preflight from the promoted commit, provisioning when a change grants, a
-connector refresh) without the stage B rollback, which no longer applies.
+**None for the launch cut.** What was owed on 2026-10-16 merged to `dev` before the freeze, so it is
+in the head promoted at stage B: approved-PDF storage for held mail (#697: #789, #790), the
+address-request retention cap and delete (#701 part 2: #788), the collage decode budget (#622:
+#786), the arrive-by checkout fixes (#726: #787) and the certified mail follow-ups (#625: #803).
+Their issues close when stage B lands. The home's fixes (#651, #665) are not all in, and the home is
+off at launch.
+
+A feature whose code is only on `dev` goes on after a later promotion of `dev` to `master`, run like
+stage B (the merge window, the preflight from the promoted commit, provisioning when a change
+grants, a connector refresh) without the stage B rollback, which no longer applies.
 
 ## Stage E: the studio features without a price
 
-One per deploy, each after its test on DEV and once its owed code is in production, then a
-connector refresh:
+One per deploy, each after its test on DEV, then a connector refresh:
 
-1. The card features, with no floor: the studio card, the envelope reveal (on the
-   confirmation page too, once website #77 is promoted), the words editor, card upload.
+1. The card features, with no floor: the studio card, the envelope reveal (on the confirmation
+   page too: website #77 is promoted in stage A), card upload once its group 2 step is done.
 2. Postcard layouts and stationery (each prints a newer renderer version), then collages.
-3. Saved designs and signatures, once their privacy rows are published on both privacy pages.
-4. The home, after the owner's call on what it shares (#651).
-5. Address requests, once their privacy row is published.
+3. Signatures, once SIGNATURE-01's remaining steps pass (their privacy rows are published in
+   stage A).
+
+Not at launch (group 3): saved designs, the home, address requests and the separate words-editor
+flag. Each comes back after the launch, with its privacy row where it needs one; the home with
+#644 and #645.
 
 ## Stage F: arrive-by
 
@@ -365,7 +401,8 @@ they need `JIT_PURCHASE_ENABLED=true`; room to write and the postcard sizes also
 
 1. Set its price ids on the API **and the maintenance service**: both validate them at start (each
    while it has `JIT_PURCHASE_ENABLED=true`), and a maintenance service with the flag but not the
-   prices fails every hourly run.
+   prices fails every hourly run. Done ahead for all six live prices on 2026-10-20; check they
+   are still present.
 2. Turn its flag on, on both services.
 3. Re-run the preflight from the promoted commit: it asks for an option's prices only once that flag
    is set.
@@ -385,12 +422,12 @@ stage B allows (see "Rollback").
 | `LETTER_IRL_ARRIVE_BY_ENABLED` | API | stage F | #697 and #726 in production, #697's object storage, SCHEDULE-01, ADMIN-CMD-04, its privacy row | held mail still goes out with it off |
 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` | API, maintenance | stage G | its two prices, terms, PAGES-01 | under the renderer floor |
 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` | API, maintenance | stage G | its two prices, terms, POSTCARD-01 | not below #596's build while such postcards are live |
-| `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage G | its prices, terms, PostGrid's confirmation, CERTIFIED-01, provisioning | certified letters must be sent before rolling back |
-| `LETTER_IRL_STATIONERY_ENABLED`, `..._CUSTOM_STATIONERY_ENABLED` | API | stage E | STATIONERY-01; saved designs STATIONERY-02, with stationery on and their privacy row | `pdf-2` mail must be gone before rolling back |
-| `LETTER_IRL_SIGNATURES_ENABLED` | API | stage E | SIGNATURE-01, its privacy row | `pdf-4` mail |
+| `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage G (group 2; off before the submission if its live letter fails) | its prices, terms, PostGrid's confirmation, CERTIFIED-01, provisioning | certified letters must be sent before rolling back |
+| `LETTER_IRL_STATIONERY_ENABLED`, `..._CUSTOM_STATIONERY_ENABLED` | API | stationery stage E; saved designs off at launch | STATIONERY-01; saved designs STATIONERY-02, with stationery on and their privacy row | `pdf-2` mail must be gone before rolling back |
+| `LETTER_IRL_SIGNATURES_ENABLED` | API | stage E (group 2) | SIGNATURE-01, its privacy row | `pdf-4` mail |
 | `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` | API | stage E | POSTCARD-01 | `pdf-3` postcards |
-| `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` | API | stage E | ADDRESS-01, its privacy row; the website's `/address` page; `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` on the maintenance service matching the row | the old build does not sweep requests |
-| `LETTER_IRL_HOME_ENABLED`, `..._WORDS_EDITOR_ENABLED`, `..._POSTCARD_COLLAGES_ENABLED`, `..._CARD_UPLOAD_ENABLED`, `..._ENVELOPE_REVEAL_ENABLED`, `..._STUDIO_CARD_ENABLED` | API | stage E | each one's DEV test: HOME-01 to HOME-04, the words editor alone in STUDIO-01 step 3 and with room to write in PAGES-01, COLLAGE-01, CLIENT-01's upload steps, ENVELOPE-01, STUDIO-01; the home after #651 (`LETTER_IRL_CHATGPT_PLUGIN_ID` only once the production plugin exists and HOME-03 passes) | none |
+| `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` | API | off at launch | ADDRESS-01, its privacy row; the website's `/address` page; `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` on the maintenance service matching the row | the old build does not sweep requests |
+| `LETTER_IRL_HOME_ENABLED`, `..._WORDS_EDITOR_ENABLED`, `..._POSTCARD_COLLAGES_ENABLED`, `..._CARD_UPLOAD_ENABLED`, `..._ENVELOPE_REVEAL_ENABLED`, `..._STUDIO_CARD_ENABLED` | API | stage E; the home and the words-editor flag off at launch, card upload group 2 | each one's DEV test: HOME-01 to HOME-04, the words editor alone in STUDIO-01 step 3 and with room to write in PAGES-01, COLLAGE-01, CLIENT-01's upload steps, ENVELOPE-01, STUDIO-01; the home after #651 (`LETTER_IRL_CHATGPT_PLUGIN_ID` only once the production plugin exists and HOME-03 passes) | none |
 | `LETTER_IRL_IMAGE_GEN_MODE` | API | `off` | check the current value first | meaning differs between builds |
 | `CONTENT_RETENTION_MODE` | maintenance | `report`, then `enforce` in stage C | the rule below | never `enforce` while the old build is a rollback target |
 | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` | API, maintenance | `true` | | `false` pauses the printer queue (new build only) |
@@ -474,6 +511,19 @@ mail it would mishandle, so:
   its enforce path has known defects.
 - **The admin panel:** `ADMIN_TOTP_SECRET` stays until stage B has settled, because the old panel
   needs it.
+
+## Before the submission: the live checks
+
+After stage G and before the ChatGPT submission, with every group 1 flag on in production, and
+each group 2 flag whose step passed: mail one real piece of each kind and check it on arrival. That means a 2-page and a
+3-page letter (double-sided show-through), a 4x6 and an 11x6 postcard (postage), a letter with
+stationery and a signature (the signature only if signatures are on), a collage, and a certified letter with a return receipt (the markings,
+where the receipt goes). Certified mail whose live letter fails is switched off before the submission;
+for any other feature whose piece fails, switching it off is the owner's call. Whatever is off at
+the submission is off in the launch golden too (re-record it), and out of
+[openai-test-cases.md](app-submission/openai-test-cases.md): its line in the app description, its
+launch feature case, and the count and list under Tool Annotations Verification. So the tool set
+and the materials OpenAI reviews are the ones that work.
 
 ## After the promotion
 

@@ -139,9 +139,10 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
 `https://developers.openai.com/plugins/deploy/submission`). Record each gate's outcome in the
 [release record](#release-record) below.
 
-- [ ] **Launch build.** Production runs the launch promotion from `dev` (#158) with stages E to G of
-      [launch-promotion.md](../launch-promotion.md) done, so every launch switch is on, and the
-      production connector has been refreshed after the last switch. The reviewer materials describe
+- [ ] **Launch build.** Production runs the launch promotion from `dev` (#158) with stages A to G
+      and the live checks of [launch-promotion.md](../launch-promotion.md) done, so the launch cut
+      (#816) is on: group 1, each group 2 feature whose step passed, and group 3 off. The production
+      connector has been refreshed after the last switch. The reviewer materials describe
       that build, so this comes before preparing the reviewer account.
 - [ ] **Pay & Send on.** `JIT_PURCHASE_ENABLED=true` on the production API. The reviewer
       materials promise it; it was on on 2026-09-23.
@@ -155,12 +156,15 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
       that `curl -si https://api.letterirl.com/.well-known/openai-apps-challenge`
       answers 200 with the token as the whole body. Then press Verify. The path answers 404 while the
       variable is unset.
-- [ ] **Scan Tools.** The portal discovers the tools production serves. With every launch switch
-      on (stages E to G of [launch-promotion.md](../launch-promotion.md)) and image generation off,
-      that is 41: every tool in [Tool Annotations Verification](./openai-test-cases.md#tool-annotations-verification)
-      but `generate_image_for_mail` and `upload_photo_chunk`, with the card-only `send_letter`,
-      `send_postcard`, `create_mail_checkout` and `get_draft_status` among them. Before those stages
-      production serves 24, and each switch adds its tools, so scan only after the last switch and a
+- [ ] **Scan Tools.** The portal discovers the tools production serves. At the launch cut that
+      is 34, the list in `tests/unit/mcp/__snapshots__/tools-list.chatgpt-launch.json`
+      ([Tool Annotations Verification](./openai-test-cases.md#tool-annotations-verification) says
+      which are left out), with the card-only `send_letter`, `send_postcard`,
+      `create_mail_checkout` and `get_draft_status` among them. If a group 2 feature stayed off,
+      that file was re-recorded to match and is the count to expect, and the feature is out of
+      [openai-test-cases.md](./openai-test-cases.md) (the app description, its launch feature case,
+      and the count and list under Tool Annotations Verification). Production serves 24 before
+      stages C to G, and each switch adds its tools, so scan only after the last switch and a
       connector refresh. Record any warning, and give each tool's three hint
       justifications from [Justifications for the portal](./openai-test-cases.md#justifications-for-the-portal).
 - [ ] **Starter prompts.** The listing's prompts for customers, from
