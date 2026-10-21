@@ -95,8 +95,8 @@ Use this table to verify each application has the correct settings:
 | DCR Enabled | Settings → Advanced | Rollback inventory only |
 | Friendly Name | Settings → General | `Letter IRL` |
 | Google Connection | Connections | `is_domain_connection: true` |
-| Microsoft Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered, off on development since 2026-10-20 |
-| Apple Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered, off on development since 2026-10-20 |
+| Microsoft Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered; on development, unticked on every listed application since 2026-10-20, promotion off to confirm (see "State on 2026-10-20") |
+| Apple Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered; on development, unticked on every listed application since 2026-10-20, promotion off to confirm (see "State on 2026-10-20") |
 | GitHub Connection | Connections | `is_domain_connection: true` |
 | Username-Password | Connections | `is_domain_connection: true` |
 | Consent screen shows the scope descriptions | No dashboard page. Tenant flag `use_scope_descriptions_for_consent`, set through the Management API | `true`. Development set on 2026-09-28; production at the launch promotion (#267) |
