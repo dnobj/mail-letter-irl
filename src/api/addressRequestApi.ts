@@ -39,7 +39,7 @@ import {
   readAddressRequestPage,
   type GivenAddress
 } from '../services/addressRequestService.js';
-import { assessValidation } from '../services/addressVerificationPolicy.js';
+import { assessValidation, US_STATE_CODES } from '../services/addressVerificationPolicy.js';
 import { getLetterProvider } from '../services/providers/index.js';
 import { unprintableCharacters } from '../services/printableText.js';
 import { rateLimitMiddlewareWithGlobal } from './middleware/rateLimit.js';
@@ -50,18 +50,6 @@ export const ADDRESS_REQUEST_API_PREFIX = '/api/public/address-requests/';
 
 /** A page's whole body: a token and an address, so a few kilobytes at most. */
 const BODY_LIMIT_BYTES = 4 * 1024;
-
-/**
- * The state and territory codes USPS delivers to (Publication 28, Appendix
- * B), with DC, the freely associated states and the military post offices:
- * the page offers these and nothing else.
- */
-export const US_STATE_CODES: readonly string[] = [
-  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS',
-  'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC',
-  'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
-  'AS', 'GU', 'MP', 'PR', 'VI', 'FM', 'MH', 'PW', 'AA', 'AE', 'AP'
-];
 
 /** The longest each field may be, in characters as a reader counts them. */
 export const ADDRESS_FIELD_LIMITS = { name: 100, addressLine1: 100, addressLine2: 100, city: 60 } as const;
@@ -238,7 +226,8 @@ export function givenAddressOf(
 
 /**
  * PostGrid's verification under the preview's policy: an address it corrects
- * is kept corrected, one it cannot reach is refused with the reason, and one
+ * is kept corrected, one it cannot reach or corrects to a place outside the
+ * U.S. is refused with the reason, and one
  * it cannot check (the service down, a unit it cannot confirm) goes ahead as
  * given, as a preview's does.
  */
@@ -255,8 +244,8 @@ async function verified(address: GivenAddress): Promise<{ ok: true; address: Giv
   });
   const assessment = assessValidation('Your', validation);
   if (assessment.outcome === 'blocked') return { ok: false, message: assessment.blockText ?? 'This address could not be delivered to.' };
-  if (validation.status === 'corrected' && validation.verifiedAddress) {
-    const fixed = validation.verifiedAddress;
+  if (assessment.correction) {
+    const fixed = assessment.correction;
     return {
       ok: true,
       address: {

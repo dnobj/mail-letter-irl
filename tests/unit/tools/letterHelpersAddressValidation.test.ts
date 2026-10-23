@@ -142,6 +142,42 @@ describe("validateAddressesWithProvider (issue #200 policy)", () => {
     expect(results.addressWarnings).toBeUndefined();
   });
 
+  // Observed on DEV 2026-10-23: a test-key verifier turned a New York
+  // recipient into Toronto, and the postcard was mailed there.
+  const torontoCorrection: AddressValidationResult = {
+    status: "corrected",
+    isValid: true,
+    originalAddress: { line1: "20 W 34th St", city: "New York", state: "NY", postalCode: "10001", country: "US" },
+    verifiedAddress: {
+      line1: "20 W 34th St",
+      city: "TORONTO",
+      state: "ON",
+      postalCode: "M5J2N8",
+      country: "CA"
+    }
+  };
+  const newYork = { addressLine1: "20 W 34th St", addressLine2: undefined, city: "New York", state: "NY", postalCode: "10001" };
+
+  it("refuses a recipient correction outside the U.S., leaving the address as given", async () => {
+    mockValidate(verifiedResult, torontoCorrection);
+    const recipient = address(newYork);
+
+    await expect(validateAddressesWithProvider(address(), recipient, context)).rejects.toThrow(
+      /Recipient address could not be confirmed.*outside the U\.S\..*Please correct/s
+    );
+    expect(recipient).toEqual(address(newYork));
+  });
+
+  it("refuses a sender correction outside the U.S., leaving the address as given", async () => {
+    mockValidate(torontoCorrection, verifiedResult);
+    const sender = address(newYork);
+
+    await expect(validateAddressesWithProvider(sender, address(), context)).rejects.toThrow(
+      /Sender address could not be confirmed.*outside the U\.S\./s
+    );
+    expect(sender).toEqual(address(newYork));
+  });
+
   it("skips validation entirely when the provider has no validateAddress", async () => {
     vi.mocked(getLetterProvider).mockReturnValue({} as never);
 

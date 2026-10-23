@@ -446,8 +446,10 @@ export async function validateAddressesWithProvider(
       );
     }
 
-    // Auto-apply corrections
-    if (senderValidation.status === 'corrected' && senderValidation.verifiedAddress) {
+    // Auto-apply corrections, only as the policy hands them over: it refuses
+    // a correction outside the U.S. above rather than let one through here.
+    const senderCorrection = senderAssessment.correction;
+    if (senderCorrection) {
       context.logger.info(
         {
           correlationId: context.correlationId,
@@ -457,17 +459,18 @@ export async function validateAddressesWithProvider(
         "Auto-applying corrected sender address"
       );
 
-      sender.addressLine1 = senderValidation.verifiedAddress.line1;
-      sender.addressLine2 = senderValidation.verifiedAddress.line2;
-      sender.city = senderValidation.verifiedAddress.city;
-      sender.state = senderValidation.verifiedAddress.state;
-      sender.postalCode = senderValidation.verifiedAddress.postalCode;
-      if (senderValidation.verifiedAddress.country) {
-        sender.country = senderValidation.verifiedAddress.country;
+      sender.addressLine1 = senderCorrection.line1;
+      sender.addressLine2 = senderCorrection.line2;
+      sender.city = senderCorrection.city;
+      sender.state = senderCorrection.state;
+      sender.postalCode = senderCorrection.postalCode;
+      if (senderCorrection.country) {
+        sender.country = senderCorrection.country;
       }
     }
 
-    if (recipientValidation.status === 'corrected' && recipientValidation.verifiedAddress) {
+    const recipientCorrection = recipientAssessment.correction;
+    if (recipientCorrection) {
       context.logger.info(
         {
           correlationId: context.correlationId,
@@ -477,13 +480,13 @@ export async function validateAddressesWithProvider(
         "Auto-applying corrected recipient address"
       );
 
-      recipient.addressLine1 = recipientValidation.verifiedAddress.line1;
-      recipient.addressLine2 = recipientValidation.verifiedAddress.line2;
-      recipient.city = recipientValidation.verifiedAddress.city;
-      recipient.state = recipientValidation.verifiedAddress.state;
-      recipient.postalCode = recipientValidation.verifiedAddress.postalCode;
-      if (recipientValidation.verifiedAddress.country) {
-        recipient.country = recipientValidation.verifiedAddress.country;
+      recipient.addressLine1 = recipientCorrection.line1;
+      recipient.addressLine2 = recipientCorrection.line2;
+      recipient.city = recipientCorrection.city;
+      recipient.state = recipientCorrection.state;
+      recipient.postalCode = recipientCorrection.postalCode;
+      if (recipientCorrection.country) {
+        recipient.country = recipientCorrection.country;
       }
     }
   }
