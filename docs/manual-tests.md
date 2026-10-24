@@ -227,7 +227,7 @@ the only rehearsal of the rollback path.
 - [ ] Confirm production was unchanged throughout.
 
 **Purpose:** Integration and end-to-end tests that require manual verification
-**Last Updated:** October 17, 2026
+**Last Updated:** October 23, 2026
 
 ---
 
@@ -264,6 +264,17 @@ Quick checks after every deployment. All should pass before considering deployme
 
 The previous run, 2026-09-13 (production 2a0144d, development 7d3cdc5), did not exercise login
 or the dashboard. The DEV connector refresh after #376 listed every widget at v29.
+
+### Card smoke test (before stage A)
+
+Ask each client for a short letter preview through the (DEV) connector, without sending. The card
+must draw the letter, and pressing **Words** must switch its tab.
+
+**Passed on 2026-10-23**, on the development connector that signs in at `auth-dev.letterirl.com`:
+ChatGPT web, desktop, Android and iOS; Claude web, desktop and Android; VS Code. ChatGPT Android
+and Claude Android ran on the owner's phone over adb. VS Code's chat was opened with
+`code chat -m agent -n "<prompt>"`. It held the tool's result for review ("Allow Without Review in
+this Session") before the card filled. Claude's card paged through a gift letter's two pages.
 
 ### API Health
 - [x] `GET https://api.letterirl.com/healthz` returns 200
@@ -657,6 +668,18 @@ clicks Claude's prompts.
     - **The card's wording.** Its line "Your request for the preview is in the conversation" did
       not point Claude users to the message box. Since #520 (upload t18, widgets v45) it goes on: "If
       it is waiting in your message box, send it."
+
+    Third run, 2026-10-23, in Claude web through Claude in Chrome, on the owner's development
+    account, after the secret rotation. **Passed.**
+    - The first attempt, on 2026-10-22, failed with "The photo could not be kept just now": the
+      photo bucket's credentials had been rotated and the API had not yet been redeployed.
+    - After the redeploy the card took the photo ("Uploaded … If it is waiting in your message box,
+      send it."), and the preview drew it on the front of a 6x9 postcard.
+    - About 12 hours later the photo had expired. Asked again, Claude said so and opened a fresh
+      upload card; the new photo previewed.
+    - Sent from the card (test mode), the postcard was accepted by the printer. That send showed
+      the recipient rewritten to Toronto, because a test key sat behind address verification on
+      DEV; the key was replaced, and #830 refuses any correction outside the U.S.
 - [x] Ask Claude for a postcard to a test address with a photo you will upload. Claude calls
       `upload_image`, and the card, revision t17, shows **Select Photo** and "Max 25 MB". (Claude
       passed `context: "postcard"`, and **Allow once** was clicked.)
@@ -1207,6 +1230,19 @@ to the owner's own return address as recipient: preview validated both addresses
 `send_letter` deducted the ledger, routed to PostGrid, the provider accepted, the transaction
 committed; lot 4 initial / 2 remaining, balance 1 letter, letter accepted, job completed.
 
+**Re-run in development, 2026-10-21 to 10-23**, before stage A. **Passed.** A Starter pack (2
+letters, $5) was bought in the Stripe sandbox (order `4db8bd70-c496-4318-83be-be43029a4e38`) and
+refunded in full from the Stripe Dashboard at 14:44Z on 2026-10-21; none of its letters had been
+sent.
+- The development log shows `stripe.webhook_received` for `refund.created` and `charge.refunded`
+  at 14:44:29Z, and no failure line.
+- The balance dropped by the pack's two letters (15 to 13). `get_purchase_status` reads
+  `refunded`, the pack shows 0 of 2, and the pack's gift letter was revoked.
+- The admin panel's order page: status `refunded`, 5.00 of 5.00 USD refunded; the purchase lot
+  `revoked`, 4 initial and 0 remaining; a refund lot with reason `payment_refunded`. Its events show
+  `charge.refunded` ignored as `already_refunded` after `refund.created` had refunded the order.
+- No open alerts and no unmatched webhooks.
+
 Precondition: PAY-01, then one letter sent from that pack, so the spent and
 unspent halves are both present. Letter IRL has no refund button of its own;
 the refund is issued in Stripe and reaches the service only as a webhook.
@@ -1493,6 +1529,17 @@ Observations:
   empty account was not run.
 - The development log from 14:55 to 15:03 UTC has no `send_letter` or `create_mail_checkout` from
   the model. Its one `send_letter`, at 14:56:46, was the second card's (DUPLICATE-01).
+
+**Re-run on 2026-10-21**, before stage A, in ChatGPT web through Claude in Chrome, on a development
+account, with mail in PostGrid's test mode. **Passed.**
+- Asked to send, the model gave the confirmation link each time and never sent.
+- **Send** on the confirmation page sent the letter (balance 16 to 15), and **Send Letter** on a
+  card sent another.
+- The words changed after the page was shown (#723): the letter was changed in the chat, then
+  **Send** was pressed on the older confirmation page. It refused ("changed after this page showed
+  it") and drew the new version.
+- A card scrolled back into view asks the server for its draft again, so one press of its Send
+  sent the new words, not the old ones.
 
 Background: with `LETTER_IRL_SEND_CONFIRMATION_ENABLED` on, the model can't send mail in any app.
 The person sends it with the preview card's Send button, or on a confirmation page on the website
@@ -1803,6 +1850,16 @@ the sender's assistant learns which, and nothing about the request appears in a 
 ### SIGNATURE-01 — A saved signature on a letter (#608)
 
 **Status:** Partly run on development, 2026-10-03, with the dev CLI's tools. Passed: step 1 and the first two sentences of step 3 on build a2509ad ([the issue's comment](https://github.com/dnobj/mail-letter-irl/issues/608#issuecomment-5964801250): `set_signature` saved a picture with the soft-print hint; a preview leaving `signature` out said `remembered`; `signature: false` was remembered by the next preview); and, on build 997f568, step 3's last sentence (a `signature: true` preview after a `false` printed it, and the next preview leaving it out kept it), step 4, and the tools' half of step 6, where the served card (v64) also carries the Signature switch. Not run: the card drawn in ChatGPT (steps 2 and 5, "the card shows" in step 3, and the switch in step 6); step 7, a test-mode send, which the owner presses; step 8; steps 9 to 11, the website's page (merged as website #57), which need a sign-in (the owner's, or BTA's); and step 12, which turns the flag off on development.
+
+**Re-run on 2026-10-21 and 10-23**, in ChatGPT web and the development website through Claude in
+Chrome. **Passed:** steps 1 to 3 and 5 to 11 on 2026-10-21, with synthetic signature images; in
+step 7 the PostGrid test PDF printed the first signature, in Botanical, after the second was saved;
+step 8's refusal was checked through the dev CLI. Step 12 passed on 2026-10-23: with the flag off
+the manifest served 34 tools, none of the four signature tools and no `signature` input on any
+preview; the Settings page showed "Signatures are switched off for now…" with **Remove** only, then
+"Removed. Letters already previewed keep theirs.", and after a refresh no **Your signature**; with
+the flag back on, 38 tools and **Upload a photo** and **Draw it** again. Not run: step 11's touch
+checks (a second finger on the pad), which need a touch screen.
 
 **Preconditions:** Development, with `LETTER_IRL_SIGNATURES_ENABLED` on and `LETTER_IRL_PRINT_RENDERER=pdf`
 in the API. A client with the (DEV) connector, or the dev CLI's tools, with its tool list refreshed. A
