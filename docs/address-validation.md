@@ -49,7 +49,8 @@ Address validation runs in every preview tool (`quote_and_preview_letter`, `quot
    request page) takes the correction from `assessValidation`, which runs
    this check (`isUsCorrection` in `src/services/addressVerificationPolicy.ts`).
    On DEV, 2026-10-23, a test key behind verification "corrected" a New York
-   recipient to Toronto and the postcard was mailed there.
+   recipient to Toronto and the postcard went to the printer addressed there
+   (PostGrid test mode, so nothing was mailed).
 
    **c) Secondary unit unconfirmed ⚠️ (issue #200)**
    ```

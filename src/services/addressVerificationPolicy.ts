@@ -72,9 +72,10 @@ export const OUTSIDE_US_CORRECTION_REASON =
  * USA (PostGrid answers in lower case), a USPS state or territory code, and a
  * ZIP. Letter IRL mails only within the U.S., so a correction that fails any
  * of these is never applied. A verifier answering from a test key once turned
- * a New York recipient into "TORONTO, ON M5J2N8" and the card was mailed
- * there; the address given is not used in its place either, since the check
- * said that address is not what it seems.
+ * a New York recipient into "TORONTO, ON M5J2N8" and the card went to the
+ * printer addressed there (PostGrid test mode, so nothing was mailed). The
+ * address given is not used in its place either, since the check said that
+ * address is not what it seems.
  */
 export function isUsCorrection(address: CorrectedAddress): boolean {
   const country = (address.country ?? "").trim().toUpperCase();
@@ -148,8 +149,7 @@ export function assessValidation(
         blockText:
           `${label} address could not be confirmed: the address check matched it to a place outside the U.S., ` +
           `and Letter IRL mails only within the U.S.` +
-          `
-   Check the street number, street name, city, state, and ZIP.`
+          `\n   Check the street number, street name, city, state, and ZIP.`
       };
     }
     return correction ? { outcome: "corrected", correction } : { outcome: "corrected" };
