@@ -1,6 +1,6 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** October 20, 2026
+**Last Updated:** October 23, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
 
@@ -1370,7 +1370,7 @@ Check afterwards:
 - use a connector made before the move, at once and again after its access token has expired, which proves the
   refresh at the old address still works.
 
-**State on 2026-10-20:**
+**State on 2026-10-23:**
 
 | | Development | Production |
 | --- | --- | --- |
@@ -1381,8 +1381,12 @@ Check afterwards:
 | GitHub | new GitHub App, both callbacks | new GitHub App, both callbacks, swapped in and tested |
 | Apple, Microsoft | turned off on every listed application and domain-level promotion off (developer keys) | not offered |
 | Steps 3 and 4 | done (#826 at `e2b230d`) | after the API promotion ([launch-promotion.md](launch-promotion.md), stage B) |
-| Checks passed | website sign-in with Google, GitHub and email and password; sign-out; one call on a connection made before the move | after stage B |
-| Checks outstanding | that connection again after its access token expires; sign-out of a session from before step 4; a new ChatGPT connector | all |
+| Checks passed | website sign-in with Google, GitHub and email and password; sign-out; one call on a connection made before the move; a new ChatGPT connector (2026-10-21: authorize, token and issuer on the custom domain); Claude's connector from before the move, still working on 2026-10-22 and 10-23, days after its access token expired | after stage B |
+| Checks outstanding | sign-out of a session from before step 4 | all |
+
+A client that keys its sign-in by the authorization server signs in again instead of refreshing. VS Code's
+connection from 2026-09-26 asked once, on 2026-10-23, to "authenticate to auth-dev.letterirl.com", and worked after
+the sign-in. Expect the same single prompt for such clients after the production switch.
 
 ### Applying Branding to Production
 
