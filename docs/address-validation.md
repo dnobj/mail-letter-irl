@@ -1,6 +1,6 @@
 # Address Validation Feature
 
-**Last Updated:** September 16, 2026
+**Last Updated:** October 23, 2026
 **Status:** ✅ Implemented (requires separate PostGrid Address Verification API key)
 
 ---
@@ -39,6 +39,18 @@ Address validation runs in every preview tool (`quote_and_preview_letter`, `quot
    → Returns corrected addresses in response
    → User can see what was changed
    ```
+
+   A correction is applied only while it is still a U.S. address: country
+   US or USA, a USPS state or territory code, and a ZIP or ZIP+4. A
+   correction that fails any of these is refused with the ordinary
+   address-failure copy ("could not be confirmed ... outside the U.S."),
+   and the address as given is not used in its place. Every site that
+   applies corrections (the previews, `set_return_address`, the address
+   request page) takes the correction from `assessValidation`, which runs
+   this check (`isUsCorrection` in `src/services/addressVerificationPolicy.ts`).
+   On DEV, 2026-10-23, a test key behind verification "corrected" a New York
+   recipient to Toronto and the postcard went to the printer addressed there
+   (PostGrid test mode, so nothing was mailed).
 
    **c) Secondary unit unconfirmed ⚠️ (issue #200)**
    ```
@@ -101,7 +113,10 @@ For full address validation support:
    - Dashboard: https://dashboard.postgrid.com/
    - Navigate to Settings → API Keys
    - Look for "Address Verification API" section
-   - Copy test or live API key
+   - Copy the live API key. A test key returns made-up verification
+     answers (on DEV it once "corrected" a New York address to Toronto),
+     so a test key in `POSTGRID_ADDRESS_VERIFICATION_API_KEY` makes
+     corrections meaningless wherever mail is sent
 
 3. **Update .env:**
    ```bash

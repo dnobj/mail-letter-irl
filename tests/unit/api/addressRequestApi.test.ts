@@ -239,6 +239,20 @@ describe('the address request routes (#604)', () => {
     expect(answerAddressRequest).not.toHaveBeenCalled();
   });
 
+  it('refuses a correction to a place outside the U.S., keeping nothing', async () => {
+    validateAddress.mockResolvedValueOnce({
+      status: 'corrected',
+      originalAddress: {},
+      errors: [],
+      verifiedAddress: { line1: '20 W 34th St', city: 'TORONTO', state: 'ON', postalCode: 'M5J2N8', country: 'CA' }
+    });
+    const answer = await call('answer', { token: TOKEN, address: { ...ADDRESS, addressLine1: '20 W 34th St', city: 'New York', state: 'NY', postalCode: '10001' } });
+    expect(answer).toMatchObject({ status: 422, json: { reason: 'undeliverable' } });
+    expect(answer.json.message).toContain('Your address could not be confirmed');
+    expect(answer.json.message).toContain('outside the U.S.');
+    expect(answerAddressRequest).not.toHaveBeenCalled();
+  });
+
   it('keeps an address the service could not check, as a preview does', async () => {
     validateAddress.mockResolvedValueOnce({ status: 'failed', originalAddress: {}, errors: [], transportError: true });
     await expect(call('answer', { token: TOKEN, address: ADDRESS })).resolves.toMatchObject({ status: 200 });
