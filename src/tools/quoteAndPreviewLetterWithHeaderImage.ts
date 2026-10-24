@@ -28,7 +28,7 @@ export const quoteAndPreviewLetterWithHeaderImageTool: McpToolDefinition<
   title: "Preview a letter with a header image",
   // The last sentence follows the send rule and the app (#516).
   description: (client) =>
-    "Preview a physical letter draft with a header image at the top. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. " +
+    "Preview a physical letter draft with a header image at the top. Requires a real U.S. recipient mailing address. Its answer says what sending it takes and when the mail usually arrives. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. " +
     roomToWriteSentence() +
     certifiedMailSentence() +
     previewSendStep("send_letter", client),

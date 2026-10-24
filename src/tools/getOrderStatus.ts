@@ -116,7 +116,7 @@ export const getOrderStatusTool: McpToolDefinition<
 > = {
   name: "get_order_status",
   title: "Check an order's status",
-  description: "Retrieve the latest status timeline for a letter order. If no orderId is provided, returns the most recent order.",
+  description: "Retrieve the latest status timeline for a letter or postcard order. If no orderId is provided, returns the most recent order. Delivery is an estimate from the printing partner's schedule.",
   readOnly: true,
   meta: {
     "openai/toolInvocation/invoking": "Checking letter status…",

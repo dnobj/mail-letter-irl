@@ -2,7 +2,7 @@
   {
     "name": "quote_and_preview_letter",
     "title": "Preview a letter",
-    "description": "Preview a text-only physical letter draft. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. A letter too long for one page runs on to a second or third page, printed on both sides and paid with Pay & Send; three pages is the longest. Only when the person asks for USPS Certified Mail (it costs more), pass mailService \"certified\"; \"certified_return_receipt\" adds an electronic return receipt. Certified mail is paid with Pay & Send, never a letter pack or a gift letter, and a new preview of a certified letter must pass mailService again. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
+    "description": "Preview a text-only physical letter draft. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. Its answer says what sending it takes and when the mail usually arrives. A letter too long for one page runs on to a second or third page, printed on both sides and paid with Pay & Send; three pages is the longest. Only when the person asks for USPS Certified Mail (it costs more), pass mailService \"certified\"; \"certified_return_receipt\" adds an electronic return receipt. Certified mail is paid with Pay & Send, never a letter pack or a gift letter, and a new preview of a certified letter must pass mailService again. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -656,7 +656,7 @@
   {
     "name": "quote_and_preview_letter_with_header_image",
     "title": "Preview a letter with a header image",
-    "description": "Preview a physical letter draft with a header image at the top. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. A letter too long for one page runs on to a second or third page, printed on both sides and paid with Pay & Send; three pages is the longest. Only when the person asks for USPS Certified Mail (it costs more), pass mailService \"certified\"; \"certified_return_receipt\" adds an electronic return receipt. Certified mail is paid with Pay & Send, never a letter pack or a gift letter, and a new preview of a certified letter must pass mailService again. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
+    "description": "Preview a physical letter draft with a header image at the top. Requires a real U.S. recipient mailing address. Its answer says what sending it takes and when the mail usually arrives. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. A letter too long for one page runs on to a second or third page, printed on both sides and paid with Pay & Send; three pages is the longest. Only when the person asks for USPS Certified Mail (it costs more), pass mailService \"certified\"; \"certified_return_receipt\" adds an electronic return receipt. Certified mail is paid with Pay & Send, never a letter pack or a gift letter, and a new preview of a certified letter must pass mailService again. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1338,7 +1338,7 @@
   {
     "name": "quote_and_preview_letter_with_image",
     "title": "Preview a letter with an enclosed image",
-    "description": "Preview a physical letter draft with an enclosed image after the signature. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. A letter too long for one page runs on to a second or third page, printed on both sides and paid with Pay & Send; three pages is the longest. Only when the person asks for USPS Certified Mail (it costs more), pass mailService \"certified\"; \"certified_return_receipt\" adds an electronic return receipt. Certified mail is paid with Pay & Send, never a letter pack or a gift letter, and a new preview of a certified letter must pass mailService again. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
+    "description": "Preview a physical letter draft with an enclosed image after the signature. Requires a real U.S. recipient mailing address. Its answer says what sending it takes and when the mail usually arrives. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. A letter too long for one page runs on to a second or third page, printed on both sides and paid with Pay & Send; three pages is the longest. Only when the person asks for USPS Certified Mail (it costs more), pass mailService \"certified\"; \"certified_return_receipt\" adds an electronic return receipt. Certified mail is paid with Pay & Send, never a letter pack or a gift letter, and a new preview of a certified letter must pass mailService again. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2734,7 +2734,7 @@
   {
     "name": "get_order_status",
     "title": "Check an order's status",
-    "description": "Retrieve the latest status timeline for a letter order. If no orderId is provided, returns the most recent order.",
+    "description": "Retrieve the latest status timeline for a letter or postcard order. If no orderId is provided, returns the most recent order. Delivery is an estimate from the printing partner's schedule.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3149,7 +3149,7 @@
   {
     "name": "quote_and_preview_postcard",
     "title": "Preview a postcard",
-    "description": "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through after a direct preview attempt. If sender is omitted, the saved return address is used automatically. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
+    "description": "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. Requires a real U.S. recipient mailing address. Its answer says what sending it takes and when the mail usually arrives. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through after a direct preview attempt. If sender is omitted, the saved return address is used automatically. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
     "inputSchema": {
       "type": "object",
       "properties": {

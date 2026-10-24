@@ -1685,6 +1685,17 @@ function heldMailSentence(result: Record<string, unknown>): string {
 }
 
 /**
+ * When mail sent at once usually arrives (#630), for a preview's narration: the
+ * preview's own deliveryEstimate, so an app whose model reads only the text
+ * can still say it. Empty for held mail, whose dates heldMailSentence gives.
+ */
+function deliverySentence(result: Record<string, unknown>): string {
+  if (heldMailSentence(result)) return "";
+  const estimate = result.deliveryEstimate;
+  return typeof estimate === "string" && estimate ? ` ${estimate}.` : "";
+}
+
+/**
  * The sentence for mail sent with an arrival date that still waits for its
  * mail date (#535), on a send or an order status: when it goes to the
  * printer, and that it can be cancelled until then. The cancel is named only
@@ -1766,7 +1777,7 @@ export function summarizeToolResult(
       // once a pack landed, and permanent in a transcript beside a card
       // reading "Ready to send". canSendNow and reasonCannotSend are still in
       // structuredContent, so the model can still offer to help buy.
-      let summary = `Preview ready: ${previewCost(result, lettersRequired)}. The card shows whether it can be sent now and the options to proceed.`;
+      let summary = `Preview ready: ${previewCost(result, lettersRequired)}. The card shows whether it can be sent now and the options to proceed.${deliverySentence(result)}`;
       if (layoutType && layoutType !== 'text_only') {
         summary += ` Layout: ${layoutType.replace('_', ' ')}.`;
       }
@@ -1877,7 +1888,7 @@ export function summarizeToolResult(
       const lettersRequired = result.lettersRequired as number | undefined;
       const usedSaved = result.usedSavedReturnAddress as boolean | undefined;
       // Same reasoning as the letter branch: no expiring claim about balance.
-      let summary = `Postcard preview ready: ${previewCost(result, lettersRequired)}. The card shows whether it can be sent now and the options to proceed.`;
+      let summary = `Postcard preview ready: ${previewCost(result, lettersRequired)}. The card shows whether it can be sent now and the options to proceed.${deliverySentence(result)}`;
       if (usedSaved) {
         summary += " Using your saved return address.";
       }
