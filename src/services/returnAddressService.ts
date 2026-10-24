@@ -6,7 +6,7 @@
  */
 
 import { query } from '../db/index.js';
-import { assessValidation } from './addressVerificationPolicy.js';
+import { assessValidation, OUTSIDE_US_CORRECTION_REASON } from './addressVerificationPolicy.js';
 import { getLetterProvider } from './providers/index.js';
 import type { AddressValidationInput, AddressValidationResult } from './providers/types.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
@@ -158,9 +158,22 @@ async function validateAndSaveReturnAddress(
 
   // Handle validation result under the shared policy (issue #200):
   // secondary-unit and verification-outage failures save the address as
-  // entered with a warning; only genuine address failures refuse.
+  // entered with a warning; only genuine address failures refuse, and so does
+  // a correction to a place outside the U.S.
+  const assessment = assessValidation('return', validation);
+  if (validation.status === 'corrected' && assessment.outcome === 'blocked') {
+    writeDiagnostic('info', 'address.validation_rejected', {
+      errorClass: 'validation_error'
+    });
+    return {
+      success: false,
+      validationStatus: 'failed',
+      wasAutoCorrected: false,
+      originalAddress: normalizedAddress,
+      errors: [OUTSIDE_US_CORRECTION_REASON]
+    };
+  }
   if (validation.status === 'failed') {
-    const assessment = assessValidation('return', validation);
     if (assessment.outcome === 'blocked') {
       const errorMessages = validation.errors?.map(e => e.message) || ['Address is invalid or undeliverable'];
       writeDiagnostic('info', 'address.validation_rejected', {
@@ -191,16 +204,16 @@ async function validateAndSaveReturnAddress(
   let wasAutoCorrected = false;
   let correctionDetails: string | undefined;
 
-  if (validation.status === 'corrected' && validation.verifiedAddress) {
+  if (assessment.correction) {
     // Use the corrected address
     addressToSave = {
       name: address.name, // Keep the user's name
-      addressLine1: validation.verifiedAddress.line1,
-      addressLine2: validation.verifiedAddress.line2,
-      city: validation.verifiedAddress.city,
-      state: validation.verifiedAddress.state,
-      postalCode: validation.verifiedAddress.postalCode,
-      country: validation.verifiedAddress.country
+      addressLine1: assessment.correction.line1,
+      addressLine2: assessment.correction.line2,
+      city: assessment.correction.city,
+      state: assessment.correction.state,
+      postalCode: assessment.correction.postalCode,
+      country: assessment.correction.country
     };
     wasAutoCorrected = true;
 
