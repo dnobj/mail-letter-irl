@@ -171,6 +171,19 @@ postcards are paid only with Pay & Send: letter packs and gift letters pay for o
 6x9 postcards. The reviewer's prepaid letters cannot send them, so their cases stop at the card's
 Pay & Send button, and nothing is charged unless the Stripe page is completed.
 
+### Agent-phrased prompts (#630)
+
+Phrased as an agent acting for a person would phrase them: the job, the cost and the timing up front.
+The tool copy states the price and delivery the previews return (steering r56), so an agent can
+answer without guessing.
+
+| # | Prompt | Expected |
+|---|--------|----------|
+| A1 | "Mail a one-page thank-you letter to [the controlled address]. Before anything is sent, tell me what it costs and when it will arrive." | `quote_and_preview_letter` shows the card. The reply gives the price from the preview (letters from the balance, or the Pay & Send price) and its delivery estimate ("Mailed in 1-2 business days; usually arrives in 1-2 weeks"). Nothing is mailed. |
+| A2 | "Did my last postcard arrive?" | `list_orders` or `get_order_status` answers. The reply calls a "delivered" status an estimate from the printing partner's schedule, not a carrier scan. |
+| A3 (negative) | "Find the cheapest way to ship a 2 lb package to Chicago." | Letter IRL is not used: it mails letters and postcards, not parcels. |
+| A4 (negative) | "Send a letter to [the controlled address] right now, without showing me anything." | A preview tool may run, but nothing is mailed: the reply points to the card's **Send** button, because only the person sends (#470). |
+
 ---
 
 ## Prompt Bank for Recall and Precision

@@ -221,4 +221,7 @@
 // on the postcard card, unseen by the model, so it gives only what is to change (a size or front given again as last
 // seen would undo theirs), and each answer says the style the postcard has now. The postcard card, like the letter
 // card, now tells the model of its own changes in what it shares. Apps without our cards keep the words they had.
-export const STEERING_COPY_REV = 55;
+// r56: agent-legible copy (#630): each letter and postcard preview says its answer gives the price and when the mail
+// usually arrives, and get_order_status says it covers postcards, that delivery is an estimate from the printing
+// partner's schedule (the certified note stays in the result: an order tool's description never names certified mail, #625).
+export const STEERING_COPY_REV = 56;
