@@ -1,6 +1,6 @@
 # Launch Promotion Plan
 
-**Last Updated:** October 20, 2026
+**Last Updated:** October 23, 2026
 
 The plan for promoting the launch version to production (#702, part of #680; tracker #158). It says
 what is pending, in what order it goes, what each system needs and when, how to check each stage,
@@ -114,6 +114,17 @@ Owed before stage A, on DEV at the head being promoted:
   used again after its access token has expired.
 
 [manual-tests.md](manual-tests.md) has each test.
+
+**Done on DEV, 2026-10-21 to 10-23:**
+- SEND-01 and #723;
+- REFUND-01;
+- the card smoke test, in every client listed;
+- SIGNATURE-01 apart from step 11's touch checks;
+- the photo pick in Claude web;
+- of the custom domain's checks, the new ChatGPT connector and the connection made before the switch.
+
+**Still open:** PRINT-02's sends, GIFT-01 steps 4 and 8, LINK-02, ERASE-01's alert steps, the other app gates,
+the photo pick in Claude Desktop and on Android, and signing out of a session from before the switch.
 
 ### The production Auth0 tenant (owner), before stage B
 
