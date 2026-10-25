@@ -228,6 +228,12 @@ Also before stage B:
   (PowerShell's npm shim drops the `--` of `npm run preflight:cutover -- --env production`; run from
   `master`, it checks the old variable list) and close its gaps ([deployment.md](deployment.md)). It reads the API and maintenance services only, so check
   `ADMIN_TOTP_SECRETS` on the admin service by hand.
+- Make `ADMIN_TOTP_SECRETS` with `npm run admin:totp-enrol -- production <tailnet login>`, run from the
+  same `dev` checkout. `master`'s copy of the script takes no login, prints a bare secret for the old
+  `ADMIN_TOTP_SECRET`, and labels the authenticator entry with the environment alone, the same label
+  as any earlier entry. On development that left two `letter-irl-admin-dev` entries after the
+  2026-10-21 rotation, and the codes came from the wrong one. The current script's entry names the
+  login. Elevate once on production after stage B deploys, to prove the entry.
 - Keep `ADMIN_TOTP_SECRET` on the admin service: the current release needs it, and so does a
   rollback.
 

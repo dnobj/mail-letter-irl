@@ -732,6 +732,11 @@ clicks Claude's prompts.
       - **Claude on Android.** The card uploaded a camera photo in two chunks, resized to
         2400x1800 at 21:20:16Z. The request again waited in the message box under the banner.
         The preview used the photo (`imageAgeMs=219735`), and the postcard card drew it.
+      - **Claude on Android, after the secret rotation (2026-10-24), passed.** On the owner's phone
+        over adb, the card showed "Sending your photo…", then the photo under **Uploaded photo**, and
+        put the request in the message box under the caution banner. The owner sent it, and the
+        postcard card (draft `6cee4e8c`) drew the photo on the front. Nothing was sent. The rerun in
+        Claude Desktop is still open.
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
@@ -783,7 +788,18 @@ our tools arrive through Claude's own connection and log as `client=claude` (che
 
 ### CLIENT-04 — Codex (launch gate, #471)
 
-**Status:** In progress in development on 2026-09-26 (Codex CLI 0.157.1, in WSL).
+**Status:** Passed in development on 2026-10-24 and 25 (Codex CLI 0.163.0, in WSL), after the
+first steps on 2026-09-26 (0.157.1). The account was testlirl02.
+
+- **After the custom-domain move**, Codex asked to sign in again because the issuer had changed,
+  as VS Code did ([auth0-tenant-configuration.md](auth0-tenant-configuration.md)). Codex waits about
+  five minutes for the consent screen, so open the authorize link only when the person is ready to
+  press Accept.
+- **Non-interactive runs** (`codex exec`) refuse MCP tools under the default approval policy ("approval
+  policy is never"). `--approve-for-me` lets them run.
+- **One startup hang**, on 2026-10-24, stopped Codex before any request reached our server. A sign-in
+  later, a call 16 minutes after it, past the access token's expiry, refreshed and succeeded, so the
+  cause is not known. Record it if it recurs.
 
 - [x] `codex mcp add letter-irl-dev --url <development /mcp>`.
 - [x] In `~/.codex/config.toml`, add
@@ -796,7 +812,18 @@ our tools arrive through Claude's own connection and log as `client=claude` (che
       authorization is required for this action".)
 - [x] Ask Codex to use the `letter-irl-dev` server, not the Letter IRL app, for the balance. (After
       the second login, `get_account_balance` succeeded as `client=codex`.)
-- [ ] Preview, send by the link, refusals, disconnect.
+- [x] Preview a letter, then ask Codex to send it. It should call `request_send`, give the link and
+      send nothing. (It did.)
+- [x] Open the link, signed in to the development website as the same account, and press **Send
+      this letter**. (Sent; PostGrid test mode accepted it.)
+- [x] A refusal: ask about an order that is not on the account. ("No matching order found for this
+      user.")
+- [x] A call more than 15 minutes after sign-in succeeds: Codex refreshes its token.
+- [x] Disconnect: `codex mcp logout letter-irl-dev`. `codex mcp list` then shows **Not logged in**,
+      and no call reaches the server under that sign-in. (Asked for the balance afterwards, Codex fell
+      back to the person's ChatGPT app connection, which was refused because that old connector's
+      sign-in had expired. Logging out removes only Codex's copy: the grant at Auth0 stays until it
+      expires or is revoked.)
 - [x] Check what Codex's app route (`codex_apps`, the person's ChatGPT plugins) shows its model.
       Those calls use the ChatGPT connection, so the server treats them as ChatGPT. (Codex listed 22
       tools from the development app: no `send_letter` or `send_postcard`, and `request_send` is
@@ -1707,44 +1734,62 @@ On development, with `LETTER_IRL_PRINT_RENDERER=pdf`, in PostGrid test mode. Dec
 with `C:\letter-irl-scripts\probe-534\decode-534.mjs`, and crop its page with `extract-raster.mjs`.
 
 **Previews: passed on 2026-10-01 on development (6dc1061, flag on since 00:27 UTC), as testlirl02,
-through the development MCP server.** The sends wait for letters on that account (a test-mode pack
-or an admin grant: the owner's step).
+through the development MCP server.**
+
+**Sends: passed on 2026-10-25 on development (25fbfda), as testlirl02, PostGrid in test mode.** The
+drafts were made through the development MCP server, and the owner pressed Send on each confirmation
+page. All seven were read in PostGrid's flattened proofs with `decode-534.mjs` and `extract-raster.mjs`:
+text only (`2082196c`), header image (`6f1b99ed`), enclosed image (`1cf4d633`), the non-breaking hyphen
+and Hebrew (`3810c6f5`), a gift letter (`f0fd5a4c`), a 6x9 postcard (`227124e8`) and a two-page Pay &
+Send letter (`0da488cb`). Not run: the cards in ChatGPT and Claude, the legacy preview after the flag,
+and the gift postcard's send.
 - [x] The website's confirm page shows a renderer preview's page in Tinos, with the line breaks it
       prints with. (The SVG page: the address zone blank, no sender block.)
 - [x] The log's `draft.created` line carries `"renderer":"pdf-1"` (2026-10-01 01:06 UTC, draft
       3785aa77; `api-log.mjs` now shows the field). `createDraft` inserts the same value into
       `renderer_version`: the unit and PostgreSQL tests prove the insert, and the database itself was
       not queried.
-- [ ] A Pay & Send letter, which the hourly maintenance run dispatches, prints from our PDF too: the
-      maintenance service builds the whole repository, `assets/fonts` included.
+- [x] A Pay & Send letter, which the hourly maintenance run dispatches, prints from our PDF too: the
+      maintenance service builds the whole repository, `assets/fonts` included. (`0da488cb`, paid in
+      the Stripe sandbox, was dispatched by the 17:01 UTC run. Its PDF's producer is "Letter IRL
+      renderer pdf-1", two pages, printed double-sided.)
 - [ ] A full 26-line letter's card draws in ChatGPT. Its preview is about 95 KB of SVG in
       `_meta.previewHtml`, 15 to 20 times the legacy HTML's size.
-- [ ] Each layout sends: text only, a header image, and an enclosed image. PostGrid accepts the
+- [x] Each layout sends: text only, a header image, and an enclosed image. PostGrid accepts the
       upload with `pageCount` 1. The flattened page shows the text where the preview put it, and
-      PostGrid's Open Sans addresses in their boxes.
-- [ ] At the limit: 26 lines of text only, 16 under a full 2-inch header image and 13 above a full
-      3-inch enclosed image make drafts and print on one page. One line more is refused with "Letter
-      is 1 line too long for one page". (Text only, previews: 25 lines and a sign-off made a draft;
-      27 and a sign-off were refused: "Letter is 2 lines too long for one page: it takes 28 lines and
-      the page holds 26.")
-- [ ] A body with a non-breaking hyphen and a line of Hebrew previews and prints. The same hyphen in
+      PostGrid's Open Sans addresses in their boxes. (All three, each at its line limit: every line on
+      the one page below the address window, the header image in its band with the text below, and the
+      enclosed image after the signature.)
+- [x] At the limit: 26 lines of text only, 16 under a full 2-inch header image and 13 above a full
+      3-inch enclosed image, each counting the sign-off, make drafts and print on one page. Since room
+      to write, one line more makes a two-page letter paid with Pay & Send, instead of being refused.
+      (25, 15 and 12 lines plus a sign-off printed on one page. 26 lines plus a sign-off made the
+      two-page Pay & Send letter above. Its second page held only the sign-off: correct, but it looks
+      bare on paper.)
+- [x] A body with a non-breaking hyphen and a line of Hebrew previews and prints. The same hyphen in
       the recipient's name is refused ("in the recipient's address"). A body with a line separator
       (U+2028, as Apple Notes stores a soft line break) is refused, naming "a line separator (U+2028)".
-      (Previews: all three behaved so; the prints wait for the sends.)
-- [ ] A gift send previews on the renderer with its card as the second page, and records `pdf-1`
+      (The refusals were checked again on 2026-10-25. "co-op" with the non-breaking hyphen, and the Hebrew line, printed as previewed.)
+- [x] A gift send previews on the renderer with its card as the second page, and records `pdf-1`
       (#534 PR 5). PostGrid accepts the upload with `pageCount` 2; the flattened second page shows the
       card with the code the send minted, clear of PostGrid's integrity QR, and its QR scans. A
       sender's name with the ff ligature (U+FB00) is refused "in the sender's name, which the gift
       card prints". A full 26-line gift letter's card draws in ChatGPT: its preview is about 150 KB,
       twice a letter's. (Probe P8 on 2026-10-01 sent such a PDF in test mode: `pageCount` 2, the
-      stamp on page 1 only, and the flattened QR decodes.)
+      stamp on page 1 only, and the flattened QR decodes. On 2026-10-25 `f0fd5a4c` printed its card on
+      page 2 with the minted code BBPH-TFRB and "Redeem by January 23, 2027"; the flattened QR decodes
+      to that code, and the paper print scanned on Android (GIFT-01). The ff ligature was refused in
+      the sender's name. The ChatGPT card was not checked. Development's long website host breaks
+      "/g" onto its own line on the card; production's short host does not.)
 - [ ] A letter previewed before the flag was on prints on the legacy HTML after it.
-- [ ] A postcard preview records `pdf-1` (#534 Phase 4, PR 7a). Its confirm page shows the front, the photo
+- [x] A postcard preview records `pdf-1` (#534 Phase 4, PR 7a). Its confirm page shows the front, the photo
       to the edges, and the back: the message in its left half, the addresses stamped on the right with
       "RETURN TO:". A 16-line message makes a draft; 17 lines are refused with "Postcard message is 1 line
       too long for the back". A postcard sent in test mode prints
       from our PDF: PostGrid accepts it with `pageCount` 2 and it stays `ready`. (Development,
-      2026-10-01, on 2c098c1: the refusal, the draft and the confirm page's two pages passed.)
+      2026-10-01, on 2c098c1: the refusal, the draft and the confirm page's two pages passed. On
+      2026-10-25 the 6x9 send `227124e8` printed two pages: the photo on the front, the message in the
+      back's left half and PostGrid's address stamp on the right, status `ready`.)
 - [ ] The postcard card shows the front and back pages in ChatGPT and in Claude, after Refresh tools to
       widgets v49 (#534 Phase 4b). A legacy postcard keeps the card's own front and mockup.
       (ChatGPT on development, 2026-10-01, on 5999dff: passed for a testlirl02 postcard, and the letter
@@ -2486,6 +2531,11 @@ that #431 fixes. Steps 2 to 4 and 8 were run again on 2026-09-29 on the #487 wor
 paper. The prints fit, and the QR codes scanned on an S26 Ultra; the iPhone scan is still open. Gates switching
 `LETTER_IRL_GIFT_LETTERS_ENABLED` on in production ([gift-letters.md](gift-letters.md)).
 
+**2026-10-25, both printing paths on paper, passed on Android.** Page 2 of PRINT-02's gift send
+(`f0fd5a4c`, drawn by our renderer, code BBPH-TFRB) and page 2 of the 2026-09-29 letter (the legacy
+layout, code 314M-5VXS) were printed from PostGrid's proofs at actual size. The owner's Galaxy scanned
+each from paper and opened its claim page; neither code was redeemed. The iPhone scan was not run.
+
 **#487 changed the printed words (2026-09-28).** The card no longer names ChatGPT, since a letter
 can now be written in any connected app: "a conversation with an AI assistant", and "You write your
 letter with your AI assistant". Steps 4 and 8 were printed again on the new copy on 2026-09-29,
@@ -2504,8 +2554,8 @@ after deploy (widget v36).
        - [x] page 2 holds the card in its upper half, clear of PostGrid's integrity QR and
              sequence ids at the bottom left;
        - [ ] the QR scans on an iPhone and on the S25 Ultra, in ordinary indoor light, and opens
-             `<website>/g/<code>`; (the Android phone passed on paper on 2026-09-29; the iPhone is
-             still to do);
+             `<website>/g/<code>`; (the Android phone passed on paper on 2026-09-29, and again on
+             2026-10-25 for both the legacy and the renderer card; the iPhone is still to do);
        - [x] the printed code, typed at `<website>/g`, is accepted;
        - [x] the QR rendered at all. If it is missing or blurred, set
              `LETTER_IRL_GIFT_QR_FORMAT=png` and repeat from step 2;
