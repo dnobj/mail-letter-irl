@@ -3243,7 +3243,7 @@ reachable and audited.
 
 **Status:** Passed on development, 2026-09-24. Build 7e92ba0 for steps 1 to 5 and 7; the step 6 sign-ins ran on c25f86d. The account was a throwaway password account, `testlirl_erase01`.
 
-- **Not yet run:** the follow-up alert checks in steps 4 and 6 (#453). They came after this run, and the account was erased before migration 036.
+- **The follow-up alert checks** in steps 4 and 6 (#453) came after this run; they passed in the 2026-10-25 run below.
 - **Reworded after the run**, to match the code:
   - the precondition: the letter was `accepted`, that is with the printer, and the erasure counts that as finished;
   - step 2: the account still had a letter, so Pay & Send was not offered and a pack checkout stood in;
@@ -3257,6 +3257,34 @@ What each step showed:
 5. In ChatGPT, the balance call answered "Account closed" with the sentence, and `get_account_balance` never started (`identity.account_erased_refused`). The dashboard showed the sentence, and its calls answered 403.
 6. A fresh password sign-in (`prompt=login`) got the sentence. After the Auth0 user was deleted, signing up again with the same address opened a new, empty account (`auth0|6ab589d1…`). The stub stayed erased.
 7. A new preview was refused (`ADMIN_INVALID_STATE`).
+
+**Run again on 2026-10-25, with the alert steps, passed** (build 2fced02, throwaway password account
+`testlirl_erase02`, through Codex instead of the ChatGPT connector). Step 2 was not repeated.
+1. The preview named nothing in flight: one letter, two drafts and the upload link to erase; three credits
+   forfeited. No email appeared.
+3. The erasure was queued, and `/audit` showed `account.erase` with the reason and counts only.
+4. The 22:05 UTC run erased the account: one letter scrubbed, two drafts deleted, three descriptions
+   cleared. The page showed `e***@erased.invalid`, the send block `account_erased`, the letter still
+   `accepted`, and "Still to do by hand" linking an open `account_erasure_followup` alert. `/alerts` listed
+   it with the account; its page gave the steps, and its details held only the account id. The forfeited
+   credits stay in the ledger, which the erasure keeps; the blocked account cannot spend them.
+5. Codex's balance call answered the erased-account sentence (`identity.account_erased_refused`). The
+   dashboard showed the sentence with **Try Again** and **Sign in again**. Codex answered the first
+   request from the person's ChatGPT app connection (`codex_apps`), another account; naming the
+   configured server reached ours.
+6. A fresh password sign-in (`prompt=login`) got the sentence. The Auth0 user was deleted, and the alert's
+   form filled in `auth0_user_deleted`; resolving it made the account page say the follow-up was done.
+   Signing up again with the same address opened a new, empty account (`auth0|6ade8a63…`), and the erased
+   record stayed erased.
+7. The account page no longer offers the erasure, and the preview's address answered `ADMIN_INVALID_STATE`.
+
+Two things to know when running it:
+- **The admin's 15-minute idle** ended the session twice between elevating and pressing Execute, each time
+  a bare `forbidden` (`ADMIN_CSRF_REJECTED` in `/audit`, #462). Elevate only when the person is ready to
+  press Execute straight away.
+- **A sign-out started by Claude in Chrome's navigation** is treated as another site's: `proxy.ts` sends it
+  home still signed in. Use the website's own **Log Out** link. While the old session stood, the sign-up's
+  return left it in place, so the new account appeared only after a real sign-out.
 
 **Preconditions:** A disposable development test account that has signed in on the website and in the
 (DEV) ChatGPT connector, has sent a letter that is now with the printer or finished (`sent`, `accepted`,
