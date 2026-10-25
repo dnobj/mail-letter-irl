@@ -1338,7 +1338,9 @@ Rehearse on development first, then production. In order:
      `LETTER_IRL_OAUTH_JWKS_URI` move to the custom domain. This is what the API publishes.
    - `LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS` names the tenant's own address. Apps that connected before the move
      keep the authorization server they found then and refresh there, so their tokens still carry the old `iss`.
-     The API accepts both and publishes only the first.
+     The API accepts both and publishes only the first. VS Code and Codex do not: they compare the issuer they
+     stored with the one the API now publishes, and ask the person to sign in again ("issuer changed"). Seen on
+     development on 2026-10-23 and 24; one fresh sign-in each, and they work at the custom domain afterwards.
    - `LETTER_IRL_OAUTH_PROD_ISSUER` (or `_DEV_ISSUER`) lists both addresses, comma or space separated. The API
      refuses to start if the issuer or any additional issuer is missing from it, so the other environment's
      tenant can never be accepted.
