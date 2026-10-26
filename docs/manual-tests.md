@@ -735,8 +735,11 @@ clicks Claude's prompts.
       - **Claude on Android, after the secret rotation (2026-10-24), passed.** On the owner's phone
         over adb, the card showed "Sending your photo…", then the photo under **Uploaded photo**, and
         put the request in the message box under the caution banner. The owner sent it, and the
-        postcard card (draft `6cee4e8c`) drew the photo on the front. Nothing was sent. The rerun in
-        Claude Desktop is still open.
+        postcard card (draft `6cee4e8c`) drew the photo on the front. Nothing was sent.
+      - **Claude Desktop, after the secret rotation (2026-10-26), passed.** The owner's photo went up
+        in two `upload_photo_chunk` calls at 02:47 UTC, and the preview made a 6x9 postcard with the
+        photo to the edges (`draft.postcard_created renderer=pdf-1 layout=full_bleed`) at 02:49.
+        Nothing was sent.
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
@@ -791,16 +794,24 @@ our tools arrive through Claude's own connection and log as `client=claude` (che
 
 ### CLIENT-03 — Visual Studio Code (launch gate, #471)
 
-**Status:** Steps 1 and 2 run in development on 2026-09-26 (VS Code 1.123.2, Windows).
+**Status:** Passed in development: steps 1 and 2 on 2026-09-26, the rest on 2026-10-26 (VS Code
+1.123.2, Windows). The refusals were not repeated here: Claude Code and Codex showed them, and the
+server answers every client the same way.
 
 - [x] Add the server: `code --add-mcp
       '{"name":"letter-irl-dev","type":"http","url":"<development /mcp>"}'`.
 - [x] **MCP: List Servers**, then the server, then **Start Server**. Sign in and accept. (VS Code
       found the metadata by itself, waited for the sign-in, and discovered 24 tools. The log shows
       `client=vscode`.)
-- [ ] A tool call from Copilot Chat, a preview, send by the link, refusals, disconnect. (Not run.)
-      Asked to send, the model should give `request_send`'s link. Since steering r20, `send_letter`
-      and `send_postcard` tell VS Code's model that a call answers with that link (#516, #670).
+- [x] A tool call from Copilot Chat, a preview, send by the link, disconnect. Asked to send, the
+      model should give `request_send`'s link. Since steering r20, `send_letter` and `send_postcard`
+      tell VS Code's model that a call answers with that link (#516, #670). (2026-10-26:
+      `get_account_balance`, `quote_and_preview_letter` and `request_send` logged as
+      `client: vscode` at 02:52 to 02:53 UTC; the owner opened the link and sent,
+      `send.confirmed_on_website outcome=sent` at 02:57.)
+- [x] Disconnect: the **Accounts** menu, the dev sign-in, **Sign Out**. The next request made VS Code
+      ask to authenticate to `auth-dev.letterirl.com` again. **Stop Server** alone is not a
+      disconnect: the next chat restarted the server with the same stored sign-in.
 - VS Code keeps a stream open on `/mcp`. When it dropped that stream, the API looped in its close
   handler until the stack overflowed (#485).
 
@@ -854,8 +865,10 @@ first steps on 2026-09-26 (0.157.1). The account was testlirl02.
 
 ### CLIENT-05 — Hermes Agent on a remote host (launch gate, #471)
 
-**Status:** Connected in development on 2026-09-26. Hermes v0.21.0 was running in Docker on a VPS,
-with the browser on another machine.
+**Status:** Passed in development: connected on 2026-09-26, the rest on 2026-10-26. Hermes v0.21.0
+was running in Docker on a VPS, with the browser on another machine. Its sign-in had died with the
+2026-10-21 secret rotation and the issuer change; Auth0's log showed a failed token exchange from
+Hermes every five minutes until it signed in again.
 
 Hermes waits for the sign-in on the loopback address of wherever it runs, on one of ports 27890 to
 27894. From a browser on another machine, that callback can't arrive by itself. Here the listener
@@ -874,7 +887,14 @@ could not reach it either.
       answers exactly one request, so a probe uses it up and the real callback hangs.
 - [x] Hermes reported "Authenticated — 24 tool(s) available". The token carries `mail:read
       mail:draft mail:send offline_access` and a refresh token. The log shows `client=hermes`.
-- [ ] A tool call, preview, send by the link, refusals, disconnect.
+- [x] A tool call, preview, send by the link, disconnect. (2026-10-26, as testlirl02, through
+      `hermes chat --query-file - --oneshot` in the container. After a fresh sign-in Hermes listed 36
+      tools; the balance answered. Hermes does not honour the app-only marker, so its model sees
+      `send_letter` and `send_postcard`. Asked to call `send_letter` on a fresh preview, the server
+      answered "Not sent: Letter IRL sends mail only when the person sends it…" with the link, so the
+      send rule holds for a client that shows card-only tools. The owner sent from the link, after a
+      sandbox Starter pack. `hermes mcp remove letter_irl_dev` removed the server and its local
+      tokens; it does not revoke them at Auth0.) The refusals were not repeated, as for VS Code.
 
 Hermes's own bugs on remote hosts are [#87329](https://github.com/NousResearch/hermes-agent/issues/87329)
 (the port collision) and [#103633](https://github.com/NousResearch/hermes-agent/issues/103633). The
@@ -883,9 +903,11 @@ Hermes on their own computer needs none of this.
 
 ### CLIENT-06 — OpenClaw (launch gate, #471)
 
-**Status:** The first two steps passed in development on 2026-09-28. The OpenClaw steps are not
-run: OpenClaw 2026.9.6 needs Node 24.16 or later, or 26.1 or later, and the test computer has
-Node 22.
+**Status:** The first two steps passed in development on 2026-09-28; install, sign-in, probe and
+disconnect on 2026-10-26, with OpenClaw 2026.10.7 under Node 24.22.1 in WSL (it needs 24.22.1 or
+later, or 26.12.1 or later; the Windows side stays on the project's Node 22). The agent steps were
+not run, by the owner's choice: an agent turn needs a model provider signed in to OpenClaw, and the
+server answers OpenClaw's tool calls as it answers every other client's.
 
 OpenClaw publishes no client document, and it takes no pre-registered client id
 ([openclaw#116052](https://github.com/openclaw/openclaw/issues/116052)). What it can do is point at a
@@ -908,22 +930,27 @@ in the website's `LETTER_IRL_CONNECT_APPS`.
       refused with "Callback URL mismatch" for another port. (`cimd-authorize-probe.mjs dev` on
       2026-09-28: port 8989 on `127.0.0.1` and on `localhost` reached the login page, and port 8990
       got `403 Callback URL mismatch.`)
-- [ ] Install OpenClaw 2026.9.6 or later, then add the server:
+- [x] Install OpenClaw 2026.9.6 or later, then add the server:
       `openclaw mcp add letter-irl-dev --url <development /mcp> --transport streamable-http --auth
       oauth --oauth-client-metadata-url <the document's address> --oauth-scope 'mail:read
       mail:draft mail:send offline_access'`. Without `--oauth-scope`, OpenClaw asks for the
       server's advertised scopes, OpenID's included, which went wrong for Codex (CLIENT-04).
-- [ ] `openclaw mcp login letter-irl-dev`, with the browser on the same computer. The consent screen
+- [x] `openclaw mcp login letter-irl-dev`, with the browser on the same computer. The consent screen
       names OpenClaw and lists Read, Draft, Send and offline access. On another computer the
       callback can't arrive; OpenClaw's fallback is `openclaw mcp login letter-irl-dev --code
       <code>`, which is known to fail on some versions
-      ([openclaw#123605](https://github.com/openclaw/openclaw/issues/123605)).
-- [ ] `openclaw mcp doctor letter-irl-dev --probe` finds the server and its tools. The API's log
+      ([openclaw#123605](https://github.com/openclaw/openclaw/issues/123605)). (2026-10-26: the
+      consent named OpenClaw and testlirl02, with the four scopes; OpenClaw in WSL received the
+      callback from Windows Chrome on 127.0.0.1:8989 and saved the credentials.)
+- [x] `openclaw mcp doctor letter-irl-dev --probe` finds the server and its tools. The API's log
       labels the calls `client=generic` with `clientIdKind=url`, since no profile names OpenClaw.
+      (The doctor answered "ok", and `openclaw mcp probe` listed 36 tools.)
 - [ ] A balance, a preview, then a send by the link: the preview's text ends with `request_send`,
-      and the person sends on the confirmation page.
-- [ ] The refusals: no letters, an unconfirmed address, an erased account.
-- [ ] Disconnect: remove the server in OpenClaw, and check that its next call is refused.
+      and the person sends on the confirmation page. (Not run: no model provider.)
+- [ ] The refusals: no letters, an unconfirmed address, an erased account. (Not run.)
+- [x] Disconnect: remove the server in OpenClaw, and check that its next call is refused.
+      (`openclaw mcp logout`, then a probe answered "requires OAuth authorization", then
+      `openclaw mcp unset` removed the entry.)
 
 OpenClaw does not ask before each tool call by default, so its agent may call `request_send`
 unattended. That only returns the link: the send rule is the safeguard (#470).
