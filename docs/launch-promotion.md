@@ -123,15 +123,16 @@ Owed before stage A, on DEV at the head being promoted:
 - the photo pick in Claude web;
 - of the custom domain's checks, the new ChatGPT connector and the connection made before the switch.
 
-**Done on DEV, 2026-10-24 and 25:**
+**Done on DEV, 2026-10-24 to 26:**
 - PRINT-02's seven sends, read in PostGrid's proofs;
 - GIFT-01's paper scans on Android, for both card layouts;
-- CLIENT-04 (Codex);
+- CLIENT-04 (Codex), and CLIENT-02 (Claude Code) with its refusals and disconnect;
 - ERASE-01 with its alert steps;
 - the photo pick on Claude Android.
 
-**Still open:** GIFT-01's iPhone scan; the other app gates (CLIENT-02's refusals and disconnect, Hermes,
-OpenClaw, VS Code); the photo pick in Claude Desktop. LINK-02 passed on DEV for Google, GitHub and email,
+**Still open:** GIFT-01's iPhone scan; the other app gates (Hermes, OpenClaw, VS Code); the photo pick
+in Claude Desktop; and what a person with an unconfirmed email sees when an app signs them in (Auth0's
+generic error page, found in CLIENT-02). LINK-02 passed on DEV for Google, GitHub and email,
 and signing out of a session from before the switch can no longer be tried there (the rotation of
 `AUTH0_SECRET` signed everyone out): both are production checks at stage B.
 

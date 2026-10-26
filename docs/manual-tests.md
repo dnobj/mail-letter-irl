@@ -743,7 +743,11 @@ clicks Claude's prompts.
 **Status:** Steps 1 to 3 run in development on 2026-09-26 (Claude Code 2.1.282, Windows). The
 preview, the send by the link and the model's tool list followed on 2026-09-28 (Claude Code
 2.1.283, on 8f994f3), in a fresh non-interactive session (`claude -p`) allowed only this server's
-tools. The account was testlirl02. The refusals on other accounts and the disconnect are not run.
+tools. The account was testlirl02. The refusals and the disconnect followed on 2026-10-26 (Claude
+Code 2.1.296, build b5437f0), on a second, temporary server entry, `letter-irl-dev-c02`, so the
+owner's own entry stayed signed in. `claude mcp login <name>` signs an entry in; it needs a real
+terminal and waits a few minutes for the consent. One finding is open: see the unconfirmed address
+below.
 
 - [x] Add the server: `claude mcp add --transport http --scope user letter-irl-dev-cli
       <development /mcp>`. `claude mcp get` should say it needs authentication.
@@ -760,9 +764,23 @@ tools. The account was testlirl02. The refusals on other accounts and the discon
 - [x] Open the link, signed in to the development website as the same account, and press **Send
       this letter**. ("Sent. We'll print your letter and mail it.", 4 letters to 3;
       `send.confirmed_on_website outcome=sent` at 16:44, PostGrid in test mode.)
-- [ ] The refusals: no letters, an unconfirmed address, an erased account. (Not run.)
-- [ ] Disconnect: `claude mcp remove letter-irl-dev-cli -s user`. (Not run: it removes the owner's
-      server entry.)
+- [x] The refusals:
+      - **No letters.** As a new account with 0 letters, the balance said so and pointed to letter
+        packs; the preview made a draft and said "Not enough letters in your balance"; asked to send,
+        the model called `request_send`, gave the link and sent nothing. The confirmation page read
+        "Sending it takes 1 letter. You have 0 letters." with **Buy letters** and no Send button.
+      - **An unconfirmed address.** Refused by the tenant's Action before any token is issued: the
+        Auth0 log shows "Failed Login", client Claude Code, with the confirmation-link sentence. But
+        Auth0 showed its own error page ("Oops!, something went wrong… contact the systems
+        administrator", the sentence only under Technical details), and Claude Code was never told:
+        it waited until its sign-in timed out. The website, which handles the error in its own
+        callback, shows the sentence properly. **Open:** a person who has not confirmed their email
+        sees what looks like an outage when they sign in from an app.
+      - **An erased account.** Signed in as the same account, which was then erased, the balance call
+        answered the erased-account sentence and nothing ran.
+- [x] Disconnect: `claude mcp logout <name>` (the Auth0 log shows "Success Revocation" for Claude
+      Code, so the refresh token is revoked, not only forgotten), then `claude mcp remove <name> -s
+      user`. `claude mcp list` then no longer shows the entry.
 
 The preview tools' descriptions still ended "Send later with send_letter", a tool Claude Code's
 model doesn't see: Claude Code hides card-only tools, and the server answers a call with the link
@@ -3285,6 +3303,9 @@ Two things to know when running it:
 - **A sign-out started by Claude in Chrome's navigation** is treated as another site's: `proxy.ts` sends it
   home still signed in. Use the website's own **Log Out** link. While the old session stood, the sign-up's
   return left it in place, so the new account appeared only after a real sign-out.
+- **Railway's Run now does not force the erasure.** The `account-erasures` task runs at most every 30
+  minutes (`ACCOUNT_ERASURE_INTERVAL_MS`), so a manual run within 30 minutes of the last one logs "not
+  due" and leaves the erasure queued. Run it again once 30 minutes have passed, or wait for the hour.
 
 **Preconditions:** A disposable development test account that has signed in on the website and in the
 (DEV) ChatGPT connector, has sent a letter that is now with the printer or finished (`sent`, `accepted`,
