@@ -100,6 +100,24 @@ Use this table to verify each application has the correct settings:
 | GitHub Connection | Connections | `is_domain_connection: true` |
 | Username-Password | Connections | `is_domain_connection: true` |
 | Consent screen shows the scope descriptions | No dashboard page. Tenant flag `use_scope_descriptions_for_consent`, set through the Management API | `true`. Development set on 2026-09-28; production at the launch promotion (#267) |
+| Error page | Settings → General → Error Pages | **Custom**, URL `<website>/sign-in-error` of the same environment (#837). Production once the website with website #86 is promoted |
+
+**The error page, #837.** When the linking Action refuses a sign-in that started in an app (an
+unconfirmed email, for example), Auth0 does not return the refusal to the app: it shows its own
+error page, "Oops!, something went wrong… contact the systems administrator", with our sentence
+only under Technical details, and the app waits until its sign-in times out (seen with Claude Code
+on development, 2026-10-26). With the custom setting, Auth0 sends the person to the website's
+`/sign-in-error` with `error`, `error_description` and `tracking` in the address. The page shows the
+description only when it is one of the Action's sentences, word for word, tells the person to go
+back to their app, and quotes the tracking id. A sentence changed in the Action must change in the
+website's `lib/sign-in-error.ts` too, or that refusal shows the page's general fallback.
+
+Development was switched on 2026-10-26 and checked the same day: a Claude Code sign-in as an
+unconfirmed password account landed on the website's page with the confirmation-link sentence,
+the line sending the person back to their app, and Auth0's reference. Auth0 sent the sentence as
+written, apostrophes unescaped, with `client_id`, `connection` and `lang` beside it. The app itself
+is still never told, so Claude Code waited until its sign-in timed out. An unrelated Auth0 error
+(`invalid_request` from `/v2/logout`) landed on the same page with its general fallback.
 
 **The consent flag, #267.** Without it, Auth0's consent screen builds labels from the scope names,
 so `mail:read` reads "mail your read". With it, the screen shows each scope's description from the
