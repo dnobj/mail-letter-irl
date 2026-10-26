@@ -132,8 +132,9 @@ Owed before stage A, on DEV at the head being promoted:
 - ERASE-01 with its alert steps;
 - the photo pick on Claude Android and in Claude Desktop.
 
-**Still open:** GIFT-01's iPhone scan, and what a person with an unconfirmed email sees when an app
-signs them in (Auth0's generic error page, #837). LINK-02 passed on DEV for Google, GitHub and email,
+**Still open:** GIFT-01's iPhone scan. #837 (an unconfirmed email signing in from an app saw Auth0's
+generic error page) is fixed on DEV by website #86 and the tenant's error page setting; production
+takes the setting in step 10 below. LINK-02 passed on DEV for Google, GitHub and email,
 and signing out of a session from before the switch can no longer be tried there (the rotation of
 `AUTH0_SECRET` signed everyone out): both are production checks at stage B.
 
@@ -186,6 +187,11 @@ must be ready before the API deploys against it
 9. The custom domain `auth.letterirl.com`, steps 1 and 2 of the tenant doc's "Moving a tenant to a custom
    domain": verified, emails switched, Google and GitHub callbacks in place. Done 2026-10-20; steps 3 and 4
    wait for stage B.
+10. The error page (#837), once the production website serves the `/sign-in-error` that handles it
+    (website #86), so after stage A: Settings → General → Error Pages → **Custom**, URL
+    `https://letterirl.com/sign-in-error`. Check it at stage B with a sign-up from an app that is not
+    confirmed yet: the person lands on our page with the confirmation-link sentence, not Auth0's
+    error page.
 
 ### Production variables set ahead (owner, or an agent with approval)
 
