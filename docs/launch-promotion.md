@@ -126,13 +126,14 @@ Owed before stage A, on DEV at the head being promoted:
 **Done on DEV, 2026-10-24 to 26:**
 - PRINT-02's seven sends, read in PostGrid's proofs;
 - GIFT-01's paper scans on Android, for both card layouts;
-- CLIENT-04 (Codex), and CLIENT-02 (Claude Code) with its refusals and disconnect;
+- every app gate: CLIENT-02 (Claude Code) with its refusals, CLIENT-03 (VS Code), CLIENT-04 (Codex),
+  CLIENT-05 (Hermes), and CLIENT-06 (OpenClaw) as far as sign-in, probe and disconnect (its agent steps
+  need a model provider and were left by the owner's choice);
 - ERASE-01 with its alert steps;
-- the photo pick on Claude Android.
+- the photo pick on Claude Android and in Claude Desktop.
 
-**Still open:** GIFT-01's iPhone scan; the other app gates (Hermes, OpenClaw, VS Code); the photo pick
-in Claude Desktop; and what a person with an unconfirmed email sees when an app signs them in (Auth0's
-generic error page, found in CLIENT-02). LINK-02 passed on DEV for Google, GitHub and email,
+**Still open:** GIFT-01's iPhone scan, and what a person with an unconfirmed email sees when an app
+signs them in (Auth0's generic error page, #837). LINK-02 passed on DEV for Google, GitHub and email,
 and signing out of a session from before the switch can no longer be tried there (the rotation of
 `AUTH0_SECRET` signed everyone out): both are production checks at stage B.
 
