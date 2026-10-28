@@ -37,7 +37,7 @@ Phase 7: Testing & Launch    ░░░░░░░░░░░░░░░░░
 **Status:** ✅ Deployed and working
 
 **What's Working:**
-- MCP server running on HTTP (Streamable HTTP + SSE fallback)
+- MCP server running on HTTP (Streamable HTTP; the SSE fallback was retired in #730)
 - Auth0 OAuth 2.1 + PKCE with 5 identity providers
 - 4 MCP tools: `quote_and_preview_letter`, `send_letter`, `check_status`, `get_balance`
 - Per-user authentication (JWT validation)

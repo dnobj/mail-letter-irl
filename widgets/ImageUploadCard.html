@@ -11,10 +11,8 @@
       body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--tb)}
       .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;overflow:hidden;max-width:100%}
       .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
-      .logo{width:17px;height:11px;flex:none;display:block}
-      /* One parametric SVG for both themes (assets/brand/letterirl-mark-small.svg):
-         the mark reads --li-blue, which the dark scope lightens. */
-      .dark{--li-blue:#6f98f2}
+      .logo{width:22.5px;height:14px;flex:none;display:block;background:url("data:image/png;base64,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") center/contain no-repeat}
+      .dark .logo{background-image:url("data:image/png;base64,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")}
       .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
       .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
       .bd{padding:14px}
@@ -45,7 +43,7 @@
   </head>
   <body>
     <div class="w">
-      <div class="hd"><span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 21"><path fill="none" stroke="var(--li-blue,#2563eb)" stroke-width="3" stroke-linejoin="round" d="M11.3 2.4c5.2 0 9.4 3.3 9.4 7.4 0 4.1-4.2 7.4-9.4 7.4-.8 0-1.6-.1-2.4-.2l-5.7 2.6 1.8-4.1C3 14.2 1.9 12 1.9 9.8c0-4.1 4.2-7.4 9.4-7.4Z"></path><g transform="rotate(-8 24 8.6)"><rect x="16.5" y="3" width="14.6" height="10" rx="1.6" fill="var(--li-orange,#f97316)"></rect><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" d="m18 4.7 5.8 4 5.8-4"></path></g></svg></span><b>Letter IRL</b><span class="ctx">Photo</span></div>
+      <div class="hd"><span class="logo" aria-hidden="true"></span><b>Letter IRL</b><span class="ctx">Photo</span></div>
 
       <!-- Select State -->
       <div id="state-select" class="bd" style="text-align:center">
@@ -57,7 +55,8 @@
           <button class="btn btn-s hidden" id="btn-library" type="button">Choose from Library</button>
         </div>
         <p id="library-status" class="status hidden"></p>
-        <p class="hint">JPEG, PNG, or WebP &middot; Max 10 MB</p>
+        <p id="upload-unavailable" class="status hidden">Photo upload isn't available in this app yet. Use a link to the photo instead.</p>
+        <p id="size-hint" class="hint">JPEG, PNG, or WebP &middot; Max 10 MB</p>
         <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp" class="hidden" />
       </div>
 
@@ -77,7 +76,7 @@
       <div id="state-uploading" class="bd hidden" style="text-align:center;padding:26px 14px">
         <div class="spin"></div>
         <h3 style="font-size:14px">Uploading&hellip;</h3>
-        <p class="ex">Adding your photo to ChatGPT's files.</p>
+        <p class="ex" id="uploading-text">Adding your photo to ChatGPT's files.</p>
       </div>
 
       <!-- Done State (after upload) -->
@@ -87,7 +86,7 @@
           <img id="done-img" src="" alt="Uploaded photo" />
         </div>
         <p id="done-note" class="hint hidden"></p>
-        <div class="url">
+        <div class="url" id="url-box">
           <code id="url-text"></code>
           <button class="btnc" id="btn-copy" type="button">Copy</button>
         </div>
@@ -99,14 +98,20 @@
         <p class="hint">Ask again in the conversation to retry.</p>
       </div>
 
-      <p class="rev">upload t14</p>
+      <p class="rev">upload t18</p>
     </div>
 
+    <!-- letter-irl:host -->
     <script>
       (function () {
-        // --- Theme (re-applied on set_globals: globals can arrive late) ---
+        // The card talks to its host only through window.letterIrlHost
+        // (widgets/shared/host.js, #474): window.openai in ChatGPT, MCP Apps in
+        // Claude and VS Code.
+        var host = window.letterIrlHost;
+
+        // --- Theme (re-applied on host changes: globals can arrive late) ---
         function applyTheme() {
-          var theme = (window.openai && window.openai.theme) ? window.openai.theme : "light";
+          var theme = host.theme();
           document.documentElement.classList.toggle("dark", theme === "dark");
         }
         applyTheme();
@@ -133,6 +138,10 @@
         var guidanceText = document.getElementById("guidance-text");
         var errorMessage = document.getElementById("error-message");
         var urlText = document.getElementById("url-text");
+        var urlBox = document.getElementById("url-box");
+        var sizeHint = document.getElementById("size-hint");
+        var uploadUnavailable = document.getElementById("upload-unavailable");
+        var uploadingText = document.getElementById("uploading-text");
 
         // Under an enforced widget CSP, a ChatGPT Library pick's download URL
         // is served from a blob host that is deliberately NOT in
@@ -160,17 +169,23 @@
         var debugEndpoint = "";
         var debugSessionId = "upload-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
 
-        var MAX_SIZE_BYTES = 10 * 1024 * 1024;
         var ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
         // --- Read context from tool output ---
         var uploadContext = "";
+        var KNOWN_CONTEXTS = ["postcard", "header_image", "inline_image"];
+        // Whether this card may send the photo itself (upload_image says so,
+        // #474); read with the rest of the tool output below.
+        var cardUploadAvailable = false;
         function hydrateFromToolOutput() {
           try {
-            if (window.openai && window.openai.toolOutput) {
-              var output = window.openai.toolOutput;
+            var output = host.toolOutput();
+            if (output) {
               if (output.context) {
-                uploadContext = output.context;
+                // Only one of the three the upload and the recent upload know:
+                // a result from before the server read it (#474) may carry the
+                // model's own words, which upload_photo_chunk would refuse.
+                uploadContext = KNOWN_CONTEXTS.indexOf(output.context) !== -1 ? output.context : "";
               }
               if (output.message) {
                 guidanceText.textContent = output.message;
@@ -181,6 +196,7 @@
               if (typeof output.debugEndpoint === "string" && output.debugEndpoint) {
                 debugEndpoint = output.debugEndpoint;
               }
+              cardUploadAvailable = output.cardUploadAvailable === true;
             }
           } catch (e) { /* ignore */ }
         }
@@ -192,7 +208,7 @@
         // Re-checked on openai:set_globals because bridge globals can arrive
         // after initial load.
         function selectFilesAvailable() {
-          return !!(window.openai && typeof window.openai.selectFiles === "function");
+          return typeof host.selectFiles === "function";
         }
 
         function updateLibraryAvailability() {
@@ -286,7 +302,7 @@
         }
 
         async function sendFollowUpFallback(downloadUrl, reason) {
-          if (!(window.openai && window.openai.sendFollowUpMessage)) {
+          if (typeof host.sendMessage !== "function") {
             debugLog("sendFollowUpMessage.unavailable");
             debugBeacon("sendFollowUpMessage.unavailable", { reason: reason });
             return;
@@ -295,7 +311,7 @@
           debugLog("sendFollowUpMessage.start", { reason: reason });
           debugBeacon("sendFollowUpMessage.start", { reason: reason });
           try {
-            await window.openai.sendFollowUpMessage({ prompt: prompt });
+            await host.sendMessage(prompt);
             debugLog("sendFollowUpMessage.success");
             debugBeacon("sendFollowUpMessage.success");
           } catch (e) {
@@ -324,9 +340,9 @@
           if (ACCEPTED_TYPES.indexOf(file.type) === -1) {
             return "Unsupported format. Please select a JPEG, PNG, or WebP image.";
           }
-          if (file.size > MAX_SIZE_BYTES) {
+          if (file.size > maxSizeBytes()) {
             var sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-            return "File is too large (" + sizeMB + " MB). Maximum size is 10 MB.";
+            return "File is too large (" + sizeMB + " MB). Maximum size is " + maxSizeMB() + " MB.";
           }
           return null;
         }
@@ -381,11 +397,11 @@
           // callTool stores the URL server-side but does NOT create a new
           // ChatGPT conversation turn. We always need sendFollowUpMessage
           // to prompt ChatGPT to act on the uploaded image.
-          if (window.openai && window.openai.callTool) {
+          if (typeof host.callTool === "function") {
             try {
               debugLog("callTool.start", { toolName: "confirm_uploaded_image" });
               debugBeacon("callTool.start", { toolName: "confirm_uploaded_image" });
-              await window.openai.callTool("confirm_uploaded_image", {
+              await host.callTool("confirm_uploaded_image", {
                 imageUrl: downloadUrl,
                 context: uploadContext || undefined
               });
@@ -405,7 +421,216 @@
           await sendFollowUpFallback(downloadUrl, reason);
         }
 
-        // --- Upload via OpenAI SDK ---
+        // --- Upload through the card itself (#474, phase 3) ---
+        // An app with no file store for cards (Claude) gets the photo from the
+        // card: shrunk to a JPEG of at most MAX_LONG_SIDE pixels, then sent in
+        // chunks through upload_photo_chunk. The server keeps it as this
+        // account's one uploaded photo, and the next preview with no image
+        // uses it. ChatGPT keeps its own file store and never takes this path.
+        var MAX_LONG_SIDE = 2400;
+        var JPEG_QUALITY = 0.88;
+        // 512 Ki base64 characters: 384 KiB of photo per call. A multiple of
+        // 4, so each chunk is whole base64 on its own.
+        var CHUNK_CHARS = 512 * 1024;
+
+        // By the kind of host, not by what it offers this moment, so ChatGPT
+        // keeps its own path whenever its calls arrive.
+        function cardUploads() {
+          return host.kind !== "chatgpt";
+        }
+
+        // The card shrinks a photo before sending it, so it takes a bigger
+        // original than ChatGPT's file store, which keeps the original as is.
+        function maxSizeMB() {
+          return cardUploads() ? 25 : 10;
+        }
+
+        function maxSizeBytes() {
+          return maxSizeMB() * 1024 * 1024;
+        }
+
+        function updateUploadAvailability() {
+          var unavailable = cardUploads() && !cardUploadAvailable;
+          btnSelect.classList.toggle("hidden", unavailable);
+          sizeHint.classList.toggle("hidden", unavailable);
+          uploadUnavailable.classList.toggle("hidden", !unavailable);
+          sizeHint.textContent = "JPEG, PNG, or WebP · Max " + maxSizeMB() + " MB";
+        }
+
+        function newUploadId() {
+          if (window.crypto && typeof window.crypto.randomUUID === "function") {
+            return window.crypto.randomUUID();
+          }
+          var bytes = new Uint8Array(16);
+          window.crypto.getRandomValues(bytes);
+          bytes[6] = (bytes[6] & 0x0f) | 0x40;
+          bytes[8] = (bytes[8] & 0x3f) | 0x80;
+          var hex = "";
+          for (var i = 0; i < bytes.length; i++) hex += ("0" + bytes[i].toString(16)).slice(-2);
+          return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+        }
+
+        function loadImage(src) {
+          return new Promise(function (resolve, reject) {
+            var img = new Image();
+            img.onload = function () { resolve(img); };
+            img.onerror = function () { reject(new Error("unreadable")); };
+            img.src = src;
+          });
+        }
+
+        // The picked photo as a JPEG of at most MAX_LONG_SIDE on its long side:
+        // its base64 for the upload and its data URL for the card to show.
+        async function shrinkPhoto() {
+          var img = await loadImage(previewDataUrl);
+          var width = img.naturalWidth;
+          var height = img.naturalHeight;
+          if (!width || !height) throw new Error("unreadable");
+          var scale = Math.min(1, MAX_LONG_SIDE / Math.max(width, height));
+          var canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(width * scale));
+          canvas.height = Math.max(1, Math.round(height * scale));
+          var ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("unreadable");
+          // A transparent PNG would turn black as a JPEG; paper is white.
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          var dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+          var prefix = "data:image/jpeg;base64,";
+          if (dataUrl.indexOf(prefix) !== 0) throw new Error("unreadable");
+          return { base64: dataUrl.slice(prefix.length), dataUrl: dataUrl };
+        }
+
+        // One call of the card's own: a refusal comes back as an error result.
+        async function uploadToolCall(args) {
+          var result;
+          try {
+            result = await host.callTool("upload_photo_chunk", args);
+          } catch (err) {
+            // The server refuses a tool it no longer lists as an error of the
+            // connection (#477), not as an error result: the same words.
+            if (err && /Tool upload_photo_chunk (not found|disabled)/.test(String(err.message))) {
+              var gone = new Error(uploadUnavailable.textContent);
+              gone.refused = true;
+              throw gone;
+            }
+            throw err;
+          }
+          if (result && result.isError) {
+            var parts = Array.isArray(result.content) ? result.content : [];
+            var text = "";
+            for (var i = 0; i < parts.length; i++) {
+              if (parts[i] && parts[i].type === "text" && typeof parts[i].text === "string") {
+                text = parts[i].text;
+                break;
+              }
+            }
+            // A card shown while upload was on, used after it was turned off:
+            // the tool is gone, so say what the card says when it is off.
+            if (/Tool upload_photo_chunk (not found|disabled)/.test(text)) {
+              text = uploadUnavailable.textContent;
+            }
+            var refused = new Error(text || "The photo could not be uploaded.");
+            refused.refused = true;
+            throw refused;
+          }
+          return (result && result.structuredContent) || result || {};
+        }
+
+        // Words written for the person: the server's refusals and our own.
+        // Anything else is the host's, and is not.
+        function forPerson(err) {
+          return Boolean(err && (err.refused || err.ours));
+        }
+
+        async function sendChunks(base64) {
+          var total = Math.ceil(base64.length / CHUNK_CHARS);
+          var uploadId = newUploadId();
+          var answer = null;
+          for (var index = 0; index < total; index++) {
+            var args = {
+              uploadId: uploadId,
+              index: index,
+              total: total,
+              data: base64.slice(index * CHUNK_CHARS, (index + 1) * CHUNK_CHARS)
+            };
+            if (uploadContext) args.context = uploadContext;
+            try {
+              answer = await uploadToolCall(args);
+            } catch (err) {
+              // A refusal is the server's answer. Anything else may only have
+              // lost the answer on the way back, and the server answers a
+              // chunk sent again as it did the first time.
+              if (err && err.refused) throw err;
+              answer = await uploadToolCall(args);
+            }
+            uploadingText.textContent = "Sending your photo… " + Math.round(((index + 1) / total) * 100) + "%";
+          }
+          if (!answer || answer.done !== true) {
+            var unfinished = new Error("The upload did not finish. Please try again.");
+            unfinished.ours = true;
+            throw unfinished;
+          }
+          return answer;
+        }
+
+        function previewPrompt() {
+          if (uploadContext === "header_image") return "Make the letter with the photo I just uploaded as its header image.";
+          if (uploadContext === "inline_image") return "Make the letter with the photo I just uploaded enclosed in it.";
+          if (uploadContext === "postcard") return "Make the postcard with the photo I just uploaded.";
+          return "Make the preview with the photo I just uploaded.";
+        }
+
+        async function uploadThroughCard() {
+          showState("uploading");
+          uploadingText.textContent = "Sending your photo…";
+          var shrunk;
+          try {
+            shrunk = await shrinkPhoto();
+          } catch (e) {
+            showError("This photo couldn't be read here. Please try a JPEG or PNG.");
+            return;
+          }
+          try {
+            await sendChunks(shrunk.base64);
+          } catch (err) {
+            showError(forPerson(err) ? err.message : "Upload failed. Please try again.");
+            return;
+          }
+
+          // The photo is the account's recent upload now; asking for the
+          // preview in the conversation lets the model make it with no image.
+          var prompt = previewPrompt();
+          doneLabel.textContent = "Uploaded Photo";
+          doneImg.onerror = null;
+          doneImg.classList.remove("hidden");
+          doneImg.src = shrunk.dataUrl;
+          urlBox.classList.add("hidden");
+          doneNote.textContent = "Uploaded. Asking for the preview…";
+          doneNote.classList.remove("hidden");
+          showState("done");
+
+          // A host that will not take the message says so with an error, or
+          // with isError in its answer.
+          var asked = false;
+          if (typeof host.sendMessage === "function") {
+            try {
+              var reply = await host.sendMessage(prompt);
+              asked = !(reply && reply.isError);
+            } catch (e) {
+              asked = false;
+            }
+          }
+          // A host that takes the message may still leave it in the message
+          // box for the person to send: Claude web does, under a caution
+          // banner (2026-09-29, #520). The card cannot tell which it did.
+          doneNote.textContent = asked
+            ? "Uploaded. Your request for the preview is in the conversation. If it is waiting in your message box, send it."
+            : "Uploaded. Now send this in the conversation: \u201c" + prompt + "\u201d";
+        }
+
+        // --- Upload via the host's file store (ChatGPT) ---
         async function uploadAndSend() {
           // Invalidate-only bump: no generation is captured here. Once the
           // uploading state renders there are no clickable controls left, so
@@ -426,7 +651,7 @@
             try {
               var freshUrl = null;
               try {
-                var freshResult = await window.openai.getFileDownloadUrl({ fileId: libFileId });
+                var freshResult = await host.getFileDownloadUrl({ fileId: libFileId });
                 freshUrl = (freshResult && (freshResult.downloadUrl || freshResult.download_url)) || null;
                 debugLog("library.refreshDownloadUrl.success", { hasDownloadUrl: !!freshUrl });
                 debugBeacon("library.refreshDownloadUrl.success", { hasDownloadUrl: !!freshUrl });
@@ -459,12 +684,17 @@
             return;
           }
 
+          if (cardUploads()) {
+            await uploadThroughCard();
+            return;
+          }
+
           showState("uploading");
 
           try {
             debugLog("uploadFile.start", { context: uploadContext || "none" });
             debugBeacon("uploadFile.start", { hasFile: !!selectedFile, fileName: selectedFile && selectedFile.name });
-            var uploadResult = await window.openai.uploadFile(selectedFile);
+            var uploadResult = await host.uploadFile(selectedFile);
             var fileId = uploadResult.fileId || uploadResult.file_id;
             debugLog("uploadFile.success", { fileId: fileId || null });
             debugBeacon("uploadFile.success", { fileId: fileId || null });
@@ -478,7 +708,7 @@
 
             debugLog("getFileDownloadUrl.start", { fileId: fileId });
             debugBeacon("getFileDownloadUrl.start", { fileId: fileId });
-            var urlResult = await window.openai.getFileDownloadUrl({ fileId: fileId });
+            var urlResult = await host.getFileDownloadUrl({ fileId: fileId });
             var downloadUrl = urlResult.downloadUrl || urlResult.download_url;
             debugLog("getFileDownloadUrl.success", {
               hasDownloadUrl: !!downloadUrl
@@ -532,7 +762,7 @@
           try {
             var files;
             try {
-              files = await window.openai.selectFiles();
+              files = await host.selectFiles();
             } catch (e) {
               debugLog("selectFiles.error", { message: scrubMessage(e) });
               debugBeacon("selectFiles.error", { message: scrubMessage(e) });
@@ -577,7 +807,7 @@
             try {
               debugLog("library.getFileDownloadUrl.start", { fileId: fileId });
               debugBeacon("library.getFileDownloadUrl.start", { fileId: fileId });
-              var urlResult = await window.openai.getFileDownloadUrl({ fileId: fileId });
+              var urlResult = await host.getFileDownloadUrl({ fileId: fileId });
               downloadUrl = (urlResult && (urlResult.downloadUrl || urlResult.download_url)) || null;
               debugLog("library.getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
               debugBeacon("library.getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
@@ -669,10 +899,12 @@
         // --- Initialize ---
         showState("select");
         updateLibraryAvailability();
-        window.addEventListener("openai:set_globals", function () {
+        updateUploadAvailability();
+        host.onChange(function () {
           applyTheme();
           hydrateFromToolOutput();
           updateLibraryAvailability();
+          updateUploadAvailability();
         });
       })();
     </script>

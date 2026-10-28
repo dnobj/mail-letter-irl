@@ -27,7 +27,123 @@ import type {
   PostcardSize,
   LetterLayoutType
 } from './types.js';
+import type { CertifiedMailService } from '../types.js';
 import { writeDiagnostic } from '../../utils/diagnosticLog.js';
+import { mailServiceOf } from '../../config/products.js';
+import {
+  buildGiftLetterPage,
+  buildGiftPostcardBlock,
+  type CardFragment
+} from '../giftCardRenderer.js';
+import { giftQrFormat } from '../../config/giftLetters.js';
+import { letterPages, letterPrintLayout, postcardPrintLayout, printPdfFor, RenderRefusal } from '../printDocument.js';
+import {
+  POSTCARD_FRONT_RENDERER_VERSION,
+  PRINTABLE_RENDERER_VERSIONS,
+  STATIONERY_RENDERER_VERSION,
+  SIGNATURE_RENDERER_VERSION,
+} from '../../render/index.js';
+
+/**
+ * A stored postcard size as an operator should read it (#596 review round 2):
+ * text as it is, anything else as JSON, so a hand-edited ["6x9"] never reads
+ * as the 6x9 it is not. Cut to 20 characters.
+ */
+function storedSize(size: unknown): string {
+  return (typeof size === 'string' ? size : JSON.stringify(size) ?? String(size)).slice(0, 20);
+}
+
+/**
+ * A PDF upload's budget (#534). Dispatch runs inside the person's request, so
+ * it cannot wait long; but a timeout is classed as ambiguous and holds the
+ * letter, so the JSON budget, sized for a small HTML body, would strand
+ * letters on a slow upload. Three times the default.
+ */
+const PDF_UPLOAD_TIMEOUT_MS = 30_000;
+
+/**
+ * The extra services PostGrid sells a letter (#625), and what its public price
+ * list charges for each (read 2026-10-03: $6.94 and $9.85). Whether those
+ * prices include the letter itself is unconfirmed, so the cost estimate adds
+ * them to the letter's own cost. That is about 85 cents high if they are
+ * all-in, and about 20 cents low if they are add-ons (the estimate's letter is
+ * 85 cents, PostGrid's list price $1.059): within about a dollar either way.
+ */
+const EXTRA_SERVICE_COST_CENTS: Readonly<Record<CertifiedMailService, number>> = {
+  certified: 694,
+  certified_return_receipt: 985
+};
+
+/** The service PostGrid sells under this name, or undefined: an own key, never one the prototype supplies. */
+function knownExtraService(value: unknown): CertifiedMailService | undefined {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(EXTRA_SERVICE_COST_CENTS, value)
+    ? (value as CertifiedMailService)
+    : undefined;
+}
+
+/**
+ * A USPS tracking number as PostGrid returns it, once trimmed (#625): letters
+ * and digits, with spaces or hyphens between groups, 8 to 40 characters. Anything
+ * else is not carried: it is shown to a customer and stored in a bounded column.
+ */
+const CARRIER_TRACKING_NUMBER = /^[A-Za-z0-9][A-Za-z0-9 -]{7,39}$/;
+
+/**
+ * A letter as PostGrid's multipart form: the contacts as bracketed fields
+ * beside our PDF, which PostGrid prints with the addresses stamped on the
+ * first page (#534 Phase 0, docs/learnings/postgrid-pdf-rendering.md).
+ */
+function letterForm(fields: {
+  to: PostGridContact;
+  from: PostGridContact;
+  description: string;
+  color: boolean;
+  doubleSided: boolean;
+  pdf: Buffer;
+  extraService?: CertifiedMailService;
+}): FormData {
+  const form = contactForm(fields.to, fields.from);
+  form.append('description', fields.description);
+  form.append('color', String(fields.color));
+  form.append('doubleSided', String(fields.doubleSided));
+  form.append('addressPlacement', 'top_first_page');
+  // Certified mail (#625): `certified`, or `certified_return_receipt`, exactly
+  // as PostGrid names them. Absent for standard mail, so a standard letter's
+  // request is byte for byte what it was.
+  if (fields.extraService) form.append('extraService', fields.extraService);
+  form.append('pdf', new Blob([new Uint8Array(fields.pdf)], { type: 'application/pdf' }), 'letter.pdf');
+  return form;
+}
+
+/**
+ * A postcard as PostGrid's multipart form: the contacts beside our two-page
+ * PDF, front then back with their bleed, which PostGrid prints with the
+ * addresses and postage stamped on the back (#534 Phase 4, probe P9).
+ */
+function postcardForm(fields: {
+  to: PostGridContact;
+  from: PostGridContact;
+  description: string;
+  size: PostGridPostcardRequest['size'];
+  pdf: Buffer;
+}): FormData {
+  const form = contactForm(fields.to, fields.from);
+  form.append('description', fields.description);
+  form.append('size', fields.size);
+  form.append('pdf', new Blob([new Uint8Array(fields.pdf)], { type: 'application/pdf' }), 'postcard.pdf');
+  return form;
+}
+
+/** The contacts as bracketed form fields, `to[firstName]` and so on, empty ones left out. */
+function contactForm(to: PostGridContact, from: PostGridContact): FormData {
+  const form = new FormData();
+  for (const [prefix, contact] of [['to', to], ['from', from]] as const) {
+    for (const [key, value] of Object.entries(contact)) {
+      if (value !== undefined && value !== '') form.append(`${prefix}[${key}]`, String(value));
+    }
+  }
+  return form;
+}
 
 type PostGridOperation =
   | 'create_letter'
@@ -159,6 +275,7 @@ interface PostGridLetterRequest {
   color?: boolean;
   doubleSided?: boolean;
   addressPlacement?: 'top_first_page' | 'insert_blank_page';
+  extraService?: CertifiedMailService;
 }
 
 interface PostGridLetterResponse {
@@ -252,6 +369,10 @@ interface PostGridAddressVerificationResponse {
 
 export class PostGridProvider implements LetterFulfillmentProvider {
   public readonly config: ProviderConfig;
+  /** Certified mail and its return receipt, as PostGrid's `extraService` (#625). */
+  public readonly supportsExtraServices = true;
+  /** It prints the PDF the preview showed (renderForPrint, #534). */
+  public readonly printsRenderedPdf = true;
   private options: Required<PostGridProviderOptions>;
 
   constructor(config: ProviderConfig, options: PostGridProviderOptions) {
@@ -275,39 +396,111 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * Send a letter via PostGrid API
    */
   async sendLetter(params: LetterParams): Promise<LetterResult> {
+    // The service the letter asks for (#625). None is none: undefined, null,
+    // the empty string and 'standard' are how a standard letter is written
+    // (mailServiceOf, the vocabulary the rest of the code reads a row by), and
+    // a letter built from stored JSON may carry any of them. One of the two
+    // PostGrid sells is passed on. Any other text is refused before any
+    // request, so it is an authoritative rejection and what paid for the
+    // letter comes back: never mailed as standard mail.
+    const requested = mailServiceOf(params.extraService);
+    const extraService = knownExtraService(requested);
+    if (requested !== undefined && extraService === undefined) {
+      const letterId = typeof params.metadata?.letterId === 'string' ? params.metadata.letterId : undefined;
+      this.writeOperationDiagnostic(
+        'provider.postgrid.extra_service_refused',
+        'create_letter',
+        letterId ? { letterId } : {},
+        'error'
+      );
+      return {
+        success: false,
+        trackingId: '',
+        error: 'PostGrid does not sell that extra service.',
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' }
+      };
+    }
+
     if (this.options.verbose) {
       this.writeOperationDiagnostic('provider.postgrid.operation_started', 'create_letter');
     }
 
     try {
-      // Build request payload
-      const request: PostGridLetterRequest = {
-        to: this.buildContact(params.recipientName, params.recipientAddress),
-        from: this.buildContact(
-          params.senderName || 'Letter IRL',
-          params.senderAddress || this.getDefaultSenderAddress()
-        ),
-        html: this.generateHTML(params.message, {
-          layoutType: params.layoutType,
-          headerImageData: params.headerImageData,
-          inlineImageData: params.inlineImageData,
-        }),
-        description: `Letter to ${params.recipientName}`,
-        // Enable color printing for layouts with images
-        color: params.color ?? (params.layoutType !== 'text_only' && (!!params.headerImageData || !!params.inlineImageData)),
-        doubleSided: params.doubleSided ?? false,
-        addressPlacement: 'top_first_page'
-      };
+      // The renderer the letter was previewed with decides how it prints
+      // (#534). A version this build cannot draw (previewed by a newer deploy,
+      // then rolled back) is an error, and like every failure that is not an
+      // authoritative provider rejection it holds the letter for an operator:
+      // see the catch below.
+      const renderer = params.rendererVersion;
+      if (renderer != null && !PRINTABLE_RENDERER_VERSIONS.has(renderer)) {
+        throw new RenderRefusal('unknown_version', `This build cannot print renderer version "${renderer}".`);
+      }
+      // A front is a postcard's (#594): a letter recording pdf-3 would print
+      // without what it was drawn with, so it is refused, as a postcard
+      // recording stationery's pdf-2 is.
+      if (renderer === POSTCARD_FRONT_RENDERER_VERSION) {
+        throw new RenderRefusal('unknown_version', `A letter is never drawn with a postcard's front: renderer version "${renderer}".`);
+      }
+      // A gift send prints its card as the PDF's second page (renderForPrint).
+      const usePdf = renderer != null;
+      const pages = letterPages(params, usePdf);
 
-      // Make API request
-      const response = await this.apiRequest<PostGridLetterResponse>(
-        'POST',
-        '/letters',
-        'create_letter',
-        request,
-        params.idempotencyKey,
-        isUsableSubmissionResponse
+      const to = this.buildContact(params.recipientName, params.recipientAddress);
+      const from = this.buildContact(
+        params.senderName || 'Letter IRL',
+        params.senderAddress || this.getDefaultSenderAddress()
       );
+      const description = `Letter to ${params.recipientName}`;
+      // Enable color printing for layouts with images
+      const color = params.color ?? (params.layoutType !== 'text_only' && (!!params.headerImageData || !!params.inlineImageData));
+      // Double-sided exactly when the letter itself runs past one page (#586),
+      // never because the PDF does: a gift card keeps a sheet of its own.
+      const doubleSided = pages > 1;
+
+      let response: PostGridLetterResponse;
+      if (usePdf) {
+        const pdf = await this.renderForPrint(params, pages);
+        response = await this.apiRequest<PostGridLetterResponse>(
+          'POST',
+          '/letters',
+          'create_letter',
+          letterForm({ to, from, description, color, doubleSided, pdf, extraService }),
+          params.idempotencyKey,
+          isUsableSubmissionResponse,
+          PDF_UPLOAD_TIMEOUT_MS
+        );
+      } else {
+        // A gift letter's card (docs/gift-letters.md). Built here, from the code
+        // the send transaction wrote into the letter, never from a stored image.
+        const giftPage = params.giftCard
+          ? await buildGiftLetterPage(params.giftCard, params.senderName || '', giftQrFormat())
+          : undefined;
+
+        const request: PostGridLetterRequest = {
+          to,
+          from,
+          html: this.generateHTML(params.message, {
+            layoutType: params.layoutType,
+            headerImageData: params.headerImageData,
+            inlineImageData: params.inlineImageData,
+            giftPage,
+          }),
+          description,
+          color,
+          doubleSided,
+          addressPlacement: 'top_first_page',
+          ...(extraService ? { extraService } : {})
+        };
+
+        response = await this.apiRequest<PostGridLetterResponse>(
+          'POST',
+          '/letters',
+          'create_letter',
+          request,
+          params.idempotencyKey,
+          isUsableSubmissionResponse
+        );
+      }
 
       if (this.options.verbose) {
         this.writeOperationDiagnostic('provider.postgrid.operation_succeeded', 'create_letter', {
@@ -337,8 +530,16 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       };
     } catch (error) {
       const errorMessage = this.extractErrorMessage(error);
+      const refused = error instanceof RenderRefusal;
 
-      if (this.options.verbose) {
+      if (refused) {
+        // Logged whatever the verbosity: the hold alone cannot say why.
+        const letterId = typeof params.metadata?.letterId === 'string' ? params.metadata.letterId : undefined;
+        this.writeOperationDiagnostic('provider.postgrid.render_refused', 'create_letter', {
+          reason: error.reason,
+          ...(letterId ? { letterId } : {})
+        }, 'error');
+      } else if (this.options.verbose) {
         this.writeOperationDiagnostic('provider.postgrid.operation_failed', 'create_letter', {
           errorClass: this.classifyRequestError(error)
         }, 'error');
@@ -352,13 +553,15 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           statusCode: error instanceof PostGridRequestError ? error.statusCode : undefined,
           retryable: error instanceof PostGridRequestError
             ? error.retryable
-            : /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
+            : !refused && /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
           // Only an authoritative provider rejection may compensate a paid
           // send. Everything else is held for reconciliation so a physically
           // mailed piece is never refunded or silently re-dispatched.
           submissionOutcome: error instanceof PostGridRequestError
             ? error.submissionOutcome
             : 'ambiguous',
+          // The hold's class: nothing was sent, so resolve with a retry.
+          ...(refused ? { errorClass: 'render_refused' } : {})
         }
       };
     }
@@ -381,6 +584,17 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       // Map PostGrid status to our status
       const status = this.mapStatus(response.status);
       const statusMessage = this.getStatusMessage(response.status);
+      if (status === 'unrecognised') {
+        // A status PostGrid has added since this was written: the letter keeps its own, and an operator is told the
+        // name, when it is shaped like PostGrid's own, or else only its length.
+        const raw = typeof response.status === 'string' ? response.status : '';
+        this.writeOperationDiagnostic(
+          'provider.postgrid.status_unrecognised',
+          operation,
+          /^[a-z][a-z_]{0,39}$/i.test(raw) ? { status: raw } : { length: raw.length },
+          'warn'
+        );
+      }
 
       const letterStatus: LetterStatus = {
         trackingId,
@@ -392,6 +606,22 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           : undefined,
         events: [] // PostGrid doesn't provide detailed events in basic API
       };
+
+      // PostGrid sets the USPS number some time after it accepts a certified
+      // letter (#625). Read as text and carried only if it is shaped like one.
+      const carrierNumber = typeof response.trackingNumber === 'string' ? response.trackingNumber.trim() : '';
+      if (CARRIER_TRACKING_NUMBER.test(carrierNumber)) {
+        letterStatus.carrierTrackingNumber = carrierNumber;
+      } else if (carrierNumber !== '') {
+        // Never the value, only its length: an operator can tell "PostGrid
+        // has not set one yet" from "it set one this code refuses".
+        this.writeOperationDiagnostic(
+          'provider.postgrid.carrier_number_unrecognised',
+          operation,
+          { length: carrierNumber.length },
+          'warn'
+        );
+      }
 
       // Add tracking URL if available
       if (response.trackingUrl) {
@@ -434,18 +664,26 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     const baseCost = 50; // ~$0.50 for printing/handling
     const postageCost = 73; // ~$0.73 for First-Class postage (2025 USPS rate)
     const colorExtra = params.color ? 35 : 0; // ~$0.35 extra for color
-    const doubleSidedExtra = params.doubleSided ? 10 : 0; // ~$0.10 extra for double-sided
+    const doubleSided = this.extraPagesCents(params) > 0;
+    const doubleSidedExtra = doubleSided ? 10 : 0; // ~$0.10 extra for double-sided
+    const extraPagesCost = this.extraPagesCents(params);
+    const service = knownExtraService(params.extraService);
+    const extraServiceCost = service ? EXTRA_SERVICE_COST_CENTS[service] : 0;
 
     return {
       baseCostCents: baseCost,
       postageCents: postageCost,
-      servicesCents: colorExtra + doubleSidedExtra,
+      servicesCents: colorExtra + doubleSidedExtra + extraPagesCost + extraServiceCost,
       totalCents,
       breakdown: [
         { item: 'Printing & Handling', costCents: baseCost },
         { item: 'First-Class Postage', costCents: postageCost },
         ...(params.color ? [{ item: 'Color Printing', costCents: colorExtra }] : []),
-        ...(params.doubleSided ? [{ item: 'Double-Sided', costCents: doubleSidedExtra }] : [])
+        ...(doubleSided ? [{ item: 'Double-Sided', costCents: doubleSidedExtra }] : []),
+        ...(extraPagesCost > 0 ? [{ item: 'Extra Pages', costCents: extraPagesCost }] : []),
+        ...(extraServiceCost > 0
+          ? [{ item: service === 'certified_return_receipt' ? 'Certified Mail with Return Receipt' : 'Certified Mail', costCents: extraServiceCost }]
+          : [])
       ]
     };
   }
@@ -516,6 +754,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       layoutType?: LetterLayoutType;
       headerImageData?: string;
       inlineImageData?: string;
+      /** A gift letter's extra page; absent for every other letter. */
+      giftPage?: CardFragment;
     }
   ): string {
     const layoutType = options?.layoutType || 'text_only';
@@ -530,19 +770,19 @@ export class PostGridProvider implements LetterFulfillmentProvider {
 
     switch (layoutType) {
       case 'header_image':
-        return this.generateHeaderImageHTML(escapedMessage, options?.headerImageData);
+        return this.generateHeaderImageHTML(escapedMessage, options?.headerImageData, options?.giftPage);
       case 'inline_image':
-        return this.generateInlineImageHTML(escapedMessage, options?.inlineImageData);
+        return this.generateInlineImageHTML(escapedMessage, options?.inlineImageData, options?.giftPage);
       case 'text_only':
       default:
-        return this.generateTextOnlyHTML(escapedMessage);
+        return this.generateTextOnlyHTML(escapedMessage, options?.giftPage);
     }
   }
 
   /**
    * Generate text-only layout HTML
    */
-  private generateTextOnlyHTML(escapedMessage: string): string {
+  private generateTextOnlyHTML(escapedMessage: string, giftPage?: CardFragment): string {
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -559,11 +799,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     .letter-body {
       white-space: pre-wrap;
       word-wrap: break-word;
-    }
+    }${giftPage?.css ?? ''}
   </style>
 </head>
 <body>
-  <div class="letter-body">${escapedMessage}</div>
+  <div class="letter-body">${escapedMessage}</div>${giftPage?.html ?? ''}
 </body>
 </html>`;
   }
@@ -572,7 +812,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * Generate header image layout HTML (US-LAYOUT-01)
    * Header image appears at top of content area, below the address window
    */
-  private generateHeaderImageHTML(escapedMessage: string, headerImageData?: string): string {
+  private generateHeaderImageHTML(
+    escapedMessage: string,
+    headerImageData?: string,
+    giftPage?: CardFragment
+  ): string {
     const headerHtml = headerImageData
       ? `<div class="header-image"><img src="${headerImageData}" alt="Header"></div>`
       : '';
@@ -604,12 +848,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     .letter-body {
       white-space: pre-wrap;
       word-wrap: break-word;
-    }
+    }${giftPage?.css ?? ''}
   </style>
 </head>
 <body>
   ${headerHtml}
-  <div class="letter-body">${escapedMessage}</div>
+  <div class="letter-body">${escapedMessage}</div>${giftPage?.html ?? ''}
 </body>
 </html>`;
   }
@@ -618,7 +862,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * Generate inline image layout HTML (US-LAYOUT-02)
    * Inline image appears after the message/signature
    */
-  private generateInlineImageHTML(escapedMessage: string, inlineImageData?: string): string {
+  private generateInlineImageHTML(
+    escapedMessage: string,
+    inlineImageData?: string,
+    giftPage?: CardFragment
+  ): string {
     const inlineHtml = inlineImageData
       ? `<div class="inline-image"><img src="${inlineImageData}" alt="Photo"></div>`
       : '';
@@ -650,18 +898,31 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       max-width: 100%;
       max-height: 3in;
       object-fit: contain;
-    }
+    }${giftPage?.css ?? ''}
   </style>
 </head>
 <body>
   <div class="letter-body">${escapedMessage}</div>
-  ${inlineHtml}
+  ${inlineHtml}${giftPage?.html ?? ''}
 </body>
 </html>`;
   }
 
   /**
-   * Make API request to PostGrid
+   * The letter drawn as it was previewed (src/render, #534). The preview
+   * refused a letter longer than the page, so an overflow here means the text
+   * or the renderer changed since: a refusal, never a clipped letter. Every
+   * failure here happens before any request, and is a RenderRefusal.
+   */
+  private async renderForPrint(params: LetterParams, pages: number): Promise<Buffer> {
+    // Held mail prints the PDF stored at its send, or as it was laid out then (#697).
+    return printPdfFor(() => letterPrintLayout(params, pages), params.heldPrint, 'letter');
+  }
+
+  /**
+   * Make API request to PostGrid. A FormData body goes as multipart, with its
+   * own boundary header; anything else as JSON. `timeoutMs` overrides the
+   * configured budget for one call (PDF uploads).
    */
   private async apiRequest<T>(
     method: 'GET' | 'POST' | 'DELETE',
@@ -669,14 +930,19 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     operation: PostGridOperation,
     body?: any,
     idempotencyKey?: string,
-    validate?: (payload: unknown) => boolean
+    validate?: (payload: unknown) => boolean,
+    timeoutMs: number = this.options.timeoutMs
   ): Promise<T> {
     const url = `${this.options.baseUrl}${endpoint}`;
+    const multipart = body instanceof FormData;
 
     const headers: Record<string, string> = {
-      'x-api-key': this.options.apiKey,
-      'Content-Type': 'application/json'
+      'x-api-key': this.options.apiKey
     };
+    // fetch writes the multipart boundary itself; a JSON content type would break it.
+    if (!multipart) {
+      headers['Content-Type'] = 'application/json';
+    }
     if (idempotencyKey) {
       headers['Idempotency-Key'] = idempotencyKey;
     }
@@ -685,14 +951,14 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     // One budget covers the whole exchange, headers and body. Arming a second
     // full timer after headers arrive would let a provider that stalls its body
     // occupy an outbox worker for nearly twice the configured timeout.
-    const deadline = Date.now() + this.options.timeoutMs;
-    const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
+    const deadline = Date.now() + timeoutMs;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     const requestOptions: RequestInit = {
       method,
       headers,
       signal: controller.signal,
-      ...(body && { body: JSON.stringify(body) })
+      ...(body && { body: multipart ? body : JSON.stringify(body) })
     };
 
     if (this.options.verbose) {
@@ -750,7 +1016,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       if (error instanceof PostGridRequestError) throw error;
       if (error instanceof Error && error.name === 'AbortError') {
         throw new PostGridRequestError(
-          `PostGrid request timed out after ${this.options.timeoutMs}ms`,
+          `PostGrid request timed out after ${timeoutMs}ms`,
           undefined,
           true
         );
@@ -832,8 +1098,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   /**
    * Map PostGrid status to our standard status
    *
-   * PostGrid lifecycle: ready → rendered → processed → printed → mailed → in_transit → delivered
-   * Our lifecycle: accepted → printing → in_transit → delivered
+   * PostGrid's documented statuses (its tracking guide, checked 2026-10-01,
+   * #566): ready → printing → processed_for_delivery → completed, or cancelled,
+   * which it allows only while a piece is ready, so a cancelled piece was never
+   * printed. Probe P9a answered `cancelled`. The other keys are older names,
+   * kept so nothing that once answered them reads differently.
+   * Our lifecycle: accepted → processing → in_transit → delivered
    */
   private mapStatus(postgridStatus: string): LetterStatus['status'] {
     const statusMap: Record<string, LetterStatus['status']> = {
@@ -841,20 +1111,25 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'ready': 'accepted',
       'rendered': 'accepted',
       // At printer / being printed
+      'printing': 'processing',
       'processed': 'processing',
       'printed': 'processing',
       // Handed to USPS / in postal system
       'mailed': 'in_transit',
       'in_transit': 'in_transit',
-      'processed_for_delivery': 'in_transit',  // PostGrid test mode status
+      'processed_for_delivery': 'in_transit',
       // Terminal statuses
       'delivered': 'delivered',
-      'completed': 'delivered',  // PostGrid test mode uses "completed" instead of "delivered"
+      'completed': 'delivered',  // PostGrid's estimate of delivery, 10-12 days after mailing
       'returned': 'returned',
+      // Cancelled before printing: nothing was mailed (statusSyncService).
+      'cancelled': 'failed',
       'canceled': 'failed'
     };
 
-    return statusMap[postgridStatus.toLowerCase()] || 'accepted';
+    // Own keys only: "constructor" is not a status (#682 review).
+    const key = String(postgridStatus).toLowerCase();
+    return Object.hasOwn(statusMap, key) ? statusMap[key] : 'unrecognised';
   }
 
   /**
@@ -863,6 +1138,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   private getStatusMessage(postgridStatus: string): string {
     const messageMap: Record<string, string> = {
       'ready': 'Letter is queued for processing',
+      'printing': 'Letter is being printed',
       'rendered': 'Letter PDF has been generated',
       'processed': 'Letter has been sent to printer',
       'printed': 'Letter has been printed',
@@ -872,10 +1148,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'delivered': 'Letter has been delivered',
       'completed': 'Letter has been delivered',  // PostGrid test mode
       'returned': 'Letter was returned to sender',
+      'cancelled': 'Letter was canceled before sending',
       'canceled': 'Letter was canceled before sending'
     };
 
-    return messageMap[postgridStatus.toLowerCase()] || `Status: ${postgridStatus}`;
+    const key = String(postgridStatus).toLowerCase();
+    return Object.hasOwn(messageMap, key) ? messageMap[key] : `Status: ${postgridStatus}`;
   }
 
   /**
@@ -888,11 +1166,24 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       baseCost = 120; // Color printing: ~$1.20
     }
 
-    if (params.doubleSided) {
+    if (this.extraPagesCents(params) > 0) {
       baseCost += 10; // Double-sided: +$0.10
     }
 
-    return baseCost;
+    // Certified mail (#625): PostGrid's public price for the service, on top.
+    const service = knownExtraService(params.extraService);
+    const extraServiceCost = service ? EXTRA_SERVICE_COST_CENTS[service] : 0;
+
+    return baseCost + this.extraPagesCents(params) + extraServiceCost;
+  }
+
+  /**
+   * Pages past the first (#586): about $0.10 each in black and white and
+   * $0.20 in colour. An internal estimate, as the rest is.
+   */
+  private extraPagesCents(params: LetterParams): number {
+    const pages = params.pages ?? 1;
+    return Number.isInteger(pages) && pages > 1 ? (pages - 1) * (params.color ? 20 : 10) : 0;
   }
 
   /**
@@ -1109,34 +1400,77 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         '6x9': '9x6',   // 9" tall x 6" wide -> PostGrid wants 9x6
         '6x11': '11x6'  // 11" tall x 6" wide -> PostGrid wants 11x6
       };
+      // A size no writer stores, as only a hand-edited row could hold, is
+      // refused before anything is drawn or sent, on either path (#594).
+      if (typeof size !== 'string' || !Object.hasOwn(postGridSizeMap, size)) {
+        const shown = typeof size === 'string' ? `"${storedSize(size)}"` : storedSize(size);
+        throw new RenderRefusal('size', `A postcard cannot be printed at size ${shown}.`);
+      }
       const postGridSize = postGridSizeMap[size];
 
-      // Build request payload
-      const request: PostGridPostcardRequest = {
-        to: this.buildContact(params.recipientName, params.recipientAddress),
-        from: this.buildContact(
-          params.senderName || 'Letter IRL',
-          params.senderAddress || this.getDefaultSenderAddress()
-        ),
-        frontHTML: this.generatePostcardFrontHTML(params.frontImageBase64, size),
-        backHTML: this.generatePostcardBackHTML(
-          params.backMessage,
-          params.senderName,
-          params.senderAddress
-        ),
-        size: postGridSize,
-        description: `Postcard to ${params.recipientName}`
-      };
+      // As for letters (sendLetter), the renderer the postcard was previewed
+      // with decides how it prints (#534), and one this build cannot draw
+      // holds it for an operator.
+      const renderer = params.rendererVersion;
+      if (renderer != null && !PRINTABLE_RENDERER_VERSIONS.has(renderer)) {
+        throw new RenderRefusal('unknown_version', `This build cannot print renderer version "${renderer}".`);
+      }
+      // Stationery is a letter's (#563), and so is a signature (#608): a
+      // postcard recording pdf-2 or pdf-4 would print without it, so it is
+      // refused rather than printed otherwise.
+      if (renderer === STATIONERY_RENDERER_VERSION || renderer === SIGNATURE_RENDERER_VERSION) {
+        throw new RenderRefusal('unknown_version', `A postcard is never drawn in stationery or with a signature: renderer version "${renderer}".`);
+      }
+      // A gift send prints its card in a strip on the back (renderPostcardForPrint).
+      const usePdf = renderer != null;
 
-      // Make API request
-      const response = await this.apiRequest<PostGridPostcardResponse>(
-        'POST',
-        '/postcards',
-        'create_postcard',
-        request,
-        params.idempotencyKey,
-        isUsableSubmissionResponse
+      const to = this.buildContact(params.recipientName, params.recipientAddress);
+      const from = this.buildContact(
+        params.senderName || 'Letter IRL',
+        params.senderAddress || this.getDefaultSenderAddress()
       );
+      const description = `Postcard to ${params.recipientName}`;
+
+      let response: PostGridPostcardResponse;
+      if (usePdf) {
+        const pdf = await this.renderPostcardForPrint(params, size);
+        response = await this.apiRequest<PostGridPostcardResponse>(
+          'POST',
+          '/postcards',
+          'create_postcard',
+          postcardForm({ to, from, description, size: postGridSize, pdf }),
+          params.idempotencyKey,
+          isUsableSubmissionResponse,
+          PDF_UPLOAD_TIMEOUT_MS
+        );
+      } else {
+        const giftBlock = params.giftCard
+          ? await buildGiftPostcardBlock(params.giftCard, params.senderName || '', giftQrFormat())
+          : undefined;
+
+        const request: PostGridPostcardRequest = {
+          to,
+          from,
+          frontHTML: this.generatePostcardFrontHTML(params.frontImageBase64, size),
+          backHTML: this.generatePostcardBackHTML(
+            params.backMessage,
+            params.senderName,
+            params.senderAddress,
+            giftBlock
+          ),
+          size: postGridSize,
+          description
+        };
+
+        response = await this.apiRequest<PostGridPostcardResponse>(
+          'POST',
+          '/postcards',
+          'create_postcard',
+          request,
+          params.idempotencyKey,
+          isUsableSubmissionResponse
+        );
+      }
 
       if (this.options.verbose) {
         this.writeOperationDiagnostic('provider.postgrid.operation_succeeded', 'create_postcard', {
@@ -1166,8 +1500,18 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       };
     } catch (error) {
       const errorMessage = this.extractErrorMessage(error);
+      const refused = error instanceof RenderRefusal;
 
-      if (this.options.verbose) {
+      if (refused) {
+        // Logged whatever the verbosity: the hold alone cannot say why.
+        const letterId = typeof params.metadata?.letterId === 'string' ? params.metadata.letterId : undefined;
+        this.writeOperationDiagnostic('provider.postgrid.render_refused', 'create_postcard', {
+          reason: error.reason,
+          ...(letterId ? { letterId } : {}),
+          // A size hold names the size, so an operator need not open the row.
+          ...(error.reason === 'size' ? { postcardSize: storedSize(params.size) } : {})
+        }, 'error');
+      } else if (this.options.verbose) {
         this.writeOperationDiagnostic('provider.postgrid.operation_failed', 'create_postcard', {
           errorClass: this.classifyRequestError(error)
         }, 'error');
@@ -1181,16 +1525,29 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           statusCode: error instanceof PostGridRequestError ? error.statusCode : undefined,
           retryable: error instanceof PostGridRequestError
             ? error.retryable
-            : /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
+            : !refused && /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
           // Only an authoritative provider rejection may compensate a paid
           // send. Everything else is held for reconciliation so a physically
           // mailed piece is never refunded or silently re-dispatched.
           submissionOutcome: error instanceof PostGridRequestError
             ? error.submissionOutcome
             : 'ambiguous',
+          // The hold's class: nothing was sent, so resolve with a retry.
+          ...(refused ? { errorClass: 'render_refused' } : {})
         }
       };
     }
+  }
+
+  /**
+   * The postcard drawn as it was previewed (src/render, #534 Phase 4), at its
+   * size (#594): the front image, the back's message and a gift send's card,
+   * never the addresses, which PostGrid stamps. Every failure here happens
+   * before any request, and is a RenderRefusal.
+   */
+  private async renderPostcardForPrint(params: PostcardParams, size: PostcardSize): Promise<Buffer> {
+    // Held mail prints the PDF stored at its send, or as it was laid out then (#697).
+    return printPdfFor(() => postcardPrintLayout(params, size), params.heldPrint, 'postcard');
   }
 
   /**
@@ -1249,7 +1606,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   private generatePostcardBackHTML(
     message: string,
     _senderName?: string,
-    _senderAddress?: PostcardParams['senderAddress']
+    _senderAddress?: PostcardParams['senderAddress'],
+    giftBlock?: CardFragment
   ): string {
     // Escape HTML special characters in message
     const escapedMessage = message
@@ -1291,13 +1649,13 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       color: #333;
       white-space: pre-wrap;
       word-wrap: break-word;
-    }
+    }${giftBlock?.css ?? ''}
   </style>
 </head>
 <body>
   <div class="postcard-back">
     <div class="message-area">
-      <div class="message">${escapedMessage}</div>
+      <div class="message">${escapedMessage}</div>${giftBlock?.html ?? ''}
     </div>
   </div>
 </body>

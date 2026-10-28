@@ -1,4 +1,5 @@
 import { writeDiagnostic } from "../utils/diagnosticLog.js";
+import type { ClientProfileName } from "../auth/clientProfiles.js";
 import { STEERING_COPY_REV } from "./steeringRev.js";
 import { WIDGET_TEMPLATE_VERSION } from "./widgetUris.js";
 
@@ -16,11 +17,15 @@ import { WIDGET_TEMPLATE_VERSION } from "./widgetUris.js";
  * method is clamped to a known protocol set, tool names outside our registry
  * collapse to "other", and resource URIs are logged only when they are our
  * own ui:// template identifiers. Raw user agents are never logged - only
- * the coarse class.
+ * the coarse class. The app is logged as its profile name (#473), never as
+ * its client id.
  */
 
 const LOGGED_METHODS = new Set([
   "initialize",
+  // The 2026-07-28 revision's own (#477): a client that asks for them speaks it.
+  "server/discover",
+  "subscriptions/listen",
   "tools/list",
   "tools/call",
   "resources/list",
@@ -49,12 +54,31 @@ export function classifyClient(userAgent: string | undefined): ClientClass {
   return "other";
 }
 
-type JsonRpcish = { method?: unknown; params?: { name?: unknown; uri?: unknown } };
+type JsonRpcish = {
+  method?: unknown;
+  params?: { name?: unknown; uri?: unknown; protocolVersion?: unknown; _meta?: Record<string, unknown> };
+};
+
+/** Where a 2026-07-28 request names its revision: in every request's _meta. */
+const PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion";
+
+/**
+ * The protocol revision a message speaks (#477), as a date or a fixed word: a 2025-era client names it in initialize
+ * and then in the MCP-Protocol-Version header, a 2026-07-28 one in every request's _meta. "none" when nothing says;
+ * "other" for anything that is not a revision date, so no client text reaches the log.
+ */
+export function protocolVersionOf(message: JsonRpcish, header: string | undefined): string {
+  const named = message.params?._meta?.[PROTOCOL_VERSION_META_KEY] ?? message.params?.protocolVersion ?? header;
+  if (named === undefined || named === "") return "none";
+  return typeof named === "string" && /^\d{4}-\d{2}-\d{2}$/.test(named) ? named : "other";
+}
 
 export function logMcpClientRequests(
   parsedBody: unknown,
   userAgent: string | undefined,
-  knownToolNames: ReadonlySet<string>
+  knownToolNames: ReadonlySet<string>,
+  client?: ClientProfileName,
+  protocolHeader?: string
 ): void {
   const messages: JsonRpcish[] = Array.isArray(parsedBody)
     ? (parsedBody as JsonRpcish[])
@@ -70,8 +94,12 @@ export function logMcpClientRequests(
 
     const fields: Record<string, string | number> = {
       rpcMethod: method,
-      clientClass: classifyClient(userAgent)
+      clientClass: classifyClient(userAgent),
+      protocolVersion: protocolVersionOf(message, protocolHeader)
     };
+    if (client) {
+      fields.client = client;
+    }
 
     if (method === "tools/list") {
       // Record what this response will serve, so a later behavioral question

@@ -63,6 +63,10 @@ describePostgres('admin commands through the operator role', () => {
   const heldJobId = randomUUID();
   const failedLetterId = `letter_${randomUUID()}`;
   const failedJobId = randomUUID();
+  // Mail held to arrive by a date (#535): due in five days, as a send with a mail date creates it.
+  const heldMailLetterId = `letter_${randomUUID()}`;
+  const heldMailJobId = randomUUID();
+  const HELD_UNTIL = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
   let alertId: string;
 
   beforeAll(async () => {
@@ -140,6 +144,18 @@ describePostgres('admin commands through the operator role', () => {
          next_attempt_at, provider_outcome, last_error)
        VALUES ($1, $2, 'failed', 3, 3, NOW(), $2, NOW(), 'definite_failure', 'provider rejected: bad address')`,
       [failedJobId, failedLetterId]
+    );
+    await owner.query(
+      `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type)
+       VALUES ($1, $2, '{"body":"x"}'::jsonb, '{"name":"y"}'::jsonb, 2, 'queued', 'letter')`,
+      [heldMailLetterId, userId]
+    );
+    await owner.query(
+      `INSERT INTO letter_jobs (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
+         next_attempt_at, provider_outcome, metadata, mail_hold_until)
+       VALUES ($1, $2, 'pending', 0, 5, $3::timestamptz, $2, $3::timestamptz, 'not_dispatched', $4::jsonb, $3::timestamptz)`,
+      // As createLetterJobWithClient writes held mail: the hold in its own column (055, #693).
+      [heldMailJobId, heldMailLetterId, HELD_UNTIL, JSON.stringify({ source: 'transactional-outbox' })]
     );
     const alert = await owner.query<{ alert_id: string }>(
       `INSERT INTO commerce_operational_alerts (alert_type, severity, status, details)
@@ -319,6 +335,103 @@ describePostgres('admin commands through the operator role', () => {
     expect(letter.rows[0].status).toBe('queued');
     await expect(confirmation('job.retry', failedJobId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
   }, 60_000);
+
+  it('sends held mail now: due at once, its hold kept, recorded once, and then no longer held (#535)', async () => {
+    const { command, fields } = await confirmation('job.dispatch_now', heldMailJobId, {}, 'customer asked to send it now');
+    expect(fields.get('phrase')).toBe(`CONFIRM ${heldMailJobId}`);
+
+    const outcome = await runner.runAdminCommand(deps(), command, heldMailJobId, fields);
+    expect(outcome).toMatchObject({ status: 'succeeded', replayed: false, result: { jobStatus: 'pending', domainReplayed: false } });
+
+    const job = await owner.query<{ status: string; provider_outcome: string; attempts: number; due: boolean; held_until: Date }>(
+      `SELECT status, provider_outcome, attempts, next_attempt_at <= NOW() AS due, mail_hold_until AS held_until
+         FROM letter_jobs WHERE job_id = $1`,
+      [heldMailJobId]
+    );
+    // Due now, and the hold it ended kept (#693): the stuck-order grace counts from the later of the two.
+    expect({ ...job.rows[0], held_until: job.rows[0].held_until.toISOString() })
+      .toEqual({ status: 'pending', provider_outcome: 'not_dispatched', attempts: 0, due: true, held_until: HELD_UNTIL });
+    const letter = await owner.query<{ status: string }>(`SELECT status FROM letters WHERE letter_id = $1`, [heldMailLetterId]);
+    expect(letter.rows[0].status).toBe('queued');
+    // Migration 042 admits the operation; the hold that ended is on record.
+    const audit = await owner.query<{ operation: string; reason_code: string; before_state: Record<string, unknown> }>(
+      `SELECT operation, reason_code, before_state FROM commerce_operator_audit_events WHERE target_reference_hash = $1`,
+      [hash(heldMailJobId)]
+    );
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0]).toMatchObject({
+      operation: 'mail_job_release',
+      reason_code: 'operator_released_hold',
+      before_state: { jobStatus: 'pending', heldUntil: HELD_UNTIL }
+    });
+
+    const replay = await runner.runAdminCommand(deps(), command, heldMailJobId, fields);
+    expect(replay).toMatchObject({ commandId: outcome.commandId, status: 'succeeded', replayed: true });
+    expect(await operatorAuditRows(heldMailJobId)).toBe(1);
+
+    // Due now, it is held mail no longer: a second release is refused at the preview.
+    await expect(confirmation('job.dispatch_now', heldMailJobId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
+  }, 60_000);
+
+  it('cancels mail left for the operator under the operator role: job and letter cancelled, with its history, recorded once (#696)', async () => {
+    const leftLetterId = `letter_${randomUUID()}`;
+    const leftJobId = randomUUID();
+    await owner.query(
+      `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type, funding_type)
+       VALUES ($1, $2, '{"body":"x"}'::jsonb, '{"name":"y"}'::jsonb, 2, 'queued', 'letter', 'prepaid_balance')`,
+      [leftLetterId, userId]
+    );
+    await owner.query(
+      `INSERT INTO letter_jobs (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
+         next_attempt_at, provider_outcome, hold_reason)
+       VALUES ($1, $2, 'pending', 0, 5, NOW(), $2, NOW(), 'not_dispatched', 'funding_reversed')`,
+      [leftJobId, leftLetterId]
+    );
+
+    const { command, fields } = await confirmation('job.cancel_held', leftJobId, {}, 'the pack was refunded in full');
+    const outcome = await runner.runAdminCommand(deps(), command, leftJobId, fields);
+    expect(outcome).toMatchObject({ status: 'succeeded', replayed: false, result: { jobStatus: 'cancelled', domainReplayed: false } });
+
+    const job = await owner.query<{ status: string; operator_resolution: string }>(
+      'SELECT status, operator_resolution FROM letter_jobs WHERE job_id = $1', [leftJobId]
+    );
+    expect(job.rows[0]).toEqual({ status: 'cancelled', operator_resolution: 'operator_cancelled' });
+    const letter = await owner.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [leftLetterId]);
+    expect(letter.rows[0].status).toBe('cancelled');
+    const history = await owner.query(
+      "SELECT 1 FROM letter_status_history WHERE letter_id = $1 AND new_status = 'cancelled' AND source = 'operator'", [leftLetterId]
+    );
+    expect(history.rowCount).toBe(1);
+    // Migration 056 admits the operation.
+    const audit = await owner.query<{ operation: string }>(
+      'SELECT operation FROM commerce_operator_audit_events WHERE target_reference_hash = $1', [hash(leftJobId)]
+    );
+    expect(audit.rows.map(row => row.operation)).toEqual(['mail_job_cancel']);
+
+    const replay = await runner.runAdminCommand(deps(), command, leftJobId, fields);
+    expect(replay).toMatchObject({ commandId: outcome.commandId, status: 'succeeded', replayed: true });
+    await expect(confirmation('job.cancel_held', leftJobId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
+  }, 60_000);
+
+  it('keeps write elevation\'s TOTP counter through the operator role, raising it once (#730)', async () => {
+    const { databaseTotpCounterStore } = await import('../../src/admin/http/totpCounters.js');
+    const store = databaseTotpCounterStore(operator);
+    const key = `owner-${randomUUID().slice(0, 8)}@example.test`;
+    await expect(store.lastCounter(key)).resolves.toBeNull();
+    await expect(store.claim(key, 100)).resolves.toBe(true);
+    // The same counter, or an older one, again: a replay.
+    await expect(store.claim(key, 100)).resolves.toBe(false);
+    await expect(store.claim(key, 99)).resolves.toBe(false);
+    await expect(store.claim(key, 101)).resolves.toBe(true);
+    await expect(store.lastCounter(key)).resolves.toBe(101);
+    // Two processes accepting the same code at once: one wins.
+    const raced = await Promise.all([store.claim(key, 200), store.claim(key, 200), store.claim(key, 200)]);
+    expect(raced.filter(Boolean)).toHaveLength(1);
+    await expect(store.lastCounter(key)).resolves.toBe(200);
+    // The reader can neither read nor write it.
+    await expect(reader.query('SELECT last_counter FROM admin_totp_counters')).rejects.toMatchObject({ code: '42501' });
+    await expect(databaseTotpCounterStore(reader).claim(key, 300)).rejects.toMatchObject({ code: '42501' });
+  });
 
   it('refuses in read-only mode and without elevation, touching nothing', async () => {
     const { command, fields } = await confirmation('job.resolve', heldJobId, { decision: 'rejected', providerName: 'dummy' }).catch(() => ({
@@ -611,6 +724,135 @@ describePostgres('admin commands through the operator role', () => {
     );
     expect(row.rows[0]).toEqual({ provider: 'dummy', enabled: true, updated_by: OWNER });
     await expect(confirmation('routing.update', 'postcard', { provider: 'lob', enabled: 'on' })).rejects.toMatchObject({ code: 'ADMIN_INVALID_REQUEST' });
+  }, 60_000);
+
+  it('grants gift letters as the operator role, holding the account row through the write (#730)', async () => {
+    const countGifts = async () =>
+      (await owner.query<{ n: number }>('SELECT COUNT(*)::int AS n FROM gift_letters WHERE user_id = $1', [userId])).rows[0].n;
+    const before = await countGifts();
+    const grant = await confirmation('gift.grant', userId, { quantity: '1', generationsRemaining: '0' });
+    expect(await runner.runAdminCommand(deps(), grant.command, userId, grant.fields)).toMatchObject({ status: 'succeeded', result: { granted: 1 } });
+    expect(await countGifts()).toBe(before + 1);
+
+    // The account moves after the reader's check but before the operator
+    // transaction holds it: the lock sees the new version, refuses, and
+    // nothing is granted or recorded.
+    const stale = await confirmation('gift.grant', userId, { quantity: '1', generationsRemaining: '0' });
+    const racing = deps();
+    const markRunning = racing.audit.markCommandRunning.bind(racing.audit);
+    racing.audit.markCommandRunning = async (...args: Parameters<typeof markRunning>) => {
+      const marked = await markRunning(...args);
+      // The trigger sets updated_at to now, which differs from the preview's version.
+      await owner.query('UPDATE users SET updated_at = NOW() WHERE user_id = $1', [userId]);
+      return marked;
+    };
+    const runsBefore = (await owner.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM admin_command_runs WHERE action = 'gift.grant'")).rows[0].n;
+    await expect(runner.runAdminCommand(racing, stale.command, userId, stale.fields)).rejects.toMatchObject({ code: 'ADMIN_STALE_PREVIEW' });
+    expect(await countGifts()).toBe(before + 1);
+    expect((await owner.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM admin_command_runs WHERE action = 'gift.grant'")).rows[0].n).toBe(runsBefore);
+  }, 60_000);
+
+  it('sets a daily limit until midnight UTC and for one account, replaces it, and clears it, as the operator role', async () => {
+    const { effectiveDailyLimits } = await import('../../src/services/dailyLimits.js');
+
+    // For everyone, for the rest of the UTC day.
+    const today = await confirmation('limit.set', 'account_daily_mail', {
+      limit: 'account_daily_mail',
+      amount: '40',
+      account: '',
+      duration: 'today'
+    });
+    expect(today.fields.get('phrase')).toBe('CONFIRM account_daily_mail');
+    const first = await runner.runAdminCommand(deps(), today.command, 'account_daily_mail', today.fields);
+    expect(first).toMatchObject({ status: 'succeeded', result: { limitKey: 'account_daily_mail', value: 40 } });
+    const written = await owner.query<{ user_id: string | null; value: number; at_midnight: boolean; created_by_command_id: string }>(
+      `SELECT user_id, value, created_by_command_id,
+              expires_at = (date_trunc('day', NOW() AT TIME ZONE 'UTC') + INTERVAL '1 day') AT TIME ZONE 'UTC' AS at_midnight
+         FROM daily_limit_overrides WHERE cleared_at IS NULL AND limit_key = 'account_daily_mail'`
+    );
+    expect(written.rows).toHaveLength(1);
+    expect(written.rows[0]).toMatchObject({ user_id: null, value: 40, at_midnight: true, created_by_command_id: first.commandId });
+
+    // Setting it again replaces it: the first row is cleared by the second run, and kept.
+    const again = await confirmation('limit.set', 'account_daily_mail', {
+      limit: 'account_daily_mail',
+      amount: '50',
+      account: '',
+      duration: 'until_cleared'
+    });
+    const second = await runner.runAdminCommand(deps(), again.command, 'account_daily_mail', again.fields);
+    expect(second).toMatchObject({ status: 'succeeded', result: { value: 50, expiresAt: null } });
+    const history = await owner.query<{ value: number; cleared_by_command_id: string | null }>(
+      `SELECT value, cleared_by_command_id FROM daily_limit_overrides WHERE limit_key = 'account_daily_mail' ORDER BY created_at`
+    );
+    expect(history.rows).toEqual([
+      { value: 40, cleared_by_command_id: second.commandId },
+      { value: 50, cleared_by_command_id: null }
+    ]);
+
+    // For one account, in whole dollars for the money limit.
+    const one = await confirmation('limit.set', 'account_daily_charge_cents', {
+      limit: 'account_daily_charge_cents',
+      amount: '500',
+      account: userId,
+      duration: 'until_cleared'
+    });
+    expect(await runner.runAdminCommand(deps(), one.command, 'account_daily_charge_cents', one.fields)).toMatchObject({
+      status: 'succeeded',
+      result: { value: 50000 }
+    });
+
+    // The API's check reads exactly what the panel wrote.
+    expect(await effectiveDailyLimits(owner, ['account_daily_mail', 'account_daily_charge_cents'], userId, {})).toEqual({
+      account_daily_mail: 50,
+      account_daily_charge_cents: 50000
+    });
+    expect(await effectiveDailyLimits(owner, ['account_daily_charge_cents'], `auth0|${randomUUID()}`, {})).toEqual({
+      account_daily_charge_cents: 6000
+    });
+
+    // A limit for everyone takes no account; an unknown account is refused.
+    await expect(
+      confirmation('limit.set', 'global_daily_mail', { limit: 'global_daily_mail', amount: '5', account: userId, duration: 'today' })
+    ).rejects.toMatchObject({ code: 'ADMIN_INVALID_REQUEST' });
+    await expect(
+      confirmation('limit.set', 'account_daily_mail', {
+        limit: 'account_daily_mail',
+        amount: '5',
+        account: `auth0|${randomUUID()}`,
+        duration: 'today'
+      })
+    ).rejects.toMatchObject({ code: 'ADMIN_NOT_FOUND' });
+
+    // Clearing stamps the row; it is kept, and cannot be cleared twice.
+    const overrideId = (
+      await owner.query<{ override_id: string }>(
+        `SELECT override_id FROM daily_limit_overrides WHERE cleared_at IS NULL AND user_id = $1`,
+        [userId]
+      )
+    ).rows[0].override_id;
+    const clear = await confirmation('limit.clear', overrideId, {});
+    expect(await runner.runAdminCommand(deps(), clear.command, overrideId, clear.fields)).toMatchObject({
+      status: 'succeeded',
+      result: { overrideId, cleared: true }
+    });
+    const cleared = await owner.query<{ cleared: boolean }>(
+      `SELECT cleared_at IS NOT NULL AS cleared FROM daily_limit_overrides WHERE override_id = $1`,
+      [overrideId]
+    );
+    expect(cleared.rows).toEqual([{ cleared: true }]);
+    await expect(confirmation('limit.clear', overrideId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
+    expect(await effectiveDailyLimits(owner, ['account_daily_charge_cents'], userId, {})).toEqual({
+      account_daily_charge_cents: 6000
+    });
+
+    // The operator role clears; it never deletes.
+    await expect(operator.query(`DELETE FROM daily_limit_overrides`)).rejects.toMatchObject({ code: '42501' });
+    await expect(operator.query(`UPDATE daily_limit_overrides SET value = 1`)).rejects.toMatchObject({ code: '42501' });
+    // The page's reads work as the reader.
+    for (const table of ['daily_limit_overrides', 'daily_limit_refusals', 'daily_limit_defaults']) {
+      await expect(reader.query(`SELECT * FROM ${table} LIMIT 1`), table).resolves.toBeTruthy();
+    }
   }, 60_000);
 
   it('lets the operator role perform exactly the granted writes', async () => {

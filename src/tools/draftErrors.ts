@@ -14,8 +14,8 @@
  *
  * which forwards whatever the service wrote. mailSendService authors those
  * messages for ITS OWN consumers and interpolates internal values into them -
- * draft ids, order ids, and raw status labels. Fifteen codes are thrown there
- * and only eight had a branch, so seven of them were reaching the customer
+ * draft ids, order ids, and raw status labels. When this list was written,
+ * fifteen codes were thrown there and only eight had a branch, so seven were reaching the customer
  * verbatim: "Draft <uuid> is held", "Order <uuid> is payment_failed". That is
  * the same leak class as users.sends_blocked_reason, which took two rounds to
  * close on one surface while these stayed open on both.
@@ -27,7 +27,13 @@
  */
 
 import { BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
+import { chooseAgainSentence, openArrivalsOf, openArrivalsSentence } from '../services/mailDateCapacity.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
+import {
+  DuplicateMailError,
+  duplicateMailMessage,
+  isDuplicateMailError
+} from '../services/duplicateMailService.js';
 
 export type DraftMailType = 'letter' | 'postcard';
 
@@ -42,6 +48,7 @@ export const HANDLED_DRAFT_ERROR_CODES = [
   'ACCOUNT_SENDS_BLOCKED',
   'BETA_ACCESS_DENIED',
   'DRAFT_CANCELLED',
+  'DRAFT_CHANGED_SINCE_SHOWN',
   'DRAFT_CHECKOUT_PENDING',
   'DRAFT_EXPIRED',
   'DRAFT_FUNDING_CONFLICT',
@@ -51,11 +58,38 @@ export const HANDLED_DRAFT_ERROR_CODES = [
   'DRAFT_NOT_OWNED',
   'DRAFT_WRONG_MAIL_TYPE',
   'FUNDING_AMOUNT_MISMATCH',
+  'GIFT_LETTERS_DISABLED',
+  'GIFT_LETTER_UNAVAILABLE',
   'JIT_ORDER_INVALID',
   'JIT_ORDER_NOT_FOUND',
   'JIT_ORDER_NOT_OWNED',
-  'JIT_ORDER_NOT_PAID'
+  'JIT_ORDER_NOT_PAID',
+  'JIT_PRODUCT_MISMATCH',
+  'PACK_CANNOT_PAY',
+  'SCHEDULE_FULL',
+  'SCHEDULE_PASSED'
 ] as const;
+
+/**
+ * The refusal for mail a pack or a gift letter does not pay for (#579). Its
+ * own constant: registerTools recognises the code to answer an app with no
+ * checkout with the page that takes the payment instead.
+ */
+export function packCannotPayText(mailType: DraftMailType, certified = false): string {
+  // Certified mail (#625) is a one-page letter too, so the rule's own words would contradict it.
+  if (certified) {
+    return `This ${mailType} is certified mail, which is paid with Pay & Send, not from the balance or a gift letter.`;
+  }
+  return (
+    `This ${mailType} is paid with Pay & Send, not from the balance: letter packs and gift letters ` +
+    'pay for one-page letters and 6x9 postcards.'
+  );
+}
+
+/** Whether a send's refusal says the mail is certified (mailSendService): a flag it sets, never text. */
+export function isCertifiedRefusal(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { certified?: unknown }).certified === true;
+}
 
 export function friendlyDraftError(
   error: unknown,
@@ -69,6 +103,16 @@ export function friendlyDraftError(
   // in a way that the generic default-deny string is not.
   if (error instanceof SpendLimitError) {
     return new Error(error.message);
+  }
+
+  // #412: the same mail went out recently. The message is server-authored,
+  // and the model needs this tool's own retry advice; the details travel on
+  // to the widget (registerTools.ts).
+  if (isDuplicateMailError(error)) {
+    return new DuplicateMailError(
+      error.duplicate,
+      duplicateMailMessage(error.duplicate, mailType === 'postcard' ? 'send_postcard' : 'send_letter')
+    );
   }
 
   const code = (error as { code?: string })?.code;
@@ -109,6 +153,36 @@ export function friendlyDraftError(
   if (code === 'DRAFT_CANCELLED') {
     return new Error(`This draft was cancelled. Please create a new ${noun} draft.`);
   }
+  // Arrive-by (#535). Upstream interpolates the draft id and the date.
+  if (code === 'SCHEDULE_PASSED') {
+    return new Error(
+      `The day this ${noun} was to go to the printer has passed, so it can no longer arrive by its date. Please preview it again with a new arrival date, or with none to send it as soon as possible.`
+    );
+  }
+  // #700: its mail date filled after the preview. Upstream interpolates the
+  // draft id and the date; the open dates travel on the error.
+  if (code === 'SCHEDULE_FULL') {
+    return new Error(
+      `Mail to arrive by this ${noun}'s date is now fully booked, so nothing was sent. ` +
+        `${openArrivalsSentence(openArrivalsOf(error), new Date(), true)} ` +
+        chooseAgainSentence(openArrivalsOf(error), 'then send it again')
+    );
+  }
+  // #579. Upstream interpolates the draft id; this keeps the code, so the
+  // tool layer can still tell this refusal from the others.
+  if (code === 'PACK_CANNOT_PAY') {
+    return Object.assign(new Error(packCannotPayText(mailType, isCertifiedRefusal(error))), { code });
+  }
+  // #695: an edit came after what the person saw. Keeps the code, so a card can
+  // tell this refusal from the others and draw the draft again.
+  if (code === 'DRAFT_CHANGED_SINCE_SHOWN') {
+    return Object.assign(
+      new Error(
+        `This ${noun} changed after it was shown, so nothing was sent. Show the person the ${noun} as it is now (its preview card, or a new preview), and send it once they have seen it.`
+      ),
+      { code }
+    );
+  }
   if (code === 'DRAFT_CHECKOUT_PENDING') {
     return new Error(
       'This draft has an active Pay & Send checkout. Complete or wait for that checkout to expire before using prepaid balance.'
@@ -135,6 +209,20 @@ export function friendlyDraftError(
       'The payment recorded for this draft does not match its price. Please contact Letter IRL support before retrying.'
     );
   }
+  // Gift sends (docs/gift-letters.md). Upstream interpolates the draft id.
+  if (code === 'GIFT_LETTERS_DISABLED') {
+    return new Error(
+      `Gift letters are not available right now. Please preview the ${noun} again to send it from your balance.`
+    );
+  }
+  if (code === 'GIFT_LETTER_UNAVAILABLE') {
+    return new Error(
+      `This account has no gift letter left to use. Please preview the ${noun} again to send it from your balance.`
+    );
+  }
+  if (code === 'GIFT_CODE_UNAVAILABLE') {
+    return new Error(`Unable to prepare the gift card for this ${noun}. Please try again.`);
+  }
   if (code === 'JIT_ORDER_NOT_FOUND') {
     return new Error('That Pay & Send order could not be found. Please start a new checkout.');
   }
@@ -147,6 +235,10 @@ export function friendlyDraftError(
   if (code === 'JIT_ORDER_NOT_PAID') {
     // Upstream: `Order ${id} is ${jitOrder.status}` - a raw status column.
     return new Error('That Pay & Send checkout has not completed yet. Please finish the payment and try again.');
+  }
+  if (code === 'JIT_PRODUCT_MISMATCH') {
+    // Upstream interpolates the order id, its product code and the draft id.
+    return new Error(`That Pay & Send order paid for different mail than this ${noun} is now, so it was not sent.`);
   }
 
   if (typeof code === 'string' && code.length > 0) {

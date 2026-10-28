@@ -8,7 +8,10 @@
 
 import http from 'node:http';
 import { verifyWebhookSignature } from '../services/stripeService.js';
+import { letterPacksReturnUrl } from '../config/sendConfirmation.js';
+import { isProductionEnv } from '../config/deploymentConfig.js';
 import { createPackCheckout, processStripeWebhookEvent } from '../services/commerceService.js';
+import { SpendLimitError } from '../services/betaSpendLimits.js';
 import { PACK_PRODUCTS } from '../config/products.js';
 import { authenticateHttpRequest } from './middleware/auth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
@@ -96,6 +99,18 @@ export async function handleCreateCheckoutSession(
       return;
     }
 
+    // Only the website's letter packs page (#683): Stripe sends the person
+    // to these addresses after they pay.
+    const successReturn = letterPacksReturnUrl(successUrl);
+    const cancelReturn = letterPacksReturnUrl(cancelUrl);
+    if (!successReturn || !cancelReturn) {
+      res.statusCode = 400;
+      res.json({
+        error: "successUrl and cancelUrl must be the website's letter packs page"
+      });
+      return;
+    }
+
     // Validate product ID
     if (!VALID_PACK_CODES.includes(productId)) {
       res.statusCode = 400;
@@ -122,8 +137,8 @@ export async function handleCreateCheckoutSession(
       userId: authInfo.userId,
       userEmail: userEmail || '',
       productId: productId as any,
-      successUrl,
-      cancelUrl
+      successUrl: successReturn,
+      cancelUrl: cancelReturn
     });
 
     // createPackCheckout either succeeds or THROWS - its result type's
@@ -139,6 +154,16 @@ export async function handleCreateCheckoutSession(
       sessionUrl: result.sessionUrl
     });
   } catch (error: unknown) {
+    // A daily limit refused the purchase (betaSpendLimits). Its message is a
+    // fixed sentence of ours, so the page shows it as it is. Before this it
+    // fell through to "Unable to create checkout session" and the log's
+    // database_error default, as the $90 Power Pack did on 2026-09-28.
+    if (error instanceof SpendLimitError) {
+      writeDiagnostic('info', 'credits.checkout_refused_by_limit', { reason: error.code });
+      res.statusCode = 429;
+      res.json({ error: 'limit', message: error.message });
+      return;
+    }
     // Prefer a class the failing layer already resolved. createPackCheckout
     // carries the Stripe error's own class (e.g. resource_missing) here, which
     // is what #213 needed: without it a Stripe misconfiguration reached this
@@ -162,6 +187,16 @@ export async function handleCreateCheckoutSession(
     // branch that used to sit in this chain had zero real coverage and its
     // test asserted a 400 that actually came from the pre-validation (#278
     // round 6).
+    if (code === 'ACCOUNT_SENDS_BLOCKED') {
+      // The pack tool's fixed sentence; never the block's label, which is an
+      // internal moderation reason (#449).
+      res.statusCode = 403;
+      res.json({
+        error: 'purchasing_disabled',
+        message: 'Purchasing is disabled on this account. Please contact support.'
+      });
+      return;
+    }
     if (
       // PACK_AMOUNT_NOT_CONFIGURED stays: its carried class is legitimately
       // transient (a Stripe blip mid-resolution), so the terminal test below
@@ -228,6 +263,15 @@ export async function handleStripeWebhook(
       return;
     }
 
+    // An event from the other Stripe mode (#683): a test event at production,
+    // or a live one anywhere else, is refused and changes nothing.
+    if (event.livemode !== isProductionEnv()) {
+      writeDiagnostic('warn', 'stripe.webhook_mode_mismatch', { livemode: event.livemode === true });
+      res.statusCode = 400;
+      res.end('Event mode does not match this deployment');
+      return;
+    }
+
     writeDiagnostic('info', 'stripe.webhook_received', { eventType: event.type });
 
     // The commerce service claims the Stripe event and applies its state
@@ -236,9 +280,15 @@ export async function handleStripeWebhook(
     res.json({ received: true, duplicate: processed.duplicate });
     return;
   } catch (error: unknown) {
-    writeDiagnostic('error', 'credits.webhook_failed', {
-      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error')
-    });
+    const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
+    // A dispute event that met an order committed while it waited fails on
+    // purpose (processDisputeEvent), so that Stripe's retry takes the matched
+    // path: a deferral, not a fault.
+    if (errorClass === 'dispute_order_committed_meanwhile') {
+      writeDiagnostic('warn', 'stripe.webhook_deferred', { errorClass });
+    } else {
+      writeDiagnostic('error', 'credits.webhook_failed', { errorClass });
+    }
     res.statusCode = 500;
     res.json({ error: 'Webhook processing failed' });
   }

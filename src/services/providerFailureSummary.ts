@@ -14,11 +14,21 @@
  * Nothing from the message survives except a three-digit status, taken from
  * the provider's structured metadata when present and otherwise from the
  * `HTTP <status>` prefix the provider client puts on every message.
+ *
+ * Our own classes are kept as they are: a refusal before any request, when a
+ * letter asks for a service the provider cannot sell (#625), or is mail our
+ * renderer drew for a provider that does not print it (#698). It is not the
+ * provider's answer, and an operator reading the column should not be told it
+ * was.
  */
+const REFUSAL_CLASSES: ReadonlySet<string> = new Set(['extra_service_refused', 'renderer_refused']);
+
 export function summarizeProviderRejection(result: {
   error?: string;
   metadata?: Record<string, unknown> | undefined;
 }): string {
+  const refusal = result.metadata?.errorClass;
+  if (typeof refusal === 'string' && REFUSAL_CLASSES.has(refusal)) return refusal;
   const fromMetadata = result.metadata?.statusCode;
   const fromMessage = /^HTTP (\d{3})\b/.exec(result.error ?? '')?.[1];
   const status =

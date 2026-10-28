@@ -34,8 +34,23 @@ export interface AdminRuntimeConfig {
   appPort: number;
   healthPort: number;
   sessionSecret: string;
-  /** Base32, validated; null only in read-only mode. */
+  /**
+   * Each operator's own TOTP secret, by login (ADMIN_TOTP_SECRETS, #730):
+   * base32, validated, for logins in operatorLogins only.
+   */
+  totpSecrets: ReadonlyMap<string, string>;
+  /**
+   * The legacy shared secret (ADMIN_TOTP_SECRET), development only, for an
+   * operator with no secret of their own; null otherwise.
+   */
   totpSecret: string | null;
+  /**
+   * ADMIN_TOTP_SECRET is set in production, where it is never used: the boot
+   * warns to delete it. Ignored rather than refused, so that a panel which has
+   * it can take this code once ADMIN_TOTP_SECRETS is set, with no variable
+   * edit and deploy that must land together.
+   */
+  legacyTotpSecretIgnored: boolean;
   readerDatabaseUrl: string;
   readerRole: string;
   operatorDatabaseUrl: string | null;
@@ -55,6 +70,27 @@ export interface AdminRuntimeConfig {
     elevationFailureWindowMs: number;
   };
   packRefundCommandEnabled: boolean;
+}
+
+/** The counter key the legacy shared secret's codes are kept under: one for every operator. */
+export const SHARED_TOTP_COUNTER_KEY = "(shared)";
+
+/**
+ * The TOTP secret an operator elevates with, and the key its accepted counter
+ * is kept under (#730): their own secret and their login, or, in development
+ * only, the shared secret and one shared key, so a code one operator used is
+ * used for everyone. Null when they have none.
+ */
+export function totpSecretFor(
+  config: Pick<AdminRuntimeConfig, "totpSecrets" | "totpSecret">,
+  login: string,
+): { secret: string; counterKey: string } | null {
+  const own = config.totpSecrets.get(login);
+  // An own secret that is the shared one shares its key too, so one code is
+  // not accepted once under each.
+  if (own) return { secret: own, counterKey: own === config.totpSecret ? SHARED_TOTP_COUNTER_KEY : login };
+  if (config.totpSecret) return { secret: config.totpSecret, counterKey: SHARED_TOTP_COUNTER_KEY };
+  return null;
 }
 
 const HOSTNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -188,18 +224,51 @@ export function parseAdminRuntimeConfig(
   if (sessionSecret.length < 32) {
     problems.push("ADMIN_SESSION_SECRET must be at least 32 characters");
   }
+  // One secret per operator (#730): "login=SECRET", entries separated by
+  // commas or new lines. A login holds no "=", so the first one splits it.
+  const totpSecrets = new Map<string, string>();
+  for (const entry of (env.ADMIN_TOTP_SECRETS ?? "").split(/[,\n]/)) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const split = trimmed.indexOf("=");
+    const login = split > 0 ? trimmed.slice(0, split).trim() : "";
+    // Without its padding, so the same secret padded differently compares equal.
+    const secret = split > 0 ? trimmed.slice(split + 1).replace(/\s+/g, "").toUpperCase().replace(/=+$/, "") : "";
+    if (!login || !secret) {
+      problems.push('ADMIN_TOTP_SECRETS entries must read "login=SECRET"');
+    } else if (!operatorLogins.includes(login)) {
+      problems.push("ADMIN_TOTP_SECRETS names a login that is not in ADMIN_OPERATOR_LOGINS");
+    } else if (totpSecrets.has(login)) {
+      problems.push("ADMIN_TOTP_SECRETS names a login twice");
+    } else if (base32Length(secret) < 16) {
+      problems.push("ADMIN_TOTP_SECRETS secrets must be base32 and decode to at least 16 bytes");
+    } else {
+      totpSecrets.set(login, secret);
+    }
+  }
+  if (new Set(totpSecrets.values()).size < totpSecrets.size) {
+    problems.push("ADMIN_TOTP_SECRETS gives two operators the same secret");
+  }
+
+  // The shared secret of before: development only, for an operator with no
+  // secret of their own. Production never uses it, so every production
+  // operator has a secret no one else holds.
   const totpRaw = env.ADMIN_TOTP_SECRET ?? "";
   let totpSecret: string | null = null;
+  let legacyTotpSecretIgnored = false;
   if (totpRaw) {
-    if (base32Length(totpRaw) < 16) {
+    if (environment === "production") {
+      legacyTotpSecretIgnored = true;
+    } else if (base32Length(totpRaw) < 16) {
       problems.push(
         "ADMIN_TOTP_SECRET must be base32 and decode to at least 16 bytes",
       );
     } else {
-      totpSecret = totpRaw.replace(/\s+/g, "").toUpperCase();
+      totpSecret = totpRaw.replace(/\s+/g, "").toUpperCase().replace(/=+$/, "");
     }
-  } else if (mode === "full") {
-    problems.push("ADMIN_TOTP_SECRET is required in full mode");
+  }
+  if (mode === "full" && totpSecrets.size === 0 && !totpSecret) {
+    problems.push("ADMIN_TOTP_SECRETS is required in full mode");
   }
 
   const tailscaleModeValue = env.ADMIN_TAILSCALE_MODE ?? "daemon";
@@ -312,7 +381,9 @@ export function parseAdminRuntimeConfig(
     appPort,
     healthPort,
     sessionSecret,
+    totpSecrets,
     totpSecret,
+    legacyTotpSecretIgnored,
     readerDatabaseUrl: env.ADMIN_READER_DATABASE_URL as string,
     readerRole,
     operatorDatabaseUrl: mode === "full" ? (env.DATABASE_URL as string) : null,

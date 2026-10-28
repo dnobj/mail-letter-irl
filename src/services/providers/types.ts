@@ -1,3 +1,6 @@
+import type { GiftCardContent } from '../giftCardRenderer.js';
+import type { CertifiedMailService } from '../types.js';
+
 /**
  * Letter Fulfillment Service Provider Types
  *
@@ -10,6 +13,19 @@
  * Letter layout type (US-LAYOUT-01 through US-LAYOUT-06)
  */
 export type LetterLayoutType = 'text_only' | 'header_image' | 'inline_image';
+
+/**
+ * What the send recorded of mail held for its date (#697, decision D3), for a
+ * print our renderer draws. The print uploads `pdf` when it is there, and
+ * otherwise lays the mail out again and holds it when the layout's fingerprint
+ * is not `layoutFingerprint`.
+ */
+export interface HeldPrint {
+  /** letters.print_layout_fingerprint: what the print lays out (src/render/fingerprint.ts). */
+  layoutFingerprint?: string;
+  /** The PDF stored at the send, its bytes already checked against letters.print_pdf_sha256. */
+  pdf?: Buffer;
+}
 
 /**
  * Letter parameters for sending
@@ -53,11 +69,27 @@ export interface LetterParams {
   /** Color printing (true) or black & white (false) */
   color?: boolean;
 
-  /** Double-sided printing */
+  /**
+   * Double-sided printing. PostGrid's letters print double-sided exactly when
+   * they run to more than one page (`pages`), whatever this says.
+   */
   doubleSided?: boolean;
 
-  /** Extra services (certified mail, etc.) */
-  extraServices?: string[];
+  /**
+   * The pages the letter was laid out on (letters.content.pages, #586): one
+   * when absent. Only our renderer prints more than one, on both sides of the
+   * paper, and never with a gift card. The print lays the letter out on
+   * exactly this many pages, and holds one that disagrees.
+   */
+  pages?: number;
+
+  /**
+   * An extra service the carrier sells with the letter (#625): USPS Certified
+   * Mail, or Certified Mail with an electronic return receipt. Absent is
+   * standard first-class mail. Sent to PostGrid as `extraService`, which takes
+   * these two values exactly; US first-class letters only.
+   */
+  extraService?: CertifiedMailService;
 
   // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
   /** Letter layout type */
@@ -68,6 +100,33 @@ export interface LetterParams {
 
   /** Inline image as base64 data URI (for inline_image layout) */
   inlineImageData?: string;
+
+  /** A gift letter's card, printed as an extra page (docs/gift-letters.md). */
+  giftCard?: GiftCardContent;
+
+  /**
+   * The renderer the letter was previewed with (letters.content.rendererVersion,
+   * #534): absent for the legacy HTML, 'pdf-1' for src/render's PDF, 'pdf-2'
+   * for its PDF in stationery (#563).
+   */
+  rendererVersion?: string;
+
+  /**
+   * The stationery the letter was drawn in (letters.content.stationery, #563),
+   * as stored: the print reads it with stationeryOf, for a 'pdf-2' or 'pdf-4'
+   * letter.
+   */
+  stationery?: unknown;
+
+  /**
+   * The person's signature (letters.content.signatureImage, #608): a PNG data
+   * URI, and the paragraph of `message` holding the sign-off's first line,
+   * which it prints under. The print draws it for a 'pdf-4' letter only.
+   */
+  signature?: { image: string; closingParagraph: number };
+
+  /** Held mail's print as the send recorded it (#697). */
+  heldPrint?: HeldPrint;
 }
 
 /**
@@ -103,8 +162,11 @@ export interface LetterStatus {
   /** Provider-specific tracking ID */
   trackingId: string;
 
-  /** Current status */
-  status: 'queued' | 'accepted' | 'processing' | 'in_transit' | 'delivered' | 'failed' | 'returned';
+  /**
+   * Current status. `unrecognised`: the provider answered a status this code does not know, so the letter's own
+   * status is left as it is (#682); reading it as any one of the others could move a letter backwards.
+   */
+  status: 'queued' | 'accepted' | 'processing' | 'in_transit' | 'delivered' | 'failed' | 'returned' | 'unrecognised';
 
   /** Human-readable status message */
   statusMessage: string;
@@ -114,6 +176,14 @@ export interface LetterStatus {
 
   /** Delivery confirmation date (if delivered) */
   deliveredAt?: Date;
+
+  /**
+   * The carrier's tracking number (#625): the USPS number of a certified
+   * letter, which the provider sets some time after the letter is accepted. Not
+   * the provider's own id (`trackingId`, which is what `letters.tracking_id`
+   * holds).
+   */
+  carrierTrackingNumber?: string;
 
   /** Provider-specific tracking events */
   events?: Array<{
@@ -191,6 +261,23 @@ export interface ProviderConfig {
 export interface LetterFulfillmentProvider {
   /** Provider configuration */
   readonly config: ProviderConfig;
+
+  /**
+   * Whether this provider sells the extra services a letter can ask for
+   * (certified mail, #625). Absent means no: the dispatch does not ask a
+   * provider for what it has not said it can do, and rejects the letter
+   * instead (nothing is sent; what paid for it comes back).
+   */
+  readonly supportsExtraServices?: boolean;
+
+  /**
+   * Whether this provider prints mail our renderer drew (#534, #698): a letter
+   * or postcard whose content records a rendererVersion, printed from the PDF
+   * the preview showed. Absent means no: the dispatch rejects such mail before
+   * anything is submitted (nothing is sent; what paid for it comes back),
+   * rather than let the provider print it some other way than it was shown.
+   */
+  readonly printsRenderedPdf?: boolean;
 
   /**
    * Send a letter
@@ -354,6 +441,25 @@ export interface PostcardParams {
 
   /** Optional metadata to pass to provider */
   metadata?: Record<string, any>;
+
+  /** A gift letter's card, printed across the foot of the message half. */
+  giftCard?: GiftCardContent;
+
+  /**
+   * The renderer the postcard was previewed with (letters.content.rendererVersion,
+   * #534). Absent for the legacy HTML; otherwise it prints from our own PDF.
+   */
+  rendererVersion?: string;
+
+  /**
+   * The front the postcard was drawn with (letters.content.postcardFront,
+   * #594), as stored: the print reads it with postcardFrontOf, for a 'pdf-3'
+   * postcard only. Absent for full bleed.
+   */
+  front?: unknown;
+
+  /** Held mail's print as the send recorded it (#697). */
+  heldPrint?: HeldPrint;
 }
 
 /**

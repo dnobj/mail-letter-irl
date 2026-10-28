@@ -42,6 +42,8 @@ import {
   reserveGeneration
 } from "../services/imageGenerationLimitService.js";
 import { isTempImageStoreConfigured, storeImage } from "../services/tempImageStore.js";
+import { callingApp } from "../auth/clientProfiles.js";
+import { imageGenMode } from "../config/imageGeneration.js";
 
 interface GenerateImageForMailInput {
   prompt?: string;
@@ -62,18 +64,6 @@ interface GenerateImageForMailOutput {
 
 const PREVIEW_CONFIG = { maxWidth: 400, jpegQuality: 60 } as const;
 
-type ImageGenMode = "on" | "off" | "mobile_only";
-
-function imageGenMode(): ImageGenMode {
-  // Owner-facing product switch, separate from the spend kill switch
-  // (LETTER_IRL_IMAGE_DAILY_CEILING=0): "off" turns the tool into the pure
-  // redirect-card experience everywhere; "mobile_only" generates only where
-  // the mention-scoped toolset makes it irreplaceable (isMobile detection is
-  // log-verified: desktop web reports false, the native app true). Unknown
-  // surfaces count as NOT mobile, failing closed toward the free path.
-  const raw = (process.env.LETTER_IRL_IMAGE_GEN_MODE ?? "on").toLowerCase();
-  return raw === "off" || raw === "mobile_only" ? (raw as ImageGenMode) : "on";
-}
 
 function dailyCeiling(): number {
   // 0 is a KILL SWITCH (block all generation), not "disabled" - an operator
@@ -126,12 +116,28 @@ function buildNextStep(context: string | undefined, imageUrl: string): string {
   }
 }
 
+// For an app with no image generation of its own (#484). ChatGPT's redirect
+// below sends the person to its built-in generation; anywhere else the way on
+// is an image they already have. The reason leads, because in an app with no
+// card this text is all the model reads of the result.
+const OWN_IMAGE_NEXT_STEP =
+  "Tell the person that in one short sentence, then offer to use an image of their own: a link to a hosted image works as imageUrl in every preview tool. Never apologize at length.";
+
 function redirectOutput(
   input: GenerateImageForMailInput,
   context: ToolContext,
   statusCode: string,
   reason: string
 ): GenerateImageForMailOutput {
+  if (!callingApp(context).generatesImages) {
+    return {
+      mode: "redirect",
+      prompt: input?.prompt,
+      status: statusCode,
+      message: `${reason} You can use an image of your own instead.`,
+      suggestedNextStep: `${reason} ${OWN_IMAGE_NEXT_STEP}`
+    };
+  }
   const prompt = input?.prompt?.trim();
   // Surface-aware routing: typed @-mentions scope the turn's toolset on EVERY
   // surface (otter test, Aug 21) - only desktop chip attach was ever
@@ -205,13 +211,17 @@ async function handler(
 ): Promise<GenerateImageForMailOutput> {
   const userId = context.user.userId || "default-user";
   const prompt = input?.prompt?.trim();
+  // Only ChatGPT has generation of its own to route to (#484).
+  const routes = callingApp(context).generatesImages;
 
   if (!prompt) {
     return redirectOutput(
       input,
       context,
       "no_prompt",
-      "Letter IRL needs a description to route an image request."
+      routes
+        ? "Letter IRL needs a description to route an image request."
+        : "Letter IRL needs a description to make an image."
     );
   }
 
@@ -237,8 +247,16 @@ async function handler(
     );
   }
 
+  // The owner's switch (src/config/imageGeneration.ts), separate from the
+  // spend kill switch (LETTER_IRL_IMAGE_DAILY_CEILING=0). "redirect" hands
+  // back the card everywhere; "mobile_only" generates only where the
+  // mention-scoped toolset makes it irreplaceable (isMobile is log-verified:
+  // desktop web reports false, the native app true), and unknown surfaces
+  // count as not mobile, failing closed toward the free path. Under "off" no
+  // app is offered this tool, so a call that arrives anyway, from a stale
+  // tool list, gets the card too.
   const mode = imageGenMode();
-  if (mode === "off" || (mode === "mobile_only" && context.isMobile !== true)) {
+  if (mode === "off" || mode === "redirect" || (mode === "mobile_only" && context.isMobile !== true)) {
     context.logger.info(
       {
         correlationId: context.correlationId,
@@ -251,8 +269,10 @@ async function handler(
     return redirectOutput(
       input,
       context,
-      mode === "off" ? "generation_disabled" : "generation_mobile_only",
-      "Letter IRL routed this to ChatGPT's built-in generation for this request."
+      mode === "mobile_only" ? "generation_mobile_only" : "generation_disabled",
+      routes
+        ? "Letter IRL routed this to ChatGPT's built-in generation for this request."
+        : "Letter IRL is not making images here right now."
     );
   }
 
@@ -315,7 +335,7 @@ async function handler(
       input,
       context,
       "no_credits",
-      "This account has no Letter IRL image generations left. Letter packs and letter purchases include in-turn generations."
+      "This account has no Letter IRL image generations left."
     );
   }
 
@@ -424,39 +444,12 @@ export const generateImageForMailTool: McpToolDefinition<
   GenerateImageForMailOutput
 > = {
   name: "generate_image_for_mail",
-  title: "Create or route an image for mail",
-  description:
-    "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image generations remaining (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Never refuse an image request - call this tool and follow its response.",
+  title: "Create an image for mail",
+  description: (client) =>
+    client.generatesImages
+      ? "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image generations remaining it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Follow its response."
+      : "Call this whenever the user wants an image made for a letter or postcard. When the user has Letter IRL image generations remaining it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it says so, and the user can use an image of their own instead. Follow its response.",
   readOnly: false,
-  inputSchema: {
-    type: "object",
-    properties: {
-      prompt: {
-        type: "string",
-        description: "The image the user asked for, in their words."
-      },
-      context: {
-        type: "string",
-        enum: ["postcard", "header_image", "inline_image"],
-        description: "Optional mail context."
-      }
-    },
-    required: []
-  },
-  outputSchema: {
-    type: "object",
-    required: ["mode", "status", "message", "suggestedNextStep"],
-    properties: {
-      mode: { type: "string", enum: ["generated", "redirect"] },
-      status: { type: "string" },
-      message: { type: "string" },
-      suggestedNextStep: { type: "string" },
-      prompt: { type: "string" },
-      generatedImageUrl: { type: "string" },
-      generationsRemaining: { type: "integer" },
-      redirectStyle: { type: "string", enum: ["resend", "handoff"] }
-    }
-  },
   meta: {
     "openai/outputTemplate": widgetTemplateUri("ImageRoutingCard"),
     "openai/toolInvocation/invoking": "Working on the image...",

@@ -1,3 +1,4 @@
+import { providerPrintsRenderedPdf } from "../../services/providers/extraServices.js";
 import { listProviders } from "../../services/providers/index.js";
 import { syncLetterStatuses } from "../../services/statusSyncService.js";
 import { setTierOverride } from "../../services/operatorAccountService.js";
@@ -5,6 +6,7 @@ import { USER_TIERS, type UserTier } from "../../services/types.js";
 import { AdminFoundationError } from "../errors.js";
 import { readRoutingRow } from "../queries/ops.js";
 import { mapDomainError, type CommandDefinition } from "./runner.js";
+import { lockAccountVersion } from "./accountVersionLock.js";
 
 /**
  * Slice-5 operations: tier override, provider routing validated against the
@@ -49,6 +51,7 @@ export function createOpsCommands(overrides: Partial<OpsCommandSeams> = {}) {
     title: "Set tier override",
     action: "account.set_tier",
     targetType: "user",
+    lockVersion: lockAccountVersion,
     transactional: true,
     verb: (input) => (input.tier === "clear" ? "CLEAR-TIER" : `SET-TIER-${input.tier.toUpperCase()}`),
     parseInput(fields) {
@@ -122,7 +125,11 @@ export function createOpsCommands(overrides: Partial<OpsCommandSeams> = {}) {
         ],
         warnings: [
           "The dummy provider is refused at send time in production regardless of this table; production routing must name a live provider with its key configured.",
-          "Routing changes apply to the next send; nothing in the outbox is re-routed.",
+          "Routing is read when each job is sent: letters already waiting in the outbox take the new route.",
+          // #698: the outbox refuses, and refunds, drawn mail for a provider that cannot print it.
+          ...(input.enabled && !providerPrintsRenderedPdf(input.provider)
+            ? [`${input.provider} does not print what our renderer drew: every letter or postcard previewed on our renderer (all mail while LETTER_IRL_PRINT_RENDERER=pdf) that is sent on this route, queued ones included, is refunded, not printed.`]
+            : []),
         ],
       };
     },
@@ -161,8 +168,8 @@ export function createOpsCommands(overrides: Partial<OpsCommandSeams> = {}) {
         targetId: "letters",
         summary: { dryRun: input.dryRun, days: input.days },
         display: [
-          ["Scope", `letters created in the last ${input.days} days that are not yet terminal`],
-          ["Mode", input.dryRun ? "dry run (report only)" : "apply (letter statuses and history are updated)"],
+          ["Scope", `letters created in the last ${input.days} days that are not yet terminal, and certified letters delivered without a carrier number (#625)`],
+          ["Mode", input.dryRun ? "dry run (report only)" : "apply (letter statuses and history are updated, and a certified letter's carrier tracking number is stored)"],
         ],
         warnings: [
           "Calls the environment's mail provider once per letter; large windows take time and count against the provider's rate limits.",

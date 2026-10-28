@@ -84,6 +84,7 @@ When you need more detail, read these docs:
 Check `docs/learnings/` for debugging notes and integration quirks:
 - `openai-app-sdk-notes.md` - Apps SDK status and action items
 - `chatgpt-auth0-oauth-learnings.md` - OAuth debugging
+- `chatgpt-connector-oidc-setting.md` - untick OIDC on every ChatGPT connector (#424)
 - `claude-desktop-mcp.md` - MCP client setup
 
 ## Common Commands
@@ -92,6 +93,6 @@ Check `docs/learnings/` for debugging notes and integration quirks:
 npm run dev          # Development with watch
 npm run start        # Production mode
 npm run db:migrate   # Run migrations
-npm run verify       # Lint, build, unit and submission tests (mirrors the CI `checks` job)
+npm run verify       # Lint, build, the test type-check ratchet, unit and submission tests (mirrors the CI `checks` job)
 npm run admin:dev    # Admin panel against .env.admin.local (docs/admin-panel-guide.md)
 ```

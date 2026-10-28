@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-plugin-extensions="on-request">
   <head>
     <meta charset="utf-8" />
     <title>PostcardPreviewCard</title>
@@ -13,10 +13,8 @@
       body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--tb);overflow:hidden}
       .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;overflow:hidden;max-width:100%}
       .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
-      .logo{width:17px;height:11px;flex:none;display:block}
-      /* One parametric SVG for both themes (assets/brand/letterirl-mark-small.svg):
-         the mark reads --li-blue, which the dark scope lightens. */
-      .dark{--li-blue:#6f98f2}
+      .logo{width:22.5px;height:14px;flex:none;display:block;background:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFoAAAA4CAMAAABKSh9hAAAAw1BMVEVMaXEXZqUyotUef7r4d1UYb64bdrOae371d1F6eYQum8/delfrfFkpksjpe1fmfl0jicL5dE7kelvfgGDheVdcjKfkf2PwcUsmcqZnmbNYlrPZfV/Rd1sxfq42jrthnro7fqRHpcvoZUZIm78tcJ1YpsM4fqhDfJ/Vel1GncJFfJ49dpzggGJWmLNKkLLOeF7mb081c5zWcFVEi7M/c4/eYkRElb2OkpXPbVKxZlvWXEL8flj3elHzflk8q9zfWTongbc6m2IhAAAAO3RSTlMA/v7+/v7+Av0F/g35/u7J/v6UOi4Zqf7+DSxfIf39Rbb6/qTtp+Bzh+pUluhljUz+yMylNP7J56XZ9VSM55UAAAAJcEhZcwAAA+gAAAPoAbV7UmsAAAY8SURBVFjDrZgLc6JKEIXHiAwjGCUJAj7wESO+4zvZAsT//6vu6QEVsqtmN7drNyUUfjRnunsOMvYl+NXIXSGE4DdCXC4/f02w6yE4+3bwPJvTd63OfPH2injLx+J1LlPhuKA5eroXIz2XlGDWfDP2vEoZ8SDjcIlxh7uCd97G4w/DCO5FNYvmzJ0PvUqlVpFRTuMhjV6Hua676PV6H4ZiKtrvoSiaqSim/JxF41k7Q69WS8EZOrD431swPNTb4dD7MLO0bMgzWojIoKGy8L3asSbZ2WRPmowtXAPy4QOp3RDCVMIQN1HW+nnt3VevKNEVb7zfbF7xLxdz1M68d+iNZ6Zdrf85nur1app//4zm7sYrFgH2houO5f6hluju48Ph4WMZx5/nqs3XsmDPM80Mw0jb2YkgdG4B8rFYGfoW45evXMB0MO9Bno84jnefQp4430Ckf59nimmaSrTbnbQWbOKoRWTdbTDGr/QFZ28HrOavOO73lyNxujWX30iOnmcRllGLdnE/RXNuDSnnWtdlV5sRiuyBHv+Kd7t+3wCb+iDTbYK9zwIt0oLZZxzbCRoPsjgi5yORb7SyNZbVve4jbAPdlnk+3AfkEOUeGs33uK+FqSCNNnIuDhvs5oxoSHRDX9vL5dI2nrJsmTPUMM3HJnvfaSk6Tbo9YbdGE2cNWsVxg7XWINt29CSy6/w+QzFrIOMmy9CUgnBGSkMOOZz4XTQHG2RNM0ZcXi6SqgvRpJHRZDprGmd0p60WVUr69sxMBOng2V7Wka1FIdi0krpUI6QWhxpYuWaUzhAOPVRVHVrszjQmdBloyNCqBhgfEdZSyKEPNZIVpEe4oJnoFlX1uLlHBross6ZqaFVpzexopHNJxpEic6bDC9oaIumjfwfNCV2WWTPJDjXThN5JbaBRgsembKIsujEAGlJ/H02EVpVGKPTWQTYVO3x8Rwl+QW8dQnf+Jmt20gTs6oymv2muW1TdnCrk79Ee0OO0r9K1xOgPFFuzNTOOf7VkY4gv6NI30B1sEQ9769yAlHeyj5mmjXm4rLaSdchrXfqG1vNyufKwdzNnKG80j6kYu3i3DAPJFl8rxLlfIQugy3uRXieHaav+GAWBUX0f7foRNsRE70xdr5C1urlnWcS+jF1zkZJFsmHoz83R6B2DamQE2MwVsPVsN06dpBtvm6HGuIKs55ekWWab4WJEutvausWz6Hm7pJac2zMEey4sSsW7DF6e7gDU6ELnej0y7aWtQO+LIBAbaLXrXkfj+6JLxmQvrskl9KdIw7BdrlvNyCS0rJapWiqVnDm7gWYdjwyKzwT/w+ZJ8xhsA+S+vR6hO0/b7naAtEuDxvW9QCBpsiiNk7xfjag0C0+R3e+jwCNFCepSA0obaHV1bW8kdyM924ZlTEfqslOjTdNV/yRybEdKGDzJ8oSXG5RoJa/s6HTBkCybt7251BDlEwaor4RRGDWTIiIfItmrP+68PJGjVoGj1Fsv1+P55Rn7PfxklDRmMms2YCOGc5dlbNHJByykHHsL/Vd9vBWzR4V2Ms1oXorU7Sbs9mrLeC51VIffJj/oTeR8MLO2N0zifBwE5CXNoK5n3lIS9u9zSgh30YazKnqLdHNJTHrOX1/8Np0Jonor4yMEE7K61aHL8yvobiqU85FaiqMtQunN5R20NOmUmxxE0Yx2zNzyWoMCEvezRQIxGivyPyCTdW8+GhQQ1TBOn04fTyeqo5ecGyS07xRk32Q9keu3a7A/R4/IjL8834uXFzQ4/1qiK1rGLkve4JJ+a3SPZI6Pta5FDuNbr435+qKhiH2sUChg/qUtDI41bUty0du48maMfye+TmM0u1MqFAaWXDpK0PIHcFWUc9v/m9fc35/CHULp0pSlrwUAw1OpxEalC/HvaLQ65KD9gLjuZDpoqwm5PXUT6/KvSUMPoAsrZOd2pkPHQY07BF51GP+JHCTAgLKeNnxwZceXyPesJoKJH3GRtE/1URgMUq5ED32Xcc5/RuasW7iEHFPOavJjsEy6MciRncF0K27/7PLt+vAvZMcZdCcW+/HqnUbqKkm34AxWU+Ky/4VL/bLF0CuA6k8skdiOi4v5odTbqe9vkx8U8m/9P8/68hME+3+EkPEfbhHbzMBpNEAAAAAASUVORK5CYII=") center/contain no-repeat}
+      .dark .logo{background-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFoAAAA4CAMAAABKSh9hAAAAq1BMVEVMaXFrps51v+JrrdP3dk9noMqgoKV9obTebVf2dlNwttpnm8PbeVnydU3qelaKv9XfgGB4qsvceVbrfFqUtMXmfl3meVqMtMeRuMvkf2OIrsPYfl92osDsaUmEwdp7pcCGssniYUHigGKEq8B/pr9+r8mBsMiLr8PWfmDOd13ffGDkbk2Hv9fZd1jLalbHb1OvpKL8f1n7eVXzfVd+xOSDzOx9utl3stTeVzltLl3SAAAAMXRSTlMA/v7+/v4IAgP9/f0p/u6mOv4O+hbIlClIqmFd5/7yxo7+53mi5bc4lE16/tzRyZfnJpz/XgAAAAlwSFlzAAAD6AAAA+gBtXtSawAABdFJREFUWMOtmItyokAQRQeF4aHERTAigoj4ihoTwKj//2V7e0YMGtRsuV2VKk3w2Ny5/SCMXYV+J8oLjNqgK4zybzr7CWY3Q+f6/QsuwjB+fNbzg3GnJsadVCaOC4ar5euDWPEqGWAv6Mz2+/2ujK9KbHy6wu9sRp+umz2KXvdCCi+d7RtWGY2L2I1A5nw8+tp9uoVq1oaq0g/CzM9onch+vLcuo4oe4yKv8/U1+rRtU7XrySXbrqC5ztOD1WxK4u6nIhsPcnS+drtPU83z/JYOuZrLr3k/o3Wvs29SWPvDbF5zioHOWQryaKLavUF9vA4GEzOnMKNt94ps7WfjhcfrnedtKOn18fgB914UgXzFOfvzbkKSwkwiKQh+ycaCvJ+lHtNvlA0LSKHP4/GYfBiwrXFlYQPkSU5yF0lSOoSzwFGIPO+zc9H9SJuR0qMtyMma2LpxWSEGyEVh2iAfI4kGy5s1FaVpzbkomhtkvvmCBbdJkkSR+wESr7KR89skhxbZBN9eOgRyHJSmcphzdpNMztvsGo2Rv42Ajtxl97KUDSKrcI87fDsmJ1/rrC+SnvXZvQbC+iMqnEV3a6/Xks2MSs5QgzztDtlbAuOf0OMD0E6A9Jn+CN1n7S3Itu0u+TdaF2qYtvoyRPprVRVZ404p6cNcnN9D9MJg7Xc7sk3bXcmrcYCUM8SwC+TM2dBV1UyifUcBOmB326VEN3Y+I3YBH4AtHMiFN3Iq/ZchHcCwOPUQ0gPomfdbNG6u3ctgswJ6S1HoBMF2h8KDZzTjMekxfdDkK2jKu0dnZhekN3kDd2GqlLN+gfZmijjE++OjioaeYNtocO6KCzLkyXGCpI9Ey5Lph4T2/wWNySf1LtxVl8g5vPHGfqJb/4Den64TmtioPrc3KdA2VPW9LcuTVwQhtPYL9GIP9KasK+N0lmaW2wj1eNy2qTBE1vY/on2gd5uzkQQbhrNprNjoh+temxlX6PB36GBnWbsNP18n2ZRx7ibHJMozsHUhiF1xiPYLh4wJ3flGE3vwUmSZ23v7SNZFoWbQ26geI48VTXPmDypG5x0MezF8z90fffXParV6QxP8cNFC1Bzs7jca6TiaooT3q1HX+xtC198cusiShoBtgl1FB46mkdi3mzVVaoBNYj+6brxiv2NG1+gOChW6U96VHuLNgFZifmcOQI85km7Et64xjO6ysNd25L63v30NRZqU9p2DxFz2D1hQdilurV4RZL507QhTYrs8HyPqLARaC+9MGd2gpC2hRx0blS/0jtYYnesiN7OBuD/sLoqQxKuXm5YJUrrZoPZo3NiuEd3XKEkwcwtTzV5Ft4XaIm1nXs/WaXpaEMRZXG3NP5L/wAIU5QViKNFcmkRz4n7d7dIZ7ptWcz/Grtq+HX8Q2yhC4RfnHRgGmBK7pcwCTvAq/7RbHZoW9Y927+VeTF6oY6km5ub3xwWbEl+wy+mLr0kd2toONPJX6KB5JfDm8hcIW80GXVbDvvIgtsixIEMOg3VpcD2KLBu0q+YCW9gk5FdikM6U89zD6F5m6jlM8VOu7PI9ranFZNU1rhavsNXSlLRqEqy1i/ggyLGHfXD44rpSVFeGeHl+I973lu3rpy8WtIAOKx7BC546FnY27LAena4wwf1oI2OdX6J16q1KXH3yZIv5QZHbMfXF+56uiHu14WKOaa2WErDzks9wfrT8gDzlJ9vcrsSySPWaUh4rQFPX1sUTMZ70QgFWDk7Kf/2MW7s9U60r0/KpQIA1QltwOufsCbRPh9iSw9fzp6EjwErTGXvsmaRRDFPIocWcuOPQcYTHAY599gxXtmxkrUwXqchXhuLEaCmcPYOmyecIV1O6rRIcBt7tB7JfkuGYGHqUQdyDyPiphMtWH2oVMhKeLnSm82fJlFv6zXVa4RRKEPg/kFHkMlvNCeOp7/2fhE/7LZbVFqip74mFS+b7fNZoJ4s0COQ/FOSDvl5+53+LJ512HX8BecPH7lQkjhUAAAAASUVORK5CYII=")}
       .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
       .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
 
@@ -36,10 +34,19 @@
       .postcard-front img{width:100% !important;height:auto !important;aspect-ratio:9/6;object-fit:cover}
       .preview-pane img{width:100%;max-width:100%;height:auto;border-radius:8px;border:1px solid var(--bd);aspect-ratio:9/6;object-fit:cover}
       .preview-pane.back-preview{display:flex;justify-content:center;align-items:center}
+      /* A page our renderer drew (#534): the postcard as it prints, bleed included. */
+      .postcard-page{width:100%}
+      .postcard-page > svg{display:block;width:100%;height:auto;border-radius:8px;border:1px solid var(--bd);background:#fff}
 
       /* Postcard back mockup - paper artifact, cream in both themes */
       .postcard-back-mockup{width:100%;aspect-ratio:9/6;background:#fdfcf8;border:1px solid #e6e0d2;border-radius:8px;box-shadow:0 2px 8px rgba(43,36,29,.1);display:flex;overflow:hidden;color:#2b241d}
       .postcard-message-side{width:53%;padding:11px 12px;border-right:1px solid #e6e0d2;display:flex;align-items:flex-start}
+      /* Gift postcard (docs/gift-letters.md): the card takes the foot of the
+         message half, as it does in print. */
+      .postcard-message-side.with-gift{flex-direction:column;justify-content:space-between;align-items:stretch}
+      .postcard-gift-strip{display:flex;align-items:center;gap:6px;border-top:1px solid #d9cdb8;padding-top:5px;margin-top:5px;font-family:Georgia,"Times New Roman",serif;font-size:6.5px;line-height:1.35;color:#2b241d}
+      .postcard-gift-qr{flex:none;width:20px;height:20px;background:repeating-conic-gradient(#2b241d 0 25%,#fdfcf8 0 50%) 0 0/4px 4px;outline:1px solid #2b241d}
+      .postcard-gift-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700}
       .postcard-message-text{font-family:Georgia,"Times New Roman",serif;font-size:9.5px;line-height:1.6;color:#4a4036;white-space:pre-wrap;word-wrap:break-word}
       .postcard-address-side{width:47%;padding:9px 10px;position:relative;display:flex;flex-direction:column;justify-content:flex-end}
       .postcard-stamp{position:absolute;top:9px;right:10px;width:32px;height:38px;border:1.5px dashed #c8b393;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:6px;letter-spacing:.12em;color:#a8916b}
@@ -65,6 +72,7 @@
       .message-text{font-family:Georgia,"Times New Roman",serif;font-size:11.5px;line-height:1.55;color:#4a4036;white-space:pre-wrap;word-wrap:break-word}
 
       .note{background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--mut);line-height:1.45;margin-top:10px}
+      .empty-hint{font-size:11px;color:var(--mut);line-height:1.45;margin:8px 2px 0}
 
       /* Action buttons: primary ink pill (inverts in dark), secondary outline */
       .send-button{display:flex;width:100%;justify-content:center;align-items:center;gap:7px;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;box-sizing:border-box;border:none;margin-top:12px;background:var(--pri);color:var(--prit);transition:opacity .15s ease}
@@ -75,6 +83,13 @@
       .purchase-actions{display:grid;gap:0}
       .send-button.secondary{color:var(--tx);background:transparent;border:1px solid var(--bd);margin-top:8px}
       .send-button.secondary:hover:not(:disabled){background:var(--sf2);opacity:1}
+      /* The Arrives row (#535) */
+      .arrives-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}
+      .arrives-controls input[type=date]{font:inherit;font-size:12px;color:var(--tx);background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:2px 6px}
+      .arrives-controls input[type=date]:disabled{opacity:.6}
+      .link-button{font:inherit;font-size:11.5px;background:none;border:none;padding:0;color:var(--mut);text-decoration:underline;cursor:pointer}
+      .link-button[aria-pressed=true],.link-button:disabled{color:var(--tx);text-decoration:none;cursor:default}
+      .note.alert{color:var(--er);background:var(--erbg);border-color:transparent}
       .checkout-link{text-decoration:none}
       .checkout-link:hover{opacity:.9}
       @keyframes spin{to{transform:rotate(360deg)}}
@@ -92,11 +107,72 @@
       .preview-loading{display:flex;align-items:center;justify-content:center;min-height:100px;color:var(--faint);font-size:11.5px;width:100%}
       .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
       .hidden{display:none !important}
+
+      /* The postcard maker (#580): while the preview's _meta carries
+         letterirl/studioCard, widgets/shared/studio.js lays the card out from
+         #studio-template, moving the card's own rows, notes and buttons into
+         it. Nothing here applies to a card without the studio class. Two
+         columns from 560px, as the letter card. */
+      .studio .hd,.studio .preview-tabs,.studio .rows{display:none}
+      .studio #message-box{display:none !important}
+      .studio .meta{padding:0 14px}
+      .studio-hd{display:flex;align-items:center;gap:10px;padding:14px 14px 0}
+      .studio-icon{width:32px;height:32px;flex:none;border-radius:8px;background:var(--sf2);border:1px solid var(--bd2);display:flex;align-items:center;justify-content:center}
+      .studio-heading{display:flex;flex-direction:column;flex:1;min-width:0}
+      .studio-title{font-size:14px;font-weight:700;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .studio-sub{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .studio-hd .status-pill{flex:none;max-width:45%;text-align:right}
+      .studio-body{display:flex;flex-direction:column;gap:14px;padding:14px}
+      .studio-page{display:flex;flex-direction:column;gap:8px;min-width:0}
+      .studio-side{min-width:0;display:flex;flex-direction:column;gap:12px}
+      @media (min-width:560px){
+        .studio-body{flex-direction:row;align-items:flex-start}
+        .studio-page{flex:0 0 55%}
+        .studio-side{flex:1}
+      }
+      .studio .preview-pane{padding:0}
+      .studio-postcard{border-radius:8px}
+      .studio-postcard.flipping{animation:studio-flip .4s ease-out}
+      @keyframes studio-flip{from{transform:perspective(900px) rotateY(-90deg)}to{transform:none}}
+      @media (prefers-reduced-motion: reduce){.studio-postcard.flipping{animation:none}}
+      .studio-flip-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+      .studio-scale{font-size:11.5px;color:var(--mut);line-height:1.4}
+      .studio-flip{flex:none;border:1px solid var(--bd);border-radius:999px;background:var(--sf);color:var(--tx);font:inherit;font-size:12px;font-weight:600;padding:6px 12px;cursor:pointer}
+      .studio-flip:focus-visible,.studio-words:focus-visible{outline:2px solid var(--tx);outline-offset:1px}
+      .studio-section{display:flex;flex-direction:column;gap:6px}
+      .studio-label,.studio #arrives-row .info-label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
+      .studio-section .info-row{padding:6px 0}
+      .studio-section .note,.studio-side > .note{margin-top:0}
+      .studio #arrives-row{flex-direction:column;align-items:stretch;gap:8px;border-bottom:0;padding:0}
+      .studio #arrives-row .arrives-controls{justify-content:flex-start;text-align:left;gap:6px}
+      .studio #arrives-row .link-button{border:1px solid var(--bd);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;color:var(--tx);text-decoration:none;background:var(--sf)}
+      .studio #arrives-row .link-button[aria-pressed=true]{background:var(--pri);border-color:var(--pri);color:var(--prit)}
+      .studio #arrives-row input[type=date]{font-size:12.5px;padding:4px 8px;border-radius:999px}
+      .studio-quiet{margin:0;font-size:12px;color:var(--mut);line-height:1.45}
+      .studio-size{margin:0;font-size:13px;font-weight:600;color:var(--tx)}
+      /* The maker's size and front (#594): choices like the Arrives row's. */
+      .studio-choices{display:flex;flex-wrap:wrap;gap:6px}
+      .studio-choice{border:1px solid var(--bd);border-radius:999px;padding:5px 11px;font:inherit;font-size:12px;font-weight:600;color:var(--tx);background:var(--sf);cursor:pointer}
+      .studio-choice[aria-pressed=true]{background:var(--pri);border-color:var(--pri);color:var(--prit)}
+      .studio-choice[aria-disabled=true]{opacity:.55;cursor:default}
+      /* Hidden stays hidden though the class lays it out (#603 review round 1). */
+      .studio-choices[hidden],.studio-section[hidden],.studio-line[hidden]{display:none}
+      .studio-error{color:var(--er)}
+      .studio-choice:focus-visible,.studio-line-input:focus-visible{outline:2px solid var(--tx);outline-offset:1px}
+      .studio-line{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+      .studio-line-input{flex:1 1 120px;min-width:0;font:inherit;font-size:12.5px;color:var(--tx);background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:5px 8px}
+      .studio-words{max-height:200px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;font-family:Georgia,"Times New Roman",serif;font-size:13px;line-height:1.55;color:var(--tx);background:var(--sf2);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px}
+      .studio-ft{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:0 14px;padding:12px 0 14px;border-top:1px solid var(--bd2)}
+      .studio-sum{flex:1 1 160px;min-width:0;display:flex;flex-direction:column}
+      .studio-cost{font-size:14px;font-weight:700;color:var(--tx)}
+      .studio-summary{font-size:12px;color:var(--mut)}
+      .studio-ft #send-button{width:auto;flex:0 0 auto;margin:0;padding:10px 20px}
+      .studio-ft > :not(.studio-sum):not(#send-button){flex:1 1 100%}
     </style>
   </head>
   <body>
     <div class="w" id="card">
-      <div class="hd"><span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 21"><path fill="none" stroke="var(--li-blue,#2563eb)" stroke-width="3" stroke-linejoin="round" d="M11.3 2.4c5.2 0 9.4 3.3 9.4 7.4 0 4.1-4.2 7.4-9.4 7.4-.8 0-1.6-.1-2.4-.2l-5.7 2.6 1.8-4.1C3 14.2 1.9 12 1.9 9.8c0-4.1 4.2-7.4 9.4-7.4Z"></path><g transform="rotate(-8 24 8.6)"><rect x="16.5" y="3" width="14.6" height="10" rx="1.6" fill="var(--li-orange,#f97316)"></rect><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" d="m18 4.7 5.8 4 5.8-4"></path></g></svg></span><b>Letter IRL</b><span class="ctx">Postcard</span></div>
+      <div class="hd"><span class="logo" aria-hidden="true"></span><b>Letter IRL</b><span class="ctx">Postcard</span></div>
       <div class="preview-tabs">
         <button class="preview-tab active" id="tab-front" data-tab="front">
           Front (Image)
@@ -105,7 +181,7 @@
           Back (Message)
         </button>
       </div>
-      <div class="preview-container">
+      <div class="preview-container" id="preview-container">
         <div class="preview-pane front-preview" id="preview-front">
           <div class="preview-loading">Loading postcard preview&hellip;</div>
         </div>
@@ -115,19 +191,28 @@
       </div>
       <div class="meta">
         <div class="rows">
-          <div class="info-row">
+          <div class="info-row" id="cost-row">
             <span class="info-label">Cost</span>
             <span class="info-value" id="cost"></span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="delivery-row">
             <span class="info-label">Delivery</span>
             <span class="info-value" id="delivery"></span>
           </div>
-          <div class="info-row">
+          <!-- Arrival dates (#535): shown while the preview offers dates and
+               this card can set one. widgets/shared/arrives.js draws it. -->
+          <div class="info-row" id="arrives-row" style="display: none">
+            <label class="info-label" for="arrives-date">Arrives by</label>
+            <span class="info-value arrives-controls">
+              <input type="date" id="arrives-date" />
+              <button type="button" class="link-button" id="arrives-asap" aria-pressed="true">As soon as possible</button>
+            </span>
+          </div>
+          <div class="info-row" id="status-row">
             <span class="info-label">Status</span>
             <span class="status-pill" id="status-pill"></span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="id-row">
             <span class="info-label" id="id-label">Draft</span>
             <span class="info-value mono" id="id-value"></span>
           </div>
@@ -140,6 +225,7 @@
           <span class="info-label">Message</span>
           <div class="message-text" id="message-text"></div>
         </div>
+        <div class="note" id="arrives-note" style="display: none" aria-live="polite"></div>
         <div class="note" id="note" style="display: none"></div>
         <!-- Shown when no result arrived (#411), or for a reopened card that
              already sent its postcard or started a checkout. -->
@@ -148,11 +234,45 @@
           <button class="send-button" id="retry-button" style="display: none">
             <span id="retry-button-text">Create my preview</span>
           </button>
+          <!-- An image attached or generated in the chat reaches this card as
+               a reference it cannot pass back (#414). The person picks the
+               image again, and the card previews it by link. -->
+          <button class="send-button" id="choose-image-button" style="display: none">
+            <span id="choose-image-button-text">Choose from library</span>
+          </button>
+          <button class="send-button secondary" id="upload-image-button" style="display: none">
+            <span id="upload-image-button-text">Upload the image</span>
+          </button>
+          <input type="file" id="image-file-input" accept="image/png,image/jpeg,image/webp" hidden />
+          <!-- Only after a wait that ran out. A card cannot tell which model
+               is selected (neither window.openai nor the request metadata
+               says), so the tip names the setting where the loss shows up. -->
+          <p class="empty-hint" id="empty-hint" style="display: none">
+            Tip: with Instant selected, ChatGPT sometimes doesn't run an action you approved. A higher thinking effort can help.
+          </p>
         </div>
         <!-- Send button -->
         <button class="send-button" id="send-button" disabled>
           <span id="send-button-text">Send Postcard</span>
         </button>
+        <!-- Sent with an arrival date (#535): it waits for its mail date and
+             can be cancelled free until then. -->
+        <div id="scheduled" style="display: none">
+          <div class="note" id="scheduled-note" aria-live="polite"></div>
+          <button class="send-button secondary" id="cancel-scheduled-button" style="display: none">
+            <span id="cancel-scheduled-button-text">Cancel this postcard</span>
+          </button>
+        </div>
+        <button
+          class="send-button"
+          id="send-page-button"
+          style="display: none"
+        >
+          Open the confirmation page
+        </button>
+        <div class="note" id="send-page-note" style="display: none">
+          Not sent: in this app, mail is sent from Letter IRL's confirmation page. Open it, check the postcard, and press Send there.
+        </div>
         <div
           class="purchase-actions"
           id="purchase-actions"
@@ -163,6 +283,22 @@
           </button>
           <button class="send-button secondary" id="buy-pack-button">
             Buy a Letter Pack
+          </button>
+          <button
+            class="send-button"
+            id="website-packs-button"
+            style="display: none"
+          >
+            Buy letters on the website
+          </button>
+          <!-- Mail no pack pays for (#579), in an app with no checkout: paid
+               with Pay & Send on the confirmation page, which sends it. -->
+          <button
+            class="send-button"
+            id="pay-page-button"
+            style="display: none"
+          >
+            Pay &amp; Send on letterirl.com
           </button>
           <div id="pack-options" style="display: none"></div>
           <a
@@ -180,7 +316,7 @@
           >
             Check status
           </button>
-          <div class="note">Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.</div>
+          <div class="note" id="checkout-note">Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.</div>
         </div>
         <div
           id="error-message"
@@ -188,15 +324,155 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t22</p>
+      <p class="rev">postcard t42</p>
     </div>
 
+    <!-- The postcard maker (#580): widgets/shared/studio.js lays the card out
+         from this while the preview's _meta turns it on. Each data-slot is
+         replaced by the card's own element with that id, moved. -->
+    <template id="studio-template">
+      <div class="studio-hd">
+        <span class="studio-icon" aria-hidden="true"><span class="logo"></span></span>
+        <div class="studio-heading">
+          <span class="studio-title" id="studio-title">Your postcard</span>
+          <span class="studio-sub" id="studio-sub"></span>
+        </div>
+        <span data-slot="status-pill"></span>
+      </div>
+      <div class="studio-body" id="studio-body">
+        <div class="studio-page">
+          <div class="studio-postcard" id="studio-postcard">
+            <span data-slot="preview-container"></span>
+          </div>
+          <div class="studio-flip-row">
+            <span class="studio-scale" id="studio-scale" aria-live="polite"></span>
+            <button type="button" class="studio-flip" id="studio-flip">Flip to the back</button>
+          </div>
+        </div>
+        <div class="studio-side">
+          <div class="studio-section">
+            <span class="studio-label" id="studio-size-label">Size</span>
+            <p class="studio-size" id="studio-size">6 x 9 in</p>
+            <!-- While the preview names its size (#594): the sizes on offer. -->
+            <div class="studio-choices" id="studio-sizes" role="group" aria-labelledby="studio-size-label" hidden>
+              <button type="button" class="studio-choice" data-size="6x4" aria-pressed="false">4 x 6 in</button>
+              <button type="button" class="studio-choice" data-size="6x9" aria-pressed="false">6 x 9 in</button>
+              <button type="button" class="studio-choice" data-size="6x11" aria-pressed="false">6 x 11 in</button>
+            </div>
+          </div>
+          <!-- While the preview names its front (#594): the layouts, and the line one takes. -->
+          <div class="studio-section" id="studio-front" hidden>
+            <span class="studio-label" id="studio-front-label">Front</span>
+            <div class="studio-choices" role="group" aria-labelledby="studio-front-label">
+              <button type="button" class="studio-choice" data-layout="full_bleed" aria-pressed="false">Full</button>
+              <button type="button" class="studio-choice" data-layout="border" aria-pressed="false">Border</button>
+              <button type="button" class="studio-choice" data-layout="greetings" aria-pressed="false">Greetings</button>
+            </div>
+            <div class="studio-line" id="studio-line" hidden>
+              <label class="studio-quiet" for="studio-line-input" id="studio-line-label">Caption</label>
+              <input type="text" class="studio-line-input" id="studio-line-input" autocomplete="off" aria-describedby="studio-line-hint">
+              <button type="button" class="studio-choice" id="studio-line-apply">Update</button>
+              <button type="button" class="studio-choice" id="studio-line-revert" hidden>Put back</button>
+              <span class="studio-quiet" id="studio-line-hint"></span>
+            </div>
+          </div>
+          <p class="studio-quiet" id="studio-style-note" role="status" aria-live="polite"></p>
+          <div class="studio-section">
+            <span class="studio-label" id="studio-message-label">Message on the back</span>
+            <div class="studio-words" id="studio-message" tabindex="0" aria-labelledby="studio-message-label"></div>
+            <p class="studio-quiet" id="studio-count"></p>
+          </div>
+          <div class="studio-section">
+            <span data-slot="arrives-row"></span>
+            <span data-slot="arrives-note"></span>
+            <span data-slot="scheduled"></span>
+            <span data-slot="delivery-row"></span>
+            <span data-slot="id-row"></span>
+          </div>
+          <span data-slot="note"></span>
+        </div>
+      </div>
+      <div class="studio-ft">
+        <div class="studio-sum">
+          <span class="studio-cost" id="studio-cost"></span>
+          <span class="studio-summary" id="studio-summary"></span>
+        </div>
+        <span data-slot="send-button"></span>
+        <span data-slot="send-page-button"></span>
+        <span data-slot="send-page-note"></span>
+        <span data-slot="purchase-actions"></span>
+        <span data-slot="error-message"></span>
+      </div>
+    </template>
+
+    <!-- letter-irl:host -->
+    <!-- letter-irl:pages -->
+    <!-- letter-irl:arrives -->
+    <!-- letter-irl:studio -->
     <script type="module">
-      // Per OpenAI docs, data may not be available immediately
-      // Must listen for 'openai:set_globals' event
+      // The card talks to its host only through window.letterIrlHost
+      // (widgets/shared/host.js, #474): window.openai in ChatGPT, MCP Apps in
+      // Claude and VS Code. Data may not be available immediately, so the
+      // card re-renders on host.onChange.
+      const host = window.letterIrlHost;
+      // The draft last told to the conversation, and the queue of those updates (#650: shareSelection).
+      let sharedDraftId = "";
+      let shareChain = Promise.resolve();
+      let sharedAt = 0;
+      // The card's changes the last share told (cardEditFor), so a new one is shared at once.
+      let sharedEdit = "";
+      // A share asked for by a use of the card too soon after the last, made when the wait is over.
+      let shareLater = false;
+      let lastUseAt = 0;
+      // The time the last share carried, so a delayed share never goes back in time.
+      let carriedAt = 0;
+      // The draft get_draft_status last answered "ready" for (#650 review round 1).
+      let statusReadyFor = null;
+      // Our renderer's pages, and the cleaner that keeps the card safe from
+      // them (widgets/shared/pages.js, #534). Were that script not to run, the
+      // card shows no page, never an uncleaned one, and falls back to its own.
+      // Without the shared pages, no page and no preview picture: never one unchecked (#684).
+      const { renderedPages, cleanPage, previewImageElement, legacyFrontImage } = window.letterIrlPages ?? {
+        renderedPages: () => null,
+        cleanPage: null,
+        previewImageElement: () => null,
+        legacyFrontImage: () => null
+      };
 
       let dataLoaded = false;
       let currentDraftId = null;
+      // The content version (#695) of the mail as this card shows it: the preview's, then each change the card drew,
+      // then a status answer it took. Send and Pay & Send name it, so the server refuses mail changed since (by the
+      // chat, or a change whose page did not come back here), and the card draws it again instead of sending it.
+      let shownVersion = { draftId: null, version: null };
+      function showVersion(draftId, version) {
+        if (typeof draftId === "string" && draftId && typeof version === "string" && version) {
+          shownVersion = { draftId, version };
+        }
+      }
+      // The version to send for this draft, or none (an older server's preview names none, and is sent as before).
+      function versionFor(draftId) {
+        return shownVersion.draftId === draftId ? shownVersion.version : null;
+      }
+      // An edit's version covers the whole draft (#695 review round 1): it is taken only when the edit was made to the
+      // version this card shows, so the edit's own change is the only one since. Made to another (the chat changed the
+      // draft meanwhile), the card asks for the draft as it is now, and draws it.
+      function takeEditVersion(draftId, version, before) {
+        const shown = versionFor(draftId);
+        if (!shown) return;
+        if (typeof before === "string" && before === shown) {
+          showVersion(draftId, version);
+          return;
+        }
+        askDraftState(draftId, true);
+      }
+
+      // A send or checkout refused for a change since, while the card asks for the draft as it is now:
+      // { draftId, action }. lastRefused: the version last refused, so a version refused twice is not asked about again.
+      let changed = null;
+      let lastRefused = null;
+      // A changed-notice that says the card could not show the mail: cleared once a later answer draws it whole.
+      let changedNotice = false;
       let currentEligibility = null;
       let sendInProgress = false;
       let checkoutInProgress = false;
@@ -224,6 +500,609 @@
       let pollDeadline = 0;
       let currentTab = "front";
 
+      // ---- Arrival dates (#535) -------------------------------------------
+      //
+      // The Arrives row sets the draft's date through set_arrival_date, and a
+      // postcard sent with one waits for its mail date, with Cancel until
+      // then. Both live in widgets/shared/arrives.js; this card tells them
+      // what to draw, and redraws when they change something.
+      const arrives = window.letterIrlArrives;
+      // What set_arrival_date last said about this card's draft:
+      // {draftId, schedule, deliveryEstimate}. render() shows its estimate.
+      let arrivalChange = null;
+      const picker = arrives.createPicker({
+        host,
+        onVersion: (draftId, version, before) => takeEditVersion(draftId, version, before),
+        row: document.getElementById("arrives-row"),
+        input: document.getElementById("arrives-date"),
+        asap: document.getElementById("arrives-asap"),
+        note: document.getElementById("arrives-note"),
+        readableError,
+        resultText,
+        onSet() {
+          draftActedOn = true;
+        },
+        onChange(change) {
+          arrivalChange = change;
+          cardEdited(change?.draftId, "arrival date");
+          render();
+        },
+        onBusy() {
+          render();
+        },
+      });
+      // What the card's note says of a postcard sent with a date, as the server last told it: waiting, or cancelled.
+      const SCHEDULED_NOTE = "This postcard has already been sent, to go to the printer on its mail date.";
+      const CANCELLED_NOTE = "This postcard was sent with a date, then cancelled. Nothing will be mailed.";
+      const scheduled = arrives.createScheduled({
+        host,
+        block: document.getElementById("scheduled"),
+        note: document.getElementById("scheduled-note"),
+        button: document.getElementById("cancel-scheduled-button"),
+        buttonText: document.getElementById("cancel-scheduled-button-text"),
+        noun: "postcard",
+        readableError,
+        resultText,
+        onCancelled() {
+          keep({ cancelled: true });
+          const statusPill = document.getElementById("status-pill");
+          statusPill.classList.remove("ok", "alert");
+          statusPill.textContent = "Cancelled";
+          // The button its send left reading "Postcard Scheduled" (STUDIO-01, DEV 2026-10-18).
+          document.getElementById("send-button-text").textContent = "Postcard Cancelled";
+          // A reopened card's note said it waits for its mail date (SCHEDULE-01, Claude, DEV 2026-10-18).
+          const note = document.getElementById("note");
+          note.textContent = note.textContent.replace(SCHEDULED_NOTE, CANCELLED_NOTE);
+          refreshStudio();
+        },
+      });
+
+      // ---- The postcard maker (#580) ----------------------------------------
+      //
+      // While the preview's _meta turns it on, the card lays itself out as
+      // Demo 3's postcard maker: a header naming the postcard, the postcard as
+      // it prints beside its size, its message and its delivery, and a footer
+      // with the cost and Send. The rows, notes and buttons in it are the
+      // card's own, moved, so each still calls the tool a model would. It
+      // lives in widgets/shared/studio.js; were that script not to run, the
+      // card is laid out as it always was.
+      const studio = window.letterIrlStudio
+        ? window.letterIrlStudio.createStudio({
+            card: document.getElementById("card"),
+            template: document.getElementById("studio-template"),
+            enabled: () => currentMeta()[window.letterIrlStudio.STUDIO_META] === true,
+          })
+        : null;
+      // The preview render() last drew, for a refresh after a send.
+      let studioState = null;
+      let flipWired = false;
+      // What get_purchase_status last said of the order this card's Pay &
+      // Send opened (#579), for the maker's header and footer.
+      let purchaseState = null;
+      // A Pay & Send order that stopped before its mail went (#579): how the
+      // maker heads it and sums it up. The pill names the status itself.
+      const HALTED_ORDERS = new Map([
+        ["payment_failed", { stage: "Draft", timing: "the payment did not go through" }],
+        ["refund_pending", { stage: "Refunded", timing: "being refunded, nothing will be mailed" }],
+        ["refunded", { stage: "Refunded", timing: "refunded, nothing will be mailed" }],
+        ["on_hold", { stage: "On hold", timing: "on hold" }],
+        ["cancelled", { stage: "Cancelled", timing: "cancelled, nothing will be mailed" }],
+      ]);
+
+      // The postcard's size as it prints (#594), from the page our renderer
+      // drew: its trim is the page less its 0.125in of bleed on each side,
+      // the short side named first. Any other preview is a 6x9, the only
+      // size drawn otherwise.
+      let postcardInches = [6, 9];
+      function inchesOf(page) {
+        const box = String(page?.getAttribute?.("viewBox") ?? "").trim().split(/\s+/).map(Number);
+        if (box.length !== 4 || !box.every(Number.isFinite)) return [6, 9];
+        const sides = [box[2], box[3]].map((points) => Math.round((points / 72 - 0.25) * 4) / 4).sort((a, b) => a - b);
+        return sides.every((side) => side > 0) ? sides : [6, 9];
+      }
+      function sizeText() {
+        return `${postcardInches[0]} x ${postcardInches[1]} in`;
+      }
+      // How many photos a collage front draws (#616), which the preview says
+      // of a collage and of nothing else; 0 for a single photo. A collage keeps
+      // the size it was made at (set_postcard_style refuses another: its photos
+      // are not kept), so the size is told here and not offered.
+      function collagePhotosOf(state) {
+        const count = state?.collagePhotos;
+        return Number.isInteger(count) && count >= 2 && count <= 4 ? count : 0;
+      }
+      // What each size's back holds: its lines, and about how much prose.
+      const BACK_HOLDS = new Map([["4x6", "11 lines, about 350"], ["6x9", "16 lines, about 500"], ["6x11", "16 lines, about 900"]]);
+      function backHolds() {
+        return BACK_HOLDS.get(postcardInches.join("x")) ?? BACK_HOLDS.get("6x9");
+      }
+
+      // The flip says which side shows, and turns the postcard over.
+      function showSide() {
+        const front = currentTab === "front";
+        document.getElementById("studio-flip").textContent = front ? "Flip to the back" : "Show the front";
+        // The line is announced (aria-live), so a redraw that changes nothing
+        // leaves it alone rather than reading it out again.
+        const scale = document.getElementById("studio-scale");
+        const line = front ? `Drawn to scale: ${sizeText()}.` : "The right side is for the address and postage.";
+        if (scale.textContent !== line) scale.textContent = line;
+      }
+
+      /**
+       * Fills the maker's header, message and footer from the preview and
+       * what the card has done. Nothing while the card is not a studio.
+       */
+      function refreshStudio(state = studioState) {
+        if (!state || !studio || !studio.update()) return;
+        if (!flipWired) {
+          flipWired = true;
+          // A view of the card, not of the mail: it changes nothing a model sets.
+          document.getElementById("studio-flip").addEventListener("click", () => {
+            switchTab(currentTab === "front" ? "back" : "front");
+            const postcard = document.getElementById("studio-postcard");
+            postcard.classList.remove("flipping");
+            // With reduced motion the postcard just turns: no motion to play.
+            if (!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
+              void postcard.offsetWidth;
+              postcard.classList.add("flipping");
+            }
+            showSide();
+          });
+          // Done, or cut short (a hidden pane cancels it): either way it is over.
+          for (const type of ["animationend", "animationcancel"]) {
+            document.getElementById("studio-postcard").addEventListener(type, (event) => {
+              event.currentTarget.classList.remove("flipping");
+            });
+          }
+        }
+        studioState = state;
+        const settled = settledDraft();
+        const sentOrder = sentOrderOf(settled);
+        const sentByCard = saved?.draftId === state.draftId && saved?.sent === true;
+        // The order this card's Pay & Send opened (#579), as its status last said.
+        const purchase = trackedOrderId !== null ? purchaseState : null;
+        const paid = purchase === "processing" || purchase === "submitted";
+        const halted = HALTED_ORDERS.get(purchase) ?? null;
+        const sent = settled?.status === "sent" || sentByCard || purchase === "submitted";
+        const cancelled = sentOrder === "cancelled" || (saved?.draftId === state.draftId && saved?.cancelled === true);
+        const expired = settled?.status === "expired";
+        const name = typeof state.recipientName === "string" ? state.recipientName.trim() : "";
+        document.getElementById("studio-title").textContent = name ? `Postcard to ${name}` : "Your postcard";
+        const place = [state.recipientCity, [state.recipientState, state.recipientPostalCode].filter(Boolean).join(" ")]
+          .filter(Boolean)
+          .join(", ");
+        const stage = cancelled
+          ? "Cancelled"
+          : halted
+            ? halted.stage
+            : expired
+              ? "Expired"
+              : sent
+                ? "Sent"
+                : paid
+                  ? "Paid"
+                  : "Draft";
+        document.getElementById("studio-sub").textContent = [stage, place].filter(Boolean).join(" · ");
+
+        // The message, read-only, beside what the back holds. The back is
+        // measured in lines (16 on a 6x9 or an 11x6, 11 on a 4x6 or beside a
+        // gift card, #594), so the count is not a budget: short lines fill it
+        // long before its characters run out.
+        const message = typeof state.message === "string" ? state.message.trim() : "";
+        document.getElementById("studio-message").textContent = message || "The message is on the back.";
+        const length = [...message].length;
+        document.getElementById("studio-count").textContent = !message
+          ? ""
+          : state.giftCard
+            ? `${length} characters · beside the gift card, the back holds 11 lines`
+            : `${length} characters · the back holds ${backHolds()} characters of prose`;
+
+        const sendEligibility = state.sendEligibility;
+        const payAndSend = sendEligibility?.payAndSend;
+        const letters = state.lettersRequired ?? 1;
+        document.getElementById("studio-cost").textContent = state.giftCard
+          ? "Free: a gift letter"
+          : paid
+            ? payAndSend?.amountCents
+              ? `Paid ${formatPayAmount(payAndSend)}`
+              : "Paid with Pay & Send"
+            : sendEligibility?.packPays === false
+              ? unpayableReason(state)
+                ? "Can't be paid now"
+                : payAndSend?.amountCents
+                  ? `Pay & Send ${formatPayAmount(payAndSend)}`
+                  : "Paid when you send it"
+              : `${letters} letter${letters === 1 ? "" : "s"}`;
+
+        // Once sent, the dates are the server's or the send's own, never the
+        // picker's: the chat may have changed them since this preview. A Pay &
+        // Send order with the printer has no date left to wait for.
+        const held =
+          settled?.status === "sent" || purchase === "submitted"
+            ? sentOrder === "scheduled"
+              ? arrives.scheduleOf(settled.schedule)
+              : null
+            : sentByCard
+              ? arrives.scheduleOf(saved.schedule)
+              : picker.schedule();
+        const estimate =
+          arrivalChange?.draftId === state.draftId && arrivalChange.deliveryEstimate
+            ? arrivalChange.deliveryEstimate
+            : state.deliveryEstimate;
+        const timing = cancelled
+          ? "cancelled, nothing will be mailed"
+          : halted
+            ? halted.timing
+            : expired
+              ? "the preview has expired"
+              : held
+                ? `held until ${arrives.describeDate(held.mailOn)}`
+                : sent
+                  ? "with the printer"
+                  : paid
+                    ? "paid, going to the printer"
+                    : typeof estimate === "string" && estimate
+                      ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
+                      : "First Class";
+        const collage = collagePhotosOf(state);
+        document.getElementById("studio-size").textContent = collage ? `${sizeText()} · a collage of ${collage} photos` : sizeText();
+        document.getElementById("studio-summary").textContent = [sizeText(), timing].join(" · ");
+        showMakerStyle(state, !cancelled && !halted && !expired && !sent && !paid);
+        showSide();
+      }
+
+      // ---- The maker's size and front (#594) --------------------------------
+      //
+      // While the preview names its size or its front, each named only while
+      // it is offered, the maker offers the choices and sets them on the
+      // draft with set_postcard_style, the tool a model would call. Its answer
+      // carries the postcard drawn again, in _meta as a preview's page is, and
+      // what it costs now, which the card shows in place of the preview's. One
+      // change at a time, none while the card sends or pays. Send and Pay &
+      // Send wait while a change is made, and while one is being written and
+      // not yet set (makerEditing), as the letter card's do while its words
+      // are: they would send the front the draft has, not this one.
+      const POSTCARD_SIZES = ["6x4", "6x9", "6x11"];
+      const POSTCARD_LAYOUTS = ["full_bleed", "border", "greetings"];
+      // Each size's sides in inches, the short side first, as sizeText names them.
+      const SIZE_INCHES = { "6x4": [4, 6], "6x9": [6, 9], "6x11": [6, 11] };
+      // The longest caption and place the tool takes (postcardFrontInput.ts).
+      const LINE_LIMITS = { border: 60, greetings: 30 };
+      const PLACE_FIRST = "Write the place it greets from, then Update.";
+      const maker = {
+        // The style last set on a draft, or that get_draft_status gave:
+        // { draftId, size, layout, caption, place, previewHtml, terms, byCard }.
+        change: null,
+        busy: false,
+        // What the maker last said, whether it was a refusal, and whether
+        // that refusal was of a front (front) rather than a size.
+        note: { draftId: null, text: "", error: false },
+        // The draft the choices are for: another draft starts afresh.
+        draftId: null,
+        // A greeting chosen whose place is still to be written.
+        drafting: null,
+        // Whether the person has typed in the line since it was filled, which
+        // a redraw keeps.
+        editing: false,
+        // Whether the draft can change now, as the last draw found it.
+        changeable: false,
+        // Whether Send and Pay & Send were last drawn waiting for the maker.
+        heldShown: false,
+        wired: false,
+      };
+
+      // What a restyle or a status answer says the postcard costs now, or
+      // null when it says nothing of it.
+      function makerTermsOf(data) {
+        if (!data || typeof data.canSendNow !== "boolean" || !data.sendEligibility || typeof data.sendEligibility !== "object") {
+          return null;
+        }
+        return {
+          canSendNow: data.canSendNow,
+          sendEligibility: data.sendEligibility,
+          reasonCannotSend: typeof data.reasonCannotSend === "string" ? data.reasonCannotSend : undefined,
+        };
+      }
+
+      // The draft's style as the maker last saw it set, over the preview's:
+      // each choice only where the preview offered it, and the price.
+      function withMakerChange(state) {
+        const change = maker.change;
+        if (!state || !change || change.draftId !== state.draftId) return state;
+        return {
+          ...state,
+          ...(POSTCARD_SIZES.includes(state.size) && change.size ? { size: change.size } : {}),
+          ...(POSTCARD_LAYOUTS.includes(state.layout) && change.layout
+            ? { layout: change.layout, caption: change.caption, place: change.place }
+            : {}),
+          ...(change.terms ?? {}),
+        };
+      }
+
+      function makerPage(draftId) {
+        return maker.change?.draftId === draftId && maker.change.previewHtml ? maker.change.previewHtml : null;
+      }
+
+      // A style the server says the draft has, with its page when one came
+      // back: from set_postcard_style (byCard), or from get_draft_status.
+      function adoptMakerChange(draftId, data, page, byCard) {
+        const before = maker.change?.draftId === draftId ? maker.change : null;
+        const layout = POSTCARD_LAYOUTS.includes(data.layout) ? data.layout : null;
+        maker.change = {
+          draftId,
+          size: POSTCARD_SIZES.includes(data.size) ? data.size : null,
+          layout,
+          caption: layout === "border" && typeof data.caption === "string" ? data.caption : undefined,
+          place: layout === "greetings" && typeof data.place === "string" ? data.place : undefined,
+          previewHtml: typeof page === "string" && page ? page : before?.previewHtml ?? null,
+          terms: makerTermsOf(data) ?? before?.terms ?? null,
+          byCard: byCard || before?.byCard === true,
+        };
+      }
+
+      // A status answer is taken only while this card has not changed the
+      // draft, nor is changing it: its own answer is newer (#603 review
+      // round 1), as the Style row and the Arrives row adopt theirs.
+      function mayAdoptStatus(draftId) {
+        return !maker.busy && !(maker.change?.draftId === draftId && maker.change.byCard);
+      }
+
+      // Another draft starts afresh: nothing written for the last carries
+      // over. Called as each draft is drawn, before Send's hold is (#603
+      // review round 2).
+      function makerFollows(draftId) {
+        if (maker.draftId === draftId) return;
+        maker.draftId = draftId;
+        maker.drafting = null;
+        maker.editing = false;
+      }
+
+      // The prompt for a place, or a refusal of the front being written, says
+      // nothing once that is left. A size's refusal stays (#603 review round 3).
+      function clearMakerPrompt(draftId) {
+        if (maker.note.text === PLACE_FIRST || (maker.note.error && maker.note.front)) maker.note = { draftId, text: "", error: false };
+      }
+
+      // The line a draft has for a layout: a border's caption or a greeting's place.
+      function storedLine(state, layout) {
+        return (layout === "border" ? state.caption : layout === "greetings" ? state.place : "") ?? "";
+      }
+
+      // Whether a change is being written and not yet set: a greeting chosen
+      // without its place, or a line typed that differs from the draft's.
+      function makerEditing() {
+        const state = withMakerChange(studioState);
+        if (!state || maker.draftId !== state.draftId) return false;
+        if (maker.drafting) return true;
+        if (!maker.editing) return false;
+        const input = document.getElementById("studio-line-input");
+        if (!input || (state.layout !== "border" && state.layout !== "greetings")) return false;
+        return input.value.trim() !== storedLine(state, state.layout).trim();
+      }
+
+      // Whether Send and Pay & Send wait for the maker.
+      function makerHolds() {
+        return maker.busy || makerEditing();
+      }
+
+      function setMakerStyle(args) {
+        const draftId = currentDraftId;
+        if (maker.busy || !maker.changeable || !draftId || typeof host.callTool !== "function") return;
+        if (sendInProgress || checkoutInProgress) return;
+        // A front set ends what was being written for it; a size leaves it as it is.
+        const frontChange = "layout" in args;
+        maker.busy = true;
+        maker.note = { draftId, text: "Drawing the postcard again.", error: false };
+        // Changing it is acting on the draft: the card keeps it from here.
+        draftActedOn = true;
+        render();
+        Promise.resolve()
+          .then(() => host.callTool("set_postcard_style", { draftId, ...args }))
+          .then((result) => {
+            // A refusal comes back as an error result, not a rejection.
+            if (result && result.isError) {
+              throw new Error(resultText(result) || "The postcard was not changed.");
+            }
+            if (currentDraftId !== draftId) return;
+            const data = toolData(result);
+            // An answer about another draft is no answer to this one.
+            if (typeof data.draftId === "string" && data.draftId !== draftId) {
+              throw new Error("The postcard may have changed. Make the preview again to see it.");
+            }
+            const page = result?._meta?.previewHtml;
+            adoptMakerChange(draftId, data, page, true);
+            // Page or no page, the draft has it: the model, which never sees the card's own calls, is told.
+            cardEdited(draftId, frontChange ? "front" : "size");
+            // Its version once its page is drawn (#695), and only when made to the version the card shows; without a page
+            // the card shows the last, and keeps its version.
+            if (typeof page === "string" && page) takeEditVersion(draftId, data.contentVersion, data.contentVersionBefore);
+            if (frontChange) {
+              maker.drafting = null;
+              maker.editing = false;
+            }
+            // The draft has the new style either way; without its page the
+            // card keeps showing the last one and says so. With it, the
+            // server's own sentence is said (announced: role=status).
+            maker.note = {
+              draftId,
+              text: typeof page === "string" && page
+                ? (typeof data.message === "string" ? data.message : "")
+                : "The postcard is changed, but its page did not come back here. Make the preview again to see it.",
+              error: false,
+            };
+          })
+          .catch((error) => {
+            if (currentDraftId !== draftId) return;
+            maker.note = { draftId, text: readableError(error), error: true, front: frontChange };
+          })
+          .then(() => {
+            maker.busy = false;
+            render();
+          });
+      }
+
+      function pickSize(size) {
+        const state = withMakerChange(studioState);
+        if (!state || maker.busy || !maker.changeable || size === state.size) return;
+        setMakerStyle({ size });
+      }
+
+      function pickLayout(layout) {
+        const state = withMakerChange(studioState);
+        if (!state || maker.busy || !maker.changeable) return;
+        if (layout === "greetings" && state.layout !== "greetings") {
+          // A greeting needs its place: the line comes first. Chosen again,
+          // it keeps what has been written.
+          if (maker.drafting !== "greetings") {
+            maker.drafting = "greetings";
+            maker.editing = false;
+            maker.note = { draftId: state.draftId, text: PLACE_FIRST, error: false };
+            render();
+          }
+          document.getElementById("studio-line-input")?.focus();
+          return;
+        }
+        const wasDrafting = maker.drafting !== null;
+        maker.drafting = null;
+        if (layout === state.layout) {
+          // Back to the front it has: a greeting being written goes, and so
+          // does its prompt or its refusal.
+          if (wasDrafting) {
+            maker.editing = false;
+            clearMakerPrompt(state.draftId);
+          }
+          render();
+          return;
+        }
+        // A border may have no caption, and full bleed has none.
+        setMakerStyle({ layout });
+      }
+
+      function applyLine() {
+        const state = withMakerChange(studioState);
+        if (!state || maker.busy || !maker.changeable) return;
+        const layout = maker.drafting ?? state.layout;
+        if (layout !== "border" && layout !== "greetings") return;
+        const text = document.getElementById("studio-line-input").value.trim();
+        if (layout === "greetings" && !text) {
+          maker.note = { draftId: state.draftId, text: PLACE_FIRST, error: false };
+          render();
+          return;
+        }
+        setMakerStyle(layout === "border" ? { layout, ...(text ? { caption: text } : {}) } : { layout, place: text });
+      }
+
+      // Puts the line back as the draft has it, and leaves a greeting being
+      // written: Send then sends what the card shows. Focus stays in the
+      // maker: on the line while it shows, else on the front the postcard has.
+      function putBackLine() {
+        const state = withMakerChange(studioState);
+        if (!state || maker.busy || !maker.changeable) return;
+        maker.drafting = null;
+        maker.editing = false;
+        clearMakerPrompt(state.draftId);
+        render();
+        if (!document.getElementById("studio-line").hidden) {
+          document.getElementById("studio-line-input").focus();
+        } else {
+          document.querySelector(`#studio-front [data-layout="${state.layout}"]`)?.focus();
+        }
+      }
+
+      function wireMakerStyle() {
+        document.getElementById("studio-sizes").addEventListener("click", (event) => {
+          const button = event.target.closest?.("[data-size]");
+          if (button) pickSize(button.dataset.size);
+        });
+        document.getElementById("studio-front").addEventListener("click", (event) => {
+          const button = event.target.closest?.("[data-layout]");
+          if (button) pickLayout(button.dataset.layout);
+        });
+        document.getElementById("studio-line-apply").addEventListener("click", applyLine);
+        document.getElementById("studio-line-revert").addEventListener("click", putBackLine);
+        const input = document.getElementById("studio-line-input");
+        input.addEventListener("input", () => {
+          maker.editing = true;
+          // Send and Pay & Send wait while the line differs from the draft's:
+          // drawn again when that turns, not on every key.
+          if (makerHolds() !== maker.heldShown) render();
+        });
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && !event.isComposing) {
+            event.preventDefault();
+            applyLine();
+          }
+        });
+      }
+
+      /**
+       * Draws the maker's choices: the sizes while the preview names its
+       * size (never for a gift postcard, which is a 6x9, nor a collage, which
+       * keeps the size it was made at), the layouts and the
+       * line one takes while it names its front. `open`: whether the draft
+       * can still change, as the maker's header says (not sent, paid,
+       * cancelled or expired).
+       */
+      function showMakerStyle(state, open) {
+        const sizes = document.getElementById("studio-sizes");
+        const front = document.getElementById("studio-front");
+        if (!sizes || !front) return;
+        if (!maker.wired) {
+          maker.wired = true;
+          wireMakerStyle();
+        }
+        makerFollows(state.draftId);
+        const offersSizes = POSTCARD_SIZES.includes(state.size) && !state.giftCard && collagePhotosOf(state) === 0;
+        const offersLayouts = POSTCARD_LAYOUTS.includes(state.layout);
+        maker.changeable =
+          open && cardIsShowingDraft() && !settledDraft() && !sendPageShown() && !sendInProgress && !checkoutInProgress && trackedOrderId === null;
+        // aria-disabled, not disabled: a pressed choice keeps keyboard focus
+        // while the server answers, and a press meanwhile does nothing, as on
+        // the letter card's Style row (style.js).
+        const inert = String(maker.busy || !maker.changeable);
+
+        sizes.hidden = !offersSizes;
+        document.getElementById("studio-size").hidden = offersSizes;
+        for (const button of sizes.querySelectorAll("[data-size]")) {
+          button.setAttribute("aria-pressed", String(button.dataset.size === state.size));
+          button.setAttribute("aria-disabled", inert);
+        }
+
+        front.hidden = !offersLayouts;
+        const layout = maker.drafting ?? state.layout;
+        for (const button of front.querySelectorAll("[data-layout]")) {
+          button.setAttribute("aria-pressed", String(button.dataset.layout === layout));
+          button.setAttribute("aria-disabled", inert);
+        }
+        const line = document.getElementById("studio-line");
+        const input = document.getElementById("studio-line-input");
+        const takesLine = offersLayouts && (layout === "border" || layout === "greetings");
+        line.hidden = !takesLine;
+        if (takesLine) {
+          document.getElementById("studio-line-label").textContent = layout === "border" ? "Caption" : "Place";
+          input.maxLength = LINE_LIMITS[layout];
+          input.placeholder = layout === "border" ? "Cape Cod, August 2026" : "Asheville";
+          // Read-only rather than disabled while a change is set: the person's place in it stays.
+          input.readOnly = inert === "true";
+          document.getElementById("studio-line-apply").setAttribute("aria-disabled", inert);
+          // The line as the draft has it, unless the person is writing one.
+          if (!maker.editing) input.value = maker.drafting ? "" : storedLine(state, layout);
+          // While what is written holds Send, the line says so, and offers
+          // to put it back (#603 review round 2).
+          const writing = makerEditing();
+          const limit = layout === "border" ? `Up to ${LINE_LIMITS.border} characters, or none.` : `Up to ${LINE_LIMITS.greetings} characters.`;
+          document.getElementById("studio-line-hint").textContent = writing ? `${limit} Sending waits until you Update or Put back.` : limit;
+          const revert = document.getElementById("studio-line-revert");
+          revert.hidden = !writing;
+          revert.setAttribute("aria-disabled", inert);
+        }
+        const note = document.getElementById("studio-style-note");
+        const said = maker.note.draftId === state.draftId ? maker.note : { text: "", error: false };
+        if (note.textContent !== said.text) note.textContent = said.text;
+        // A refusal reads as one, as the card's other notes do.
+        note.classList.toggle("studio-error", said.error === true);
+      }
+
       // ---- Recovery: a preview call that never arrived (#411) -------------
       //
       // On ChatGPT web a preview call approved with "Allow once" can be lost
@@ -245,11 +1124,43 @@
       // that arrives after the wait still renders, and it replaces a preview
       // this card made until the card acts on its own draft (see render()).
       const PREVIEW_WAIT_MS = 45000;
+      // A collage's photos download one at a time, within 30 seconds between
+      // them (#616), so its preview can take that much longer than a photo's:
+      // asked for two or more photos, the card waits that long again, once,
+      // before it says no result is coming.
+      const COLLAGE_EXTRA_WAIT_MS = 30000;
+      let collageWaited = false;
+      function namesCollage(input) {
+        const blank = (photo) => typeof photo === "string" && photo.trim() === "";
+        return [input?.images, input?.imageUrls].some(
+          (photos) => Array.isArray(photos) && photos.filter((photo) => !blank(photo)).length >= 2,
+        );
+      }
       // How long the button waits on the card's own call before it can be
       // pressed again. A result that arrives later is still drawn, as long as
       // the card has no preview by then.
       const RETRY_TIMEOUT_MS = 60000;
       const RETRY_LABEL = "Create my preview";
+      // ---- Recovery with an image picked on the card (#414) ---------------
+      //
+      // ChatGPT passes an image attached or generated in the chat to this
+      // card as a sandbox path, which the server cannot open. The person
+      // picks the image again, from the ChatGPT library or from the device,
+      // and the card previews it by link: getFileDownloadUrl, then the
+      // stamped tool with imageUrl in place of image, as the upload card does.
+      const CHOOSE_LABEL = "Choose from library";
+      const UPLOAD_LABEL = "Upload the image";
+      const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+      const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+      // The host calls of a pick or an upload have no timeout: the library
+      // picker waits on the person, and an upload can be slow. Each call gets
+      // its own two-minute wait, after which the buttons come back so the
+      // person can try again. A new attempt replaces the waiting one; if the
+      // waiting one answers first, it carries on.
+      const IMAGE_WAIT_MS = 120000;
+      // Bumped by every image pick or upload, so a late answer from an older
+      // one changes nothing.
+      let imageFlow = 0;
       // The tools that draw this card. The server stamps the one that drew it
       // into the page (stampPreviewTool in src/mcp/registerTools.ts); a page
       // without that stamp offers no retry.
@@ -275,10 +1186,14 @@
       // An attached image the card can pass back exactly as the host gave it:
       // none, the empty string some clients send for "no file", or the file
       // object the server reads. Anything else, such as a bare file
-      // reference, reaches the server as no image at all, and the server then
-      // falls back to the most recent upload, which may be another picture.
+      // reference or a sandbox path, names a picture the server cannot open
+      // (#414), so the card asks for the image again instead.
       function imageArgumentRepeatable(image) {
         if (image === undefined || image === "") return true;
+        return fileObjectUsable(image);
+      }
+
+      function fileObjectUsable(image) {
         return Boolean(
           image &&
             typeof image === "object" &&
@@ -288,30 +1203,91 @@
         );
       }
 
+      // An image link the card can pass back: none, the empty string, or an
+      // https address. The server refuses any other link, such as a sandbox
+      // path given as imageUrl, unless a usable file object comes with it.
+      function imageUrlRepeatable(input) {
+        const url = input.imageUrl;
+        if (url === undefined || url === "" || isHttpsUrl(url)) return true;
+        return fileObjectUsable(input.image);
+      }
+
+      // A collage's list of photos the card can pass back (#616): none (absent, a
+      // blank string, or slots that are all blank), or every photo a file object
+      // with an address (images) or an https link (imageUrls). The server refuses
+      // a sandbox path in either, and a blank slot beside real photos, by its
+      // place, on every press, and a card cannot pick several photos again.
+      function photoListRepeatable(photos, usable) {
+        const blank = (photo) => typeof photo === "string" && photo.trim() === "";
+        if (photos === undefined || blank(photos)) return true;
+        if (!Array.isArray(photos)) return false;
+        return photos.every(blank) || photos.every(usable);
+      }
+
       // The call this card can repeat faithfully, or null.
       function retryRequest() {
+        const asked = hostRequest();
+        if (!asked) return null;
+        if (!imageArgumentRepeatable(asked.input.image) || !imageUrlRepeatable(asked.input)) return null;
+        if (!photoListRepeatable(asked.input.images, fileObjectUsable) || !photoListRepeatable(asked.input.imageUrls, isHttpsUrl)) {
+          return null;
+        }
+        return { tool: asked.tool, args: asked.input };
+      }
+
+      // The stamped tool and the host's arguments, when they describe a whole
+      // postcard; otherwise null.
+      function hostRequest() {
         const tool = previewTool();
-        const input = window.openai?.toolInput;
+        const input = host.toolInput();
         if (!tool || !input || typeof input !== "object" || Array.isArray(input)) return null;
         if (!input.recipient || typeof input.recipient !== "object") return null;
         if (typeof input.message !== "string") return null;
-        if (!imageArgumentRepeatable(input.image)) return null;
-        return { tool, args: input };
+        return { tool, input };
+      }
+
+      // The call to make with an image the person picks again, when the
+      // host's image is the only thing this card cannot pass back; otherwise
+      // null. Its arguments leave the image out, and the pick adds imageUrl.
+      function imageRequest() {
+        const asked = hostRequest();
+        if (!asked) return null;
+        // One picked image cannot repair a collage (it takes images or imageUrls, never image beside them).
+        if (namesCollage(asked.input)) return null;
+        if (imageArgumentRepeatable(asked.input.image) && imageUrlRepeatable(asked.input)) return null;
+        const { image, imageUrl, ...args } = asked.input;
+        return { tool: asked.tool, args };
       }
 
       function isHttpsUrl(value) {
         return typeof value === "string" && /^https:\/\//i.test(value);
       }
 
+      function canPreviewByLink() {
+        return (
+          Boolean(imageRequest()) &&
+          typeof host.callTool === "function" &&
+          typeof host.getFileDownloadUrl === "function"
+        );
+      }
+
+      function canChooseImage() {
+        return canPreviewByLink() && typeof host.selectFiles === "function";
+      }
+
+      function canUploadImage() {
+        return canPreviewByLink() && typeof host.uploadFile === "function";
+      }
+
       // The tool output this card is drawing: its own preview if it made one,
       // otherwise the host's.
       function currentOutput() {
-        return retryResult ? retryResult.output : window.openai?.toolOutput;
+        return retryResult ? retryResult.output : host.toolOutput();
       }
 
       // The widget-only half of the same result: the preview HTML.
       function currentMeta() {
-        return (retryResult ? retryResult.meta : window.openai?.toolResponseMetadata) || {};
+        return (retryResult ? retryResult.meta : host.toolMeta()) || {};
       }
 
       // ---- Kept state: reopened conversations -------------------------------
@@ -322,7 +1298,8 @@
       // second postcard, so what this card has done is kept in widgetState,
       // and a card that sent its postcard or started paying for it never
       // offers the preview again (the pack card learned this in PAY-05). Only
-      // identifiers are kept.
+      // identifiers are kept, and what the person changed on the card
+      // (changedOnCard).
       const SAVED_STATE_VERSION = 1;
       // This card's own copy of what it keeps, so consecutive saves build on
       // each other even when the host applies widgetState asynchronously.
@@ -332,7 +1309,7 @@
       let resumed = null;
 
       function readSaved() {
-        const value = window.openai?.widgetState;
+        const value = host.widgetState();
         if (!value || typeof value !== "object" || value.v !== SAVED_STATE_VERSION) return null;
         if (typeof value.draftId !== "string" || !value.draftId) return null;
         return value;
@@ -344,15 +1321,65 @@
         if (!kept) return;
         saved = kept;
         resumed = kept;
+        // Anything the empty card said before, such as a wait message, is
+        // about a state this card no longer shows.
+        document.getElementById("error-message").style.display = "none";
       }
 
       function keep(patch) {
         saved = { ...(saved || readSaved() || {}), ...patch, v: SAVED_STATE_VERSION };
-        if (typeof window.openai?.setWidgetState !== "function") return;
+        // A send or a payment this card made takes the draft back from the conversation (#650).
+        shareSelection();
+        if (typeof host.setWidgetState !== "function") return;
         const snapshot = saved;
         Promise.resolve()
-          .then(() => window.openai.setWidgetState(snapshot))
+          .then(() => host.setWidgetState(snapshot))
           .catch(() => {});
+      }
+
+      // ---- Changes made on the card, told to the model --------------------
+      //
+      // The model sees none of the card's own calls: the letter card's words changed there went unseen, and ChatGPT
+      // answered from the preview's (DEV, 2026-10-17, #795). A postcard's size, front and arrival date are changed here
+      // the same way, so each change the server accepts is kept as changedOnCard, { draftId, what, at, note }: what was
+      // changed (never the message, a caption or a place, nor an address), when (the latest change), and in note a
+      // sentence for the model. It goes in widgetState, which ChatGPT may show the model, and in the draft this card
+      // shares (shareSelection). It is kept for the draft's life, a reopened card's too, as the letter card's is: taking
+      // part of it out once the chat had caught up was tried there and taken out again, as each of three review rounds
+      // found a way it went wrong (#795).
+      const CARD_EDITS = ["size", "front", "arrival date"];
+      function cardEditNote(draftId, what, at) {
+        const named = what.length > 1 ? what.slice(0, -1).join(", ") + " and " + what[what.length - 1] : what[0];
+        const stamp = at.slice(0, 10) + " at " + at.slice(11, 19) + " UTC";
+        // One time for all of them: the latest change's.
+        let note =
+          "The person changed this postcard's " + named + " on its Letter IRL card (draft " + draftId + ")" +
+          (what.length > 1 ? ", most recently on " : " on ") + stamp +
+          ", and the chat does not see the card's changes: what it last saw of them may be out of date.";
+        if (what.includes("size") || what.includes("front")) {
+          // set_postcard_style keeps what it is not given: given again as last seen, a size or front undoes the change.
+          note +=
+            " To change its style, give set_postcard_style only what is to change, since a size or front given again as " +
+            "last seen would undo the person's change; its answer says the style the postcard has.";
+        }
+        return note;
+      }
+      function cardEdited(draftId, kind) {
+        if (typeof draftId !== "string" || !draftId || !CARD_EDITS.includes(kind)) return;
+        const before = saved?.changedOnCard?.draftId === draftId && Array.isArray(saved.changedOnCard.what) ? saved.changedOnCard.what : [];
+        // In one order whatever the order of the changes, so the note reads the same for the same changes.
+        const what = CARD_EDITS.filter((edit) => edit === kind || before.includes(edit));
+        const at = new Date().toISOString();
+        keep({ changedOnCard: { draftId, what, at, note: cardEditNote(draftId, what, at) } });
+      }
+      // The note for this draft, or none: written afresh from what was changed and when, so a reopened card's kept
+      // change is said in this card's words.
+      function cardEditFor(draftId) {
+        const edit = saved?.changedOnCard;
+        if (!edit || edit.draftId !== draftId || !Array.isArray(edit.what)) return "";
+        const what = CARD_EDITS.filter((kind) => edit.what.includes(kind));
+        const at = typeof edit.at === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(edit.at) ? edit.at : "";
+        return what.length && at ? cardEditNote(draftId, what, at) : "";
       }
 
       function keptOrderId(kept) {
@@ -361,12 +1388,19 @@
 
       function armEmptyTimer() {
         if (emptyTimer !== null || emptyShown) return;
-        emptyTimer = setTimeout(() => {
-          emptyTimer = null;
-          if (dataLoaded) return;
-          emptyShown = true;
-          render();
-        }, PREVIEW_WAIT_MS);
+        emptyTimer = setTimeout(emptyTimerFired, PREVIEW_WAIT_MS);
+      }
+
+      function emptyTimerFired() {
+        emptyTimer = null;
+        if (dataLoaded) return;
+        if (!collageWaited && namesCollage(host.toolInput())) {
+          collageWaited = true;
+          emptyTimer = setTimeout(emptyTimerFired, COLLAGE_EXTRA_WAIT_MS);
+          return;
+        }
+        emptyShown = true;
+        render();
       }
 
       function cancelEmptyTimer() {
@@ -377,6 +1411,7 @@
 
       function hideEmptyState() {
         document.getElementById("empty-state").style.display = "none";
+        document.getElementById("empty-hint").style.display = "none";
       }
 
       function showPanesText(text) {
@@ -397,13 +1432,24 @@
         document.getElementById("id-value").textContent = "-";
         document.getElementById("send-button").style.display = "none";
         const canRetry =
-          Boolean(retryRequest()) && typeof window.openai?.callTool === "function";
+          Boolean(retryRequest()) && typeof host.callTool === "function";
+        const canChoose = canChooseImage();
+        const canUpload = canUploadImage();
+        let next = "Otherwise, ask for the preview again in the chat.";
+        if (canRetry) next = "Otherwise, create the preview again.";
+        else if (canChoose && canUpload) next = "Otherwise, choose the image from your ChatGPT library or upload it again, and this card creates the preview.";
+        else if (canChoose) next = "Otherwise, choose the image from your ChatGPT library, and this card creates the preview.";
+        else if (canUpload) next = "Otherwise, upload the image again, and this card creates the preview.";
         document.getElementById("empty-message").textContent =
-          "No preview is showing on this card. If this postcard was already sent, there is nothing more to do here. " +
-          (canRetry
-            ? "Otherwise, create the preview again."
-            : "Otherwise, ask for the preview again in the chat.");
+          "No preview is showing on this card. If this postcard was already sent, there is nothing more to do here. " + next;
         document.getElementById("retry-button").style.display = canRetry ? "flex" : "none";
+        document.getElementById("choose-image-button").style.display = canChoose ? "flex" : "none";
+        document.getElementById("upload-image-button").style.display = canUpload ? "flex" : "none";
+        // A reopened card is empty because the host does not replay results,
+        // not because a call was lost. The tip is about ChatGPT's Instant
+        // mode, so no other app shows it (#474).
+        document.getElementById("empty-hint").style.display =
+          resumed || host.kind !== "chatgpt" ? "none" : "block";
         document.getElementById("empty-state").style.display = "block";
       }
 
@@ -417,19 +1463,45 @@
         document.getElementById("id-value").textContent = orderId || "-";
         document.getElementById("send-button").style.display = "none";
         document.getElementById("retry-button").style.display = "none";
+        document.getElementById("choose-image-button").style.display = "none";
+        document.getElementById("upload-image-button").style.display = "none";
+        document.getElementById("empty-hint").style.display = "none";
         document.getElementById("empty-message").textContent = kept.sent
           ? "This postcard was sent to the printer from this card. Ask for its status in the chat."
-          : "A checkout for this postcard was started from this card.";
+          : kept.alreadyPaid
+            ? "This card found a Pay & Send payment already taken for this postcard."
+            : "A checkout for this postcard was started from this card.";
+        // Nothing is left to pay for a payment it found taken, so the note about paying goes, as on the live card (#679).
+        if (kept.alreadyPaid) document.getElementById("checkout-note").style.display = "none";
         document.getElementById("empty-state").style.display = "block";
         const statusPill = document.getElementById("status-pill");
+        const keptSchedule = arrives.scheduleOf(kept.schedule);
+        // Cancelled from here: before the conversation was reopened, or
+        // since (the kept state above is what the card found on opening).
+        const keptCancelled = Boolean(kept.cancelled) || scheduled.cancelled(orderId);
+        // Sent with a date (#535): waiting for it, or cancelled from here. Once
+        // its mail date is behind it in New York, the card cannot know what
+        // became of it, and says what it says of any send.
+        if (kept.sent && keptSchedule && (keptCancelled || !arrives.mailDatePassed(keptSchedule))) {
+          statusPill.classList.remove("ok", "alert");
+          statusPill.textContent = keptCancelled ? "Cancelled" : "Scheduled";
+          document.getElementById("empty-message").textContent = keptCancelled
+            ? "This postcard was cancelled from this card. Nothing will be mailed."
+            : "This postcard was sent from this card to go to the printer on its mail date.";
+          scheduled.show(orderId, keptSchedule, keptCancelled, kept.cancellable !== false);
+          return;
+        }
         if (kept.sent) {
-          // The same words the card used when the send succeeded.
+          // The same words the card used when the send succeeded. A kept
+          // order whose mail date has passed since the last draw has no
+          // Scheduled block any more.
+          scheduled.hide();
           statusPill.classList.remove("alert");
           statusPill.classList.add("ok");
           statusPill.textContent = "With the printer";
           return;
         }
-        if (!orderId || typeof window.openai?.callTool !== "function") {
+        if (!orderId || typeof host.callTool !== "function") {
           statusPill.classList.remove("ok", "alert");
           statusPill.textContent = "Checkout started";
           return;
@@ -468,14 +1540,335 @@
         return part ? part.text : "";
       }
 
+      // A refusal reaches this card's own callTool as a rejection whose
+      // message wraps the server's sentence in the host's Python-style repr
+      // (#434), for example:
+      //   Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling
+      //   MCP tool: [TextContent(type='text', text='<sentence>', annotations=None, meta=None)]
+      // Show the first sentence alone, read as Python writes a string: in
+      // double quotes when it holds a ' and no ", otherwise in single quotes
+      // with a backslash before each '; with \\, \n, \t and \r escaped, and
+      // \x, \u or \U hex for a character that does not print. Anything else
+      // shows as it came.
+      function readableError(error) {
+        const message =
+          typeof error === "string" ? error : typeof error?.message === "string" ? error.message : "";
+        const wrapped = message.match(/TextContent\(type=['"]text['"], text=(['"])((?:\\[\s\S]|(?!\1)[^\\])*)\1/);
+        if (wrapped) {
+          const sentence = wrapped[2]
+            .replace(/\\(x[0-9a-f]{2}|u[0-9a-f]{4}|U[0-9a-f]{8}|[\s\S])/g, (_, escape) => {
+              if (escape.length > 1) {
+                const point = parseInt(escape.slice(1), 16);
+                return point <= 0x10ffff ? String.fromCodePoint(point) : "";
+              }
+              return escape === "n" || escape === "t" ? " " : escape === "r" ? "" : escape;
+            })
+            .trim();
+          if (sentence) return sentence;
+        }
+        return message || "Unknown error";
+      }
+
+      // ---- The same mail twice (#412) ------------------------------------
+      //
+      // The server refuses a send or a checkout for mail that went out, was
+      // paid for or is awaiting payment in the last 24 hours, unless the
+      // person asks for another copy. The refusal comes back as an error
+      // result with its details in _meta. Its text starts with
+      // DUPLICATE_PREFIX, which is all that is left when a host drops _meta
+      // or turns the error into a rejection. A host may put its own words in
+      // front of a rejection's message, so the prefix is looked for anywhere.
+      const DUPLICATE_META_KEY = "letterirl/duplicateMail";
+      const DUPLICATE_PREFIX = "Possible duplicate:";
+      const MAIL_NOUN = "postcard";
+      const ANOTHER_COPY_SEND_LABEL = "Send another copy";
+      const ANOTHER_COPY_PAY_LABEL = "Pay for another copy";
+      // Set once the person has been told about the earlier copy. From then
+      // on, this card's send or checkout asks for another copy.
+      let anotherCopy = false;
+
+      // An app not yet trusted with card-only tools gets a link instead of a
+      // send (#470, src/auth/clientProfiles.ts): the server answers this
+      // card's Send as it answers the model there, with the page where the
+      // person checks the mail and sends it. The answer is recognised by its
+      // text, which every host passes back (#412), and the page is the
+      // /confirm/ address in it for this card's own draft.
+      const SEND_BY_LINK_MARKER = "sends mail only when the person sends it";
+      // {url, draftId} once the server has given this card's draft its page.
+      let sendPage = null;
+
+      function sendPageFrom(text, draftId) {
+        if (typeof text !== "string" || !text.includes(SEND_BY_LINK_MARKER)) return null;
+        const match = text.match(/https:\/\/[^\s"'<>\\]+\/confirm\/[A-Za-z0-9_.~%-]+/);
+        if (!match || typeof draftId !== "string") return null;
+        return match[0].endsWith(`/confirm/${encodeURIComponent(draftId)}`) ? match[0] : null;
+      }
+
+      function sendPageShown() {
+        return sendPage !== null && sendPage.draftId === currentDraftId;
+      }
+
+      // What the server says became of the host's draft (#474): MCP Apps has
+      // no widgetState, and Claude hands a reopened card the preview's result
+      // again, which would offer Send for mail that has gone. ChatGPT keeps
+      // the card's own state, but with the Plugin Extensions handshake open it
+      // gave a reopened letter card none (#676), and this card opens it too to
+      // share its draft (shareSelection), so it asks in every host, as the
+      // letter card does. {draftId, status, orderId, schedule, orderStatus,
+      // cancellable} once the draft turns out to be sent or expired.
+      let draftState = null;
+      const draftStateAsked = new Set();
+
+      // force (#695): asked again after a send refused for a change since, in every host, the answer is taken
+      // whatever this card has set, and its version with it.
+      function askDraftState(draftId, force) {
+        if (typeof host.callTool !== "function") return;
+        if (typeof draftId !== "string" || !draftId || (!force && draftStateAsked.has(draftId))) return;
+        draftStateAsked.add(draftId);
+        host.callTool("get_draft_status", { draftId }).then(
+          (result) => {
+            const answer = toolData(result);
+            if (answer.draftId !== draftId) {
+              // An error result (a host that resolves a failed call) is an ask that failed, to try again.
+              if (force === true) changedRedrawn(draftId, result?.isError || typeof answer.draftId !== "string" ? "failed" : false);
+              return;
+            }
+            // Both answers are final: a sent or expired draft never becomes
+            // ready again, so a late one is still true. A send this card is
+            // making or has made keeps the pill and the buttons meanwhile
+            // (cardIsShowingDraft).
+            // A draft still ready keeps its preview, with the dates it has
+            // now: this card may have changed them since that preview (#535).
+            if (answer.status === "ready") {
+              statusReadyFor = draftId;
+              // The size and front it has now, with its page and price
+              // (#594): the maker may have changed them since this preview.
+              const statusPage = result?._meta?.previewHtml;
+              const frontTaken =
+                (POSTCARD_SIZES.includes(answer.size) || POSTCARD_LAYOUTS.includes(answer.layout)) && (force === true || mayAdoptStatus(draftId));
+              if (frontTaken) adoptMakerChange(draftId, answer, statusPage, false);
+              // And what they mean for delivery, for the Delivery line.
+              const datesTaken = picker.adopt(draftId, answer.schedule, force === true);
+              if (datesTaken && typeof answer.deliveryEstimate === "string" && answer.deliveryEstimate) {
+                arrivalChange = { draftId, schedule: picker.schedule(), deliveryEstimate: answer.deliveryEstimate };
+              }
+              // Its version, once the card shows all it says (#695): its front, drawn from this answer, and its dates.
+              const drawnWhole =
+                frontTaken && typeof statusPage === "string" && statusPage !== "" && (datesTaken || !picker.follows(draftId));
+              if (drawnWhole) showVersion(draftId, answer.contentVersion);
+              if (drawnWhole && changed === null && changedNotice) {
+                changedNotice = false;
+                document.getElementById("error-message").style.display = "none";
+              }
+              if (force === true) changedRedrawn(draftId, drawnWhole);
+              render();
+              return;
+            }
+            if (answer.status !== "sent" && answer.status !== "expired") {
+              if (force === true) changedRedrawn(draftId, false);
+              return;
+            }
+            if (force === true) changedRedrawn(draftId, null);
+            draftState = {
+              draftId,
+              status: answer.status,
+              orderId: typeof answer.orderId === "string" ? answer.orderId : null,
+              schedule: arrives.scheduleOf(answer.schedule),
+              // Where the order stands (#535), from its letter, not the draft.
+              orderStatus: ["scheduled", "cancelled", "sent"].includes(answer.orderStatus) ? answer.orderStatus : null,
+              cancellable: answer.cancellable === true,
+            };
+            render();
+          },
+          // Unanswered, the card shows the preview as the host gave it.
+          () => {
+            if (force === true) changedRedrawn(draftId, "failed");
+          },
+        );
+      }
+
+      function settledDraft() {
+        return draftState !== null && draftState.draftId === currentDraftId ? draftState : null;
+      }
+
+      // Where a sent draft's order stands (#535), by the server's answer:
+      // "scheduled" while it waits for its mail date, "cancelled", or "sent"
+      // (anything else, an older server's answer included). A cancel made on
+      // this card since counts at once. Null for a draft not sent.
+      function sentOrderOf(settled) {
+        if (settled?.status !== "sent") return null;
+        if (settled.orderStatus === "cancelled") return "cancelled";
+        if (settled.orderStatus === "scheduled") return scheduled.cancelled(settled.orderId) ? "cancelled" : "scheduled";
+        return "sent";
+      }
+
+      function showSendPage(url, draftId) {
+        sendPage = { url, draftId };
+        sendInProgress = false;
+        const sendButton = document.getElementById("send-button");
+        sendButton.classList.remove("loading");
+        sendButton.disabled = false;
+        document.getElementById("error-message").style.display = "none";
+        render();
+      }
+
+      async function handleSendPage() {
+        if (!sendPageShown()) return;
+        const url = sendPage.url;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.style.display = "none";
+        let opened = false;
+        if (typeof host.openLink === "function") {
+          try {
+            // A host that declines answers with isError rather than failing.
+            opened = !(await host.openLink(url))?.isError;
+          } catch {
+            opened = false;
+          }
+        }
+        if (!opened) {
+          errorMessage.textContent = `The page did not open. It is at ${url}`;
+          errorMessage.style.display = "block";
+        }
+      }
+
+      // The refusal's details, {} when only its text says so, or null.
+      function duplicateDetails(result, error) {
+        const details = result?._meta?.[DUPLICATE_META_KEY];
+        if (details && typeof details === "object") return details;
+        const text = error ? String(error?.message ?? "") : resultText(result);
+        return text.includes(DUPLICATE_PREFIX) ? {} : null;
+      }
+
+      function duplicateAge(minutes) {
+        if (typeof minutes !== "number" || !Number.isFinite(minutes)) return "recently";
+        if (minutes < 1) return "less than a minute ago";
+        if (minutes < 60) return minutes === 1 ? "1 minute ago" : `${minutes} minutes ago`;
+        const hours = Math.floor(minutes / 60);
+        return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+      }
+
+      function duplicateNotice(details) {
+        const name =
+          typeof details.recipientName === "string" && details.recipientName
+            ? ` to ${details.recipientName}`
+            : "";
+        const when = duplicateAge(details.ageMinutes);
+        if (details.kind === "sent") {
+          return `You already sent this same ${MAIL_NOUN}${name} ${when}. Send another copy only if you want two.`;
+        }
+        if (details.kind === "paid") {
+          return `You already paid to send this same ${MAIL_NOUN}${name} ${when}. Send another copy only if you want two.`;
+        }
+        if (details.kind === "checkout_open") {
+          return `A checkout for this same ${MAIL_NOUN}${name} was started ${when} and is still open. If you pay for both, two copies are mailed.`;
+        }
+        return `This same ${MAIL_NOUN} was sent or paid for recently. Send another copy only if you want two.`;
+      }
+
+      // Nothing was sent or charged. Says why, and turns the button that was
+      // pressed into the another-copy button.
+      // A send or a checkout refused because the mail changed after this card drew it (#695): nothing was sent or
+      // charged. The words are the server's (draftErrors, createMailCheckout).
+      const CHANGED_SINCE_SHOWN = "changed after it was shown";
+
+      // What the card says once it has asked (#695 review round 1): drawn whole, to check it and press again; not drawn
+      // (no page, or a part this card cannot show), to ask for a new preview; sent or expired meanwhile, nothing, as the
+      // card's own state says so.
+      function changedSaid(action, drawn) {
+        const nothing = `This ${MAIL_NOUN} changed after it was shown here, so nothing was ${action === "send" ? "sent" : "charged"}.`;
+        if (drawn === "asking") return `${nothing} Getting it as it is now…`;
+        if (drawn === "failed") return `${nothing} This card couldn't check it just now: try again in a moment.`;
+        return drawn
+          ? `${nothing} It is shown again as it is now: check it, then press ${action === "send" ? "Send" : "Pay & Send"} again.`
+          : `${nothing} This card can't show it as it is now: ask in the chat for a new preview, and ${action === "send" ? "send" : "pay"} from that.`;
+      }
+
+      function changedRedrawn(draftId, drawn) {
+        if (!changed || changed.draftId !== draftId) return;
+        const action = changed.action;
+        changed = null;
+        // Not an answer: the next refusal asks again.
+        if (drawn === "failed") lastRefused = null;
+        changedNotice = drawn !== true && drawn !== null;
+        const errorMessage = document.getElementById("error-message");
+        if (drawn === null) {
+          errorMessage.style.display = "none";
+        } else {
+          errorMessage.textContent = changedSaid(action, drawn);
+          errorMessage.style.display = "block";
+        }
+        // The buttons it held come back, with their own labels.
+        render();
+      }
+
+      // Says so, puts the pressed button back, and asks for the mail as it is now, to draw it whatever this card had set.
+      // A version refused twice is not asked about again: the card says to make a new preview.
+      // refused: the version the send or checkout named, which may be older than the one shown by the time it is refused.
+      function showChanged(action, draftId, refused) {
+        const errorMessage = document.getElementById("error-message");
+        const again = Boolean(refused) && refused === lastRefused;
+        lastRefused = refused || null;
+        changed = again ? null : { draftId, action };
+        changedNotice = true;
+        errorMessage.textContent = changedSaid(action, again ? false : "asking");
+        errorMessage.style.display = "block";
+        if (action === "send") {
+          const sendButton = document.getElementById("send-button");
+          sendButton.classList.remove("loading");
+          sendInProgress = false;
+        } else {
+          const payButton = document.getElementById("pay-send-button");
+          payButton.classList.remove("loading");
+          checkoutInProgress = false;
+        }
+        if (!again) askDraftState(draftId, true);
+        // Held while it asks, then drawn with their own labels (a dated or gift letter's, a price).
+        render();
+      }
+
+      function showDuplicate(details, action) {
+        anotherCopy = true;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.textContent = duplicateNotice(details);
+        errorMessage.style.display = "block";
+        if (action === "send") {
+          const sendButton = document.getElementById("send-button");
+          sendButton.classList.remove("loading");
+          sendButton.disabled = false;
+          document.getElementById("send-button-text").textContent = ANOTHER_COPY_SEND_LABEL;
+          sendInProgress = false;
+          shareSelection();
+        } else {
+          const payButton = document.getElementById("pay-send-button");
+          payButton.classList.remove("loading");
+          payButton.disabled = false;
+          document.getElementById("pay-send-button-text").textContent = ANOTHER_COPY_PAY_LABEL;
+          checkoutInProgress = false;
+        }
+      }
+
       async function handleCreatePreview() {
         if (retryBusy || dataLoaded) return;
         const request = retryRequest();
-        if (!request || typeof window.openai?.callTool !== "function") return;
-        const button = document.getElementById("retry-button");
-        const buttonText = document.getElementById("retry-button-text");
-        const errorMessage = document.getElementById("error-message");
+        if (!request || typeof host.callTool !== "function") return;
         retryBusy = true;
+        try {
+          await runPreview(
+            request,
+            document.getElementById("retry-button"),
+            document.getElementById("retry-button-text"),
+            RETRY_LABEL,
+          );
+        } finally {
+          retryBusy = false;
+        }
+      }
+
+      // Calls the preview tool from the card and draws the result the way
+      // render() draws the host's. The caller holds retryBusy.
+      async function runPreview(request, button, buttonText, label) {
+        const errorMessage = document.getElementById("error-message");
         button.disabled = true;
         button.classList.add("loading");
         buttonText.innerHTML = '<span class="spinner"></span> Creating preview...';
@@ -484,7 +1877,7 @@
         // the host's, this call's, or an earlier call's that outlasted its
         // timeout. Any later one is left unused.
         const drawn = Promise.resolve()
-          .then(() => window.openai.callTool(request.tool, request.args))
+          .then(() => host.callTool(request.tool, request.args))
           .then((result) => {
             const output = previewOutput(result);
             if (!output) {
@@ -508,20 +1901,197 @@
           }
         } catch (error) {
           if (!dataLoaded) {
-            errorMessage.textContent = `Unable to create the preview: ${error?.message || "Unknown error"}`;
+            errorMessage.textContent = `Unable to create the preview: ${readableError(error)}`;
             errorMessage.style.display = "block";
           }
         } finally {
           clearTimeout(timer);
-          retryBusy = false;
           button.disabled = false;
           button.classList.remove("loading");
-          buttonText.textContent = RETRY_LABEL;
+          buttonText.textContent = label;
+        }
+      }
+
+      function showImageError(text) {
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.textContent = text;
+        errorMessage.style.display = "block";
+      }
+
+      function setImageButtonsDisabled(disabled) {
+        document.getElementById("choose-image-button").disabled = disabled;
+        document.getElementById("upload-image-button").disabled = disabled;
+      }
+
+      // A reopened card that sent its mail or started paying shows only that.
+      function keptOrderShown() {
+        return Boolean(resumed && (resumed.sent === true || resumed.checkout === true));
+      }
+
+      // Starts a pick or an upload. It holds retryBusy until it ends.
+      function beginImageFlow(buttonText, busyHtml) {
+        const flow = ++imageFlow;
+        retryBusy = true;
+        setImageButtonsDisabled(true);
+        buttonText.innerHTML = busyHtml;
+        document.getElementById("error-message").style.display = "none";
+        return flow;
+      }
+
+      // Runs one host call of a pick or an upload, and gives the buttons back
+      // if it has not answered after IMAGE_WAIT_MS. The call keeps waiting;
+      // imageFlowCurrent decides whether its answer is still used.
+      async function waitForHost(flow, buttonText, label, call) {
+        const wait = setTimeout(() => {
+          if (flow !== imageFlow || !retryBusy || dataLoaded || keptOrderShown()) return;
+          retryBusy = false;
+          setImageButtonsDisabled(false);
+          buttonText.textContent = label;
+          showImageError("Still waiting for the image. If nothing happened, please try again.");
+        }, IMAGE_WAIT_MS);
+        try {
+          return await call();
+        } finally {
+          clearTimeout(wait);
+        }
+      }
+
+      // Whether an answer for this flow should still be used: no newer
+      // attempt, no preview, no kept order. A flow whose buttons were given
+      // back takes them again.
+      function imageFlowCurrent(flow, buttonText, busyHtml) {
+        if (flow !== imageFlow || dataLoaded || keptOrderShown()) return false;
+        if (!retryBusy) {
+          retryBusy = true;
+          setImageButtonsDisabled(true);
+          buttonText.innerHTML = busyHtml;
+          document.getElementById("error-message").style.display = "none";
+        }
+        return true;
+      }
+
+      // Previews a picked or uploaded file by link. The preview call has its
+      // own timeout.
+      async function previewFile(fileId, flow, button, buttonText, label, busyHtml) {
+        let url = null;
+        try {
+          const result = await waitForHost(flow, buttonText, label, () =>
+            host.getFileDownloadUrl({ fileId }),
+          );
+          url = result?.downloadUrl || result?.download_url || null;
+        } catch (error) {
+          url = null;
+        }
+        if (!imageFlowCurrent(flow, buttonText, busyHtml)) return;
+        const request = imageRequest();
+        if (!request) return;
+        if (!isHttpsUrl(url)) {
+          showImageError("Unable to get a link to that image. Please try again.");
+          return;
+        }
+        await runPreview(
+          { tool: request.tool, args: { ...request.args, imageUrl: url } },
+          button,
+          buttonText,
+          label,
+        );
+      }
+
+      async function handleChooseImage() {
+        if (retryBusy || dataLoaded || !canChooseImage()) return;
+        const button = document.getElementById("choose-image-button");
+        const buttonText = document.getElementById("choose-image-button-text");
+        const busyHtml = '<span class="spinner"></span> Opening your library...';
+        const flow = beginImageFlow(buttonText, busyHtml);
+        try {
+          let files = null;
+          try {
+            files = await waitForHost(flow, buttonText, CHOOSE_LABEL, () => host.selectFiles());
+          } catch (error) {
+            files = null;
+          }
+          if (!imageFlowCurrent(flow, buttonText, busyHtml)) return;
+          const picked = Array.isArray(files) ? files[0] : null;
+          const fileId = picked?.fileId || picked?.file_id;
+          if (typeof fileId !== "string" || !fileId) {
+            showImageError("No image was chosen.");
+            return;
+          }
+          const mimeType = picked.mimeType || picked.mime_type;
+          if (mimeType && !IMAGE_TYPES.includes(mimeType)) {
+            showImageError("That file is not a JPEG, PNG or WebP image.");
+            return;
+          }
+          await previewFile(fileId, flow, button, buttonText, CHOOSE_LABEL, busyHtml);
+        } finally {
+          if (flow === imageFlow) {
+            retryBusy = false;
+            setImageButtonsDisabled(false);
+            buttonText.textContent = CHOOSE_LABEL;
+          }
+        }
+      }
+
+      function handleUploadImage() {
+        if (retryBusy || dataLoaded || !canUploadImage()) return;
+        document.getElementById("image-file-input").click();
+      }
+
+      async function handleImageFile(event) {
+        const input = event.target;
+        const file = input.files && input.files[0];
+        input.value = "";
+        if (!file || dataLoaded || !canUploadImage()) return;
+        if (retryBusy) {
+          // An earlier pick answered after its buttons came back, and it is
+          // still being previewed.
+          showImageError("An image you chose earlier is still on its way. Try again once it has arrived.");
+          return;
+        }
+        if (!IMAGE_TYPES.includes(file.type)) {
+          showImageError("That file is not a JPEG, PNG or WebP image.");
+          return;
+        }
+        if (file.size > MAX_IMAGE_BYTES) {
+          showImageError("That image is larger than 10 MB.");
+          return;
+        }
+        const button = document.getElementById("upload-image-button");
+        const buttonText = document.getElementById("upload-image-button-text");
+        const busyHtml = '<span class="spinner"></span> Uploading...';
+        const flow = beginImageFlow(buttonText, busyHtml);
+        try {
+          let fileId = null;
+          let failed = false;
+          let failure = null;
+          try {
+            const uploaded = await waitForHost(flow, buttonText, UPLOAD_LABEL, () => host.uploadFile(file));
+            fileId = uploaded?.fileId || uploaded?.file_id || null;
+          } catch (error) {
+            failed = true;
+            failure = error;
+          }
+          if (!imageFlowCurrent(flow, buttonText, busyHtml)) return;
+          if (failed) {
+            showImageError(`Unable to upload the image: ${failure?.message || "Unknown error"}`);
+            return;
+          }
+          if (typeof fileId !== "string" || !fileId) {
+            showImageError("The upload did not return a file.");
+            return;
+          }
+          await previewFile(fileId, flow, button, buttonText, UPLOAD_LABEL, busyHtml);
+        } finally {
+          if (flow === imageFlow) {
+            retryBusy = false;
+            setImageButtonsDisabled(false);
+            buttonText.textContent = UPLOAD_LABEL;
+          }
         }
       }
 
       function applyTheme() {
-        const theme = window.openai?.theme ?? "light";
+        const theme = host.theme();
         document.documentElement.classList.toggle("dark", theme === "dark");
       }
 
@@ -572,16 +2142,30 @@
         sendButton.disabled = true;
       }
 
-      function extractBodyContent(html) {
-        if (!html) return null;
-        const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-        return bodyMatch ? bodyMatch[1] : html;
+      /**
+       * One of the postcard's pages as it prints, cleaned. The page keeps its
+       * title for screen readers, inside a labelled group.
+       */
+      function showPage(pane, svg, label) {
+        pane.textContent = "";
+        const page = document.createElement("div");
+        page.className = "postcard-page";
+        page.setAttribute("role", "group");
+        page.setAttribute("aria-label", label);
+        page.appendChild(document.importNode(cleanPage(svg), true));
+        pane.appendChild(page);
       }
 
+      // Draws the card, then tells the conversation which draft it shows (#650).
       function render() {
+        renderCard();
+        shareSelection();
+      }
+
+      function renderCard() {
         applyTheme();
         adoptKeptState();
-        if (resumed && (resumed.sent === true || resumed.checkout === true)) {
+        if (keptOrderShown()) {
           // Whatever else arrives, a reopened card that sent this postcard or
           // started paying for it shows that and nothing else.
           cancelEmptyTimer();
@@ -595,11 +2179,12 @@
         // knows, so switching keeps a send from the card and a send from the
         // chat on one draft, which the server sends only once. From the first
         // attempt on, successful or not, the card keeps its own draft.
-        const hostOutput = window.openai?.toolOutput;
+        const hostOutput = host.toolOutput();
         if (retryResult && hostOutput?.draftId !== undefined && !draftActedOn) {
           retryResult = null;
         }
-        const state = retryResult ? retryResult.output : window.openai?.toolOutput;
+        // With the size and front the maker last set on it (#594), and its price.
+        const state = withMakerChange(retryResult ? retryResult.output : host.toolOutput());
 
         // Check if we have actual data
         if (!state || state.draftId === undefined) {
@@ -663,23 +2248,51 @@
 
         // Store draftId for send button
         currentDraftId = draftId;
+        // The preview's own version, the first time this draft is drawn (#695); later changes tell their own.
+        if (shownVersion.draftId !== draftId) {
+          shownVersion = { draftId, version: null };
+          showVersion(draftId, state.contentVersion);
+        }
+        // The maker's too, before Send's hold is drawn below (#594).
+        makerFollows(draftId);
         currentEligibility = sendEligibility || null;
+        if (!retryResult) askDraftState(draftId);
+        const settled = settledDraft();
+        const sentOrder = sentOrderOf(settled);
         if (typeof draftId === "string" && draftId && saved?.draftId !== draftId) {
           keep({ draftId });
         }
 
+        // A preview our renderer drew (#534) is the postcard as it prints: its
+        // front and back pages. Any other gets the legacy front and the
+        // mockup of the back.
+        // The page the maker last drew (#594), else the preview's.
+        const pages = renderedPages(makerPage(draftId) ?? meta.previewHtml ?? state.previewHtml);
+        const printed = pages && pages.length >= 2;
+        postcardInches = SIZE_INCHES[state.size] ?? (printed ? inchesOf(pages[0]) : [6, 9]);
+
         // Render front preview (image)
         const previewFront = document.getElementById("preview-front");
-        const frontContent = extractBodyContent(previewFrontHtml);
-        if (frontContent) {
-          previewFront.innerHTML = frontContent;
+        // A legacy front: its picture alone, made with DOM calls (#684).
+        const frontImage = printed
+          ? null
+          : previewImageElement(legacyFrontImage(previewFrontHtml), "Postcard front");
+        if (printed) {
+          showPage(previewFront, pages[0], "The front of your postcard, as it prints");
+        } else if (frontImage) {
+          const frame = document.createElement("div");
+          frame.className = "postcard-front";
+          frame.appendChild(frontImage);
+          previewFront.replaceChildren(frame);
         } else {
           previewFront.innerHTML = '<div class="preview-loading">No image preview available</div>';
         }
 
         // Render back preview (postcard mockup)
         const previewBack = document.getElementById("preview-back");
-        if (message) {
+        if (printed) {
+          showPage(previewBack, pages[1], "The back of your postcard, as it prints");
+        } else if (message) {
           // Escape HTML helper
           const escapeHtml = (str) =>
             (str || "")
@@ -713,10 +2326,25 @@
               .replace(/, (\d)/, " $1"),
           );
 
+          // The gift strip, from state.giftCard: a placeholder code, because the
+          // real one is minted at send.
+          const giftCard = state.giftCard;
+          const giftStrip =
+            giftCard && (giftCard.state === "funded" || giftCard.state === "unfunded")
+              ? `<div class="postcard-gift-strip">
+                  <span class="postcard-gift-qr" aria-hidden="true"></span>
+                  <span>${
+                    giftCard.state === "funded"
+                      ? `<strong>A gift from you:</strong> a free letter of their own. Code <span class="postcard-gift-code">XXXX-XXXX</span>`
+                      : `<strong>Sent with Letter IRL</strong> &middot; letterirl.com`
+                  }</span>
+                </div>`
+              : "";
+
           previewBack.innerHTML = `
             <div class="postcard-back-mockup">
-              <div class="postcard-message-side">
-                <div class="postcard-message-text">${escapedMessage}</div>
+              <div class="postcard-message-side${giftStrip ? " with-gift" : ""}">
+                <div class="postcard-message-text">${escapedMessage}</div>${giftStrip}
               </div>
               <div class="postcard-address-side">
                 <div class="postcard-stamp">STAMP</div>
@@ -759,16 +2387,33 @@
           recipientRow.style.display = "flex";
         }
 
-        // Cost - lettersRequired is already in letters (1 letter = 1 postcard)
-        const letters = lettersRequired ?? 1;
-        document.getElementById("cost").textContent =
-          `${letters} Letter${letters === 1 ? "" : "s"}`;
+        // A gift send is free and needs no balance (docs/gift-letters.md).
+        const isGiftSend = Boolean(state.giftCard);
 
-        // Delivery info
+        // Cost - lettersRequired is already in letters (1 letter = 1 postcard).
+        // Mail no pack pays for (#579), such as a 4x6 postcard, says its price,
+        // as the studio's cost does (#592 review round 1).
+        const letters = lettersRequired ?? 1;
+        const costPayAndSend = sendEligibility?.payAndSend;
+        document.getElementById("cost").textContent = isGiftSend
+          ? "Free (gift letter)"
+          : sendEligibility?.packPays === false
+            ? unpayableReason(state)
+              ? "Can't be paid now"
+              : costPayAndSend?.amountCents
+                ? `Pay & Send ${formatPayAmount(costPayAndSend)}`
+                : "Paid when you send it"
+            : `${letters} Letter${letters === 1 ? "" : "s"}`;
+
+        // Delivery info. A date this card set (#535) brings its own estimate.
+        const estimate =
+          arrivalChange?.draftId === draftId && arrivalChange.deliveryEstimate
+            ? arrivalChange.deliveryEstimate
+            : deliveryEstimate;
         const deliveryText = [];
         if (deliveryClass) deliveryText.push(deliveryClass);
-        if (deliveryEstimate) {
-          deliveryText.push(deliveryEstimate);
+        if (estimate) {
+          deliveryText.push(estimate);
         } else if (estimatedDeliveryDays) {
           deliveryText.push(`~${estimatedDeliveryDays} days`);
         }
@@ -788,16 +2433,35 @@
         // letters. They agree exactly under flat pricing, which is pinned by
         // tests/unit/tools/letterBalanceEquivalence.test.ts - if that test
         // reddens, this line is what it is warning about.
+        //
+        // A gift send spends a gift letter, not the balance, so a refreshed
+        // balance says nothing about it. Nor about mail no pack pays for
+        // (#579): that is paid per send, whatever the balance.
+        const packPays = sendEligibility?.packPays !== false;
         const effectiveCanSendNow =
-          refreshedLetters !== null
-            ? refreshedLetters >= (lettersRequired ?? 1)
-            : canSendNow;
+          isGiftSend || !packPays
+            ? canSendNow
+            : refreshedLetters !== null
+              ? refreshedLetters >= (lettersRequired ?? 1)
+              : canSendNow;
 
         // Status pill - only while this card still describes a draft.
         if (cardIsShowingDraft()) {
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
-          if (effectiveCanSendNow) {
+          if (sentOrder === "scheduled" || sentOrder === "cancelled") {
+            // Sent with a date (#535), as the card's own send would say.
+            statusPill.textContent = sentOrder === "cancelled" ? "Cancelled" : "Scheduled";
+          } else if (settled?.status === "sent") {
+            // The words the card uses when its own send succeeds.
+            statusPill.classList.add("ok");
+            statusPill.textContent = "With the printer";
+          } else if (settled?.status === "expired") {
+            statusPill.classList.add("alert");
+            statusPill.textContent = "Preview expired";
+          } else if (sendPageShown()) {
+            statusPill.textContent = "Send it on the confirmation page";
+          } else if (effectiveCanSendNow) {
             statusPill.classList.add("ok");
             statusPill.textContent = "Ready to send";
           } else if (packPurchasePending) {
@@ -807,21 +2471,37 @@
             statusPill.textContent = "Waiting for your Letter Pack";
           } else {
             statusPill.classList.add("alert");
-            statusPill.textContent = reasonCannotSend ?? "Cannot send";
+            statusPill.textContent = unpayableReason(state) ?? reasonCannotSend ?? "Cannot send";
           }
         }
 
-        // Note about saved return address
+        // Note about saved return address and, on a gift send, what the
+        // card on the back is.
         const noteEl = document.getElementById("note");
-        if (savedReturnAddressNote) {
-          noteEl.textContent = savedReturnAddressNote;
+        const noteParts = [];
+        if (sentOrder === "scheduled") {
+          noteParts.push(SCHEDULED_NOTE);
+        } else if (sentOrder === "cancelled") {
+          noteParts.push(CANCELLED_NOTE);
+        } else if (settled?.status === "sent") {
+          noteParts.push("This postcard has already been sent. Ask for its status in the chat.");
+        } else if (settled?.status === "expired") {
+          noteParts.push("This preview has expired. Ask for a new one in the chat.");
+        }
+        if (isGiftSend && state.giftCard.description) noteParts.push(state.giftCard.description);
+        if (savedReturnAddressNote) noteParts.push(savedReturnAddressNote);
+        if (noteParts.length > 0) {
+          noteEl.textContent = noteParts.join(" ");
           noteEl.style.display = "block";
         } else {
           noteEl.style.display = "none";
         }
 
         // Show Draft ID - same ownership rule as the status pill above.
-        if (cardIsShowingDraft()) {
+        if (cardIsShowingDraft() && settled?.status === "sent") {
+          document.getElementById("id-label").textContent = "Order";
+          document.getElementById("id-value").textContent = settled.orderId || "-";
+        } else if (cardIsShowingDraft()) {
           document.getElementById("id-label").textContent = "Draft";
           document.getElementById("id-value").textContent = draftId || "-";
         }
@@ -836,10 +2516,33 @@
         );
         const buyPackButton = document.getElementById("buy-pack-button");
 
+        // The Arrives row, while this card still describes a draft it can
+        // send (#535). A sent one that waits for its mail date offers Cancel.
+        picker.show(
+          draftId,
+          state,
+          cardIsShowingDraft() && !checkoutInProgress && !settled && !sendPageShown(),
+        );
+        if (cardIsShowingDraft() && (sentOrder === "scheduled" || sentOrder === "cancelled")) {
+          scheduled.show(settled.orderId, settled.schedule, sentOrder === "cancelled", settled.cancellable);
+        } else if (cardIsShowingDraft()) {
+          scheduled.hide();
+        }
+        // Setting a date or a style (#594): Send waits for the draft it sends.
+        maker.heldShown = makerHolds();
+        // And the card asking for the draft as it is now, after a refusal for a change since (#695).
+        const settingDate = picker.busy() || maker.heldShown || changed !== null;
+        const datedSend = Boolean(picker.schedule());
+
         if (!sendInProgress && !checkoutInProgress) {
-          sendButton.style.display = effectiveCanSendNow ? "flex" : "none";
-          sendButton.disabled = !effectiveCanSendNow;
-          sendButtonText.textContent = "Send Postcard";
+          const onSendPage = sendPageShown();
+          sendButton.style.display = effectiveCanSendNow && !onSendPage ? "flex" : "none";
+          sendButton.disabled = !effectiveCanSendNow || settingDate;
+          document.getElementById("send-page-button").style.display = onSendPage ? "flex" : "none";
+          document.getElementById("send-page-note").style.display = onSendPage ? "block" : "none";
+          sendButtonText.textContent = anotherCopy
+            ? ANOTHER_COPY_SEND_LABEL
+            : `${datedSend ? "Schedule" : "Send"} ${isGiftSend ? "Gift Postcard" : "Postcard"}`;
 
           const payAndSend = sendEligibility?.payAndSend;
           const letterPack = sendEligibility?.letterPack;
@@ -854,9 +2557,11 @@
           purchaseActions.style.display =
             !effectiveCanSendNow || payAndSendAvailable ? "grid" : "none";
           paySendButton.style.display = payAndSendAvailable ? "flex" : "none";
-          paySendButton.disabled = !payAndSendAvailable;
+          paySendButton.disabled = !payAndSendAvailable || settingDate;
           if (payAndSendAvailable && payAndSend.amountCents) {
-            paySendButtonText.textContent = `Pay & Send (${formatPayAmount(payAndSend)})`;
+            paySendButtonText.textContent = anotherCopy
+              ? ANOTHER_COPY_PAY_LABEL
+              : `Pay & Send (${formatPayAmount(payAndSend)})`;
           }
           const packsBuyable = !effectiveCanSendNow && Boolean(letterPack?.available);
           buyPackButton.style.display =
@@ -865,12 +2570,60 @@
           // true means there is nothing left to buy.
           document.getElementById("pack-options").style.display =
             packsBuyable && packOptionsOpen ? "grid" : "none";
+          // An app that takes no purchases (#475) offers neither button
+          // above; the server says so with letterPack.available false and
+          // the website's letter packs page as purchaseUrl (#474).
+          // Never for mail no pack pays for (#579): a pack would not send it.
+          const packsOnWebsite =
+            !effectiveCanSendNow &&
+            packPays &&
+            letterPack?.available === false &&
+            isHttpsUrl(letterPack?.purchaseUrl) &&
+            typeof host.openLink === "function";
+          document.getElementById("website-packs-button").style.display =
+            packsOnWebsite ? "flex" : "none";
+          // That mail, in an app with no checkout, is paid on the
+          // confirmation page (#579), which the server names.
+          const payOnPage =
+            !effectiveCanSendNow &&
+            isHttpsUrl(payAndSend?.pageUrl) &&
+            typeof host.openLink === "function";
+          document.getElementById("pay-page-button").style.display =
+            payOnPage ? "flex" : "none";
+          // The note describes a checkout this card opens, so it shows only
+          // where there is one to open.
+          const checkoutNote = document.getElementById("checkout-note");
+          if (payAndSendAvailable || packsBuyable) {
+            checkoutNote.textContent = CHECKOUT_NOTE;
+            checkoutNote.style.display = "block";
+          } else if (payOnPage) {
+            checkoutNote.textContent = PAY_PAGE_NOTE;
+            checkoutNote.style.display = "block";
+          } else if (packsOnWebsite) {
+            checkoutNote.textContent = WEBSITE_PACKS_NOTE;
+            checkoutNote.style.display = "block";
+          } else if (!effectiveCanSendNow && unpayableReason(state)) {
+            checkoutNote.textContent = unpayableNote(unpayableReason(state));
+            checkoutNote.style.display = "block";
+          } else {
+            checkoutNote.style.display = "none";
+          }
+          // Nothing to press on a draft that was sent or has expired, and an
+          // earlier failure to send it no longer says anything true.
+          if (settled) {
+            sendButton.style.display = "none";
+            purchaseActions.style.display = "none";
+            document.getElementById("send-page-button").style.display = "none";
+            document.getElementById("send-page-note").style.display = "none";
+            document.getElementById("error-message").style.display = "none";
+          }
         }
+        refreshStudio(state);
       }
 
       // Handle send button click
       async function handleSend() {
-        if (sendInProgress || !currentDraftId) return;
+        if (sendInProgress || changed !== null || !currentDraftId || picker.busy() || makerHolds()) return;
         draftActedOn = true;
 
         const sendButton = document.getElementById("send-button");
@@ -895,12 +2648,26 @@
         sendButtonText.innerHTML = '<span class="spinner"></span> Sending...';
 
         const sentDraftId = currentDraftId;
+        // The version it shows as it sends (#695): a refusal names this one.
+        const sentVersion = versionFor(sentDraftId);
         try {
           // Call send_postcard via OpenAI callTool
-          const result = await window.openai.callTool("send_postcard", {
-            draftId: sentDraftId,
-            confirm: true,
-          });
+          const sendArgs = { draftId: sentDraftId, confirm: true };
+          if (anotherCopy) sendArgs.sendAnotherCopy = true;
+          // What it showed (#695): mail changed since is refused, and drawn again.
+          if (sentVersion) sendArgs.contentVersion = sentVersion;
+          const result = await host.callTool("send_postcard", sendArgs);
+          // A refused send comes back as an error result, not a rejection.
+          if (result?.isError) {
+            const duplicate = duplicateDetails(result, null);
+            if (duplicate) {
+              showDuplicate(duplicate, "send");
+              return;
+            }
+            // Thrown with its text, where the catch below also finds the
+            // confirmation page's address (#470).
+            throw new Error(resultText(result) || "The postcard was not sent.");
+          }
 
           // Extract orderId
           const orderId =
@@ -909,12 +2676,35 @@
             result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1] ||
             null;
 
+          // Where the mail stands, as the send says (#535): sent with a date
+          // and waiting for it, it is scheduled, and can be cancelled from
+          // here until then unless Pay & Send paid for it. Not the card's own
+          // idea of the dates: the chat may have changed them.
+          const sendAnswer = toolData(result);
+          const sentSchedule =
+            sendAnswer.currentStatus === "scheduled" ? arrives.scheduleOf(sendAnswer.schedule) : null;
+          const sentCancellable = sendAnswer.cancellable === true;
+
           // A reopened conversation must not offer this postcard again.
-          keep(
-            typeof orderId === "string" && orderId
-              ? { draftId: sentDraftId, sent: true, orderId }
-              : { draftId: sentDraftId, sent: true },
-          );
+          keep({
+            draftId: sentDraftId,
+            sent: true,
+            ...(typeof orderId === "string" && orderId ? { orderId } : {}),
+            ...(sentSchedule ? { schedule: sentSchedule } : {}),
+            ...(sentSchedule && !sentCancellable ? { cancellable: false } : {}),
+          });
+
+          if (sentSchedule) {
+            statusPill.classList.remove("ok", "alert");
+            statusPill.textContent = "Scheduled";
+            idLabel.textContent = "Order";
+            idValue.textContent = orderId || "Confirmed";
+            sendButton.classList.remove("loading");
+            sendButtonText.innerHTML = "Postcard Scheduled";
+            picker.hide();
+            scheduled.show(orderId, sentSchedule, false, sentCancellable);
+            return;
+          }
 
           // Same state, same words as the purchase flow above: a prepaid
           // send dispatches inline and also stops at provider acceptance, so
@@ -935,8 +2725,27 @@
           sendButtonText.innerHTML = "Postcard Sent!";
           // Keep button disabled
         } catch (error) {
+          const duplicate = duplicateDetails(null, error);
+          if (duplicate) {
+            showDuplicate(duplicate, "send");
+            return;
+          }
+          // Refused for a change since (#695), as an error result or, in ChatGPT, a rejection wrapping its text.
+          if (String(error?.message ?? "").includes(CHANGED_SINCE_SHOWN)) {
+            showChanged("send", sentDraftId, sentVersion);
+            showPickerAgain();
+            return;
+          }
+          // An error result arrives here with its text, and a host's
+          // rejection with its message. Not readableError: that keeps only
+          // the first sentence, and the page's address is in the second.
+          const page = sendPageFrom(String(error?.message ?? ""), sentDraftId);
+          if (page) {
+            showSendPage(page, sentDraftId);
+            return;
+          }
           // Show error message
-          errorMessage.textContent = `Failed to send: ${error.message || "Unknown error"}`;
+          errorMessage.textContent = `Failed to send: ${readableError(error)}`;
           errorMessage.style.display = "block";
 
           // Reset button for retry
@@ -950,6 +2759,11 @@
           statusPill.textContent = "Send failed";
 
           sendInProgress = false;
+        } finally {
+          // A send that did not go out shares its draft again; one that did has taken it back (#650).
+          shareSelection();
+          // The maker's header and footer say what the send did (#580).
+          refreshStudio();
         }
       }
 
@@ -987,6 +2801,7 @@
       function applyPurchaseStatus(status) {
         const statusPill = document.getElementById("status-pill");
         const state = status.purchaseStatus;
+        purchaseState = typeof state === "string" ? state : null;
         statusPill.classList.remove("ok", "alert");
         if (state === "submitted") {
           statusPill.classList.add("ok");
@@ -1003,6 +2818,22 @@
           statusPill.textContent = status.message || state;
         } else {
           statusPill.textContent = "Checkout open - waiting for payment";
+          // Its mail date passed while it waits (#726), on a reopened card too.
+          if (state === "pending_payment") showScheduleMissed(status.scheduleMissed);
+        }
+        // Paid, or closed: the note about paying no longer applies.
+        // A real status only: a failed call carries none, and leaves the note as it was.
+        if (typeof state === "string" && state !== "pending_payment" && scheduleMissedShown) {
+          scheduleMissedShown = false;
+          document.getElementById("checkout-note").style.display = "none";
+        }
+        // A checkout cancelled, or left until it expired, cancels its order: nothing can be paid on this card now, so
+        // its checkout link, the button that opened it, Check status and the note about paying go. The pill says what
+        // happened, and a new preview is the way to send it.
+        if (state === "cancelled") {
+          for (const id of ["pay-send-button", "checkout-link", "check-status-button", "checkout-note"]) {
+            document.getElementById(id).style.display = "none";
+          }
         }
         // "Settled" means nothing further will change SOON - not that nothing
         // will ever change. "processing" counts, and that is the point:
@@ -1023,6 +2854,8 @@
         // dispatches inline too, the only cost of this line is a card that
         // updates when the user returns rather than on a timer - which is why
         // this is a comment rather than a pinned test.
+        // The maker's header and footer follow the order (#580).
+        refreshStudio();
         return state === "processing" || TERMINAL_PURCHASE_STATUSES.includes(state);
       }
 
@@ -1035,7 +2868,7 @@
 
       async function refreshOrderStatus() {
         const status = toolData(
-          await window.openai.callTool("get_purchase_status", {
+          await host.callTool("get_purchase_status", {
             orderId: trackedOrderId,
           }),
         );
@@ -1049,7 +2882,7 @@
       // point render() has taken over and there is nothing left to wait for.
       async function refreshLetterBalance() {
         const balance = toolData(
-          await window.openai.callTool("get_account_balance", {}),
+          await host.callTool("get_account_balance", {}),
         );
         if (typeof balance.lettersRemaining !== "number") return false;
         refreshedLetters = balance.lettersRemaining;
@@ -1178,15 +3011,62 @@
 
       // Reveal the checkout link, the customer's route to paying when the
       // host does not open a tab. See handlePayAndSend for why it exists.
+      // An unpaid checkout whose mail date has passed (#726), from the checkout or a status answer:
+      // said in place of the checkout note. True when it was shown.
+      let scheduleMissedShown = false;
+      function showScheduleMissed(value) {
+        const missed = arrives.scheduleOf(value);
+        if (!missed) return false;
+        scheduleMissedShown = true;
+        const note = document.getElementById("checkout-note");
+        note.textContent =
+          `This was to go to the printer on ${arrives.describeDate(missed.mailOn)} to arrive by ${arrives.describeDate(missed.arriveBy)}, and that day has passed. ` +
+          `If you pay, it goes to the printer as soon as it can and may arrive after ${arrives.describeDate(missed.arriveBy)}.`;
+        note.style.display = "block";
+        return true;
+      }
+
+      // Mail no pack pays for (#579) that the card cannot have paid either: the server offers no Pay & Send for it now (its
+      // option was turned off since the preview: "Pay & Send isn't available for this mail."), and names no confirmation
+      // page to pay on. The card says the server's reason, never the pack rule, which points at a payment it cannot
+      // make, and prices nothing. Null for mail it can send or have paid.
+      function unpayableReason(state) {
+        const eligibility = state?.sendEligibility;
+        const payAndSend = eligibility?.payAndSend;
+        if (state?.giftCard || eligibility?.packPays !== false || !payAndSend || payAndSend.available !== false) return null;
+        if (isHttpsUrl(payAndSend.pageUrl)) return null;
+        return typeof payAndSend.unavailableReason === "string" && payAndSend.unavailableReason
+          ? payAndSend.unavailableReason
+          : "Pay & Send isn't available for this mail.";
+      }
+      // What to do about it: a new preview only for mail whose option is not sold now (a shorter letter, another size),
+      // since a new preview of the same mail meets the same answer; for any other reason (Pay & Send off, not priced
+      // yet, briefly unavailable, an app with no checkout) the card says only that it can't be paid here.
+      function unpayableNote(reason) {
+        return reason === "Pay & Send isn't available for this mail."
+          ? "This can't be paid for here now. Ask in the chat for a new preview."
+          : "This can't be paid for here now.";
+      }
+
       function showCheckoutLink(href, label) {
+        // Only an https link becomes the card's link (#684); the order is still followed.
+        if (!isHttpsUrl(href)) return;
         const link = document.getElementById("checkout-link");
         link.href = href;
         link.textContent = label;
         link.style.display = "flex";
       }
 
+      // The Arrives row after a checkout that did not open, drawn as render()
+      // would draw it now: a host redraw during the call took it away.
+      function showPickerAgain() {
+        const output = retryResult ? retryResult.output : host.toolOutput();
+        picker.show(currentDraftId, output, cardIsShowingDraft() && !settledDraft() && !sendPageShown());
+      }
+
       async function handlePayAndSend() {
-        if (checkoutInProgress || !currentDraftId) return;
+        // Not while the maker sets a style (#594): the checkout prices the draft as it stands.
+        if (checkoutInProgress || changed !== null || !currentDraftId || makerHolds()) return;
         draftActedOn = true;
         const button = document.getElementById("pay-send-button");
         const buttonText = document.getElementById("pay-send-button-text");
@@ -1194,17 +3074,46 @@
         const idLabel = document.getElementById("id-label");
         const idValue = document.getElementById("id-value");
         checkoutInProgress = true;
+        picker.hide();
         errorMessage.style.display = "none";
         button.disabled = true;
         button.classList.add("loading");
         buttonText.innerHTML =
           '<span class="spinner"></span> Preparing checkout...';
+        // The version it shows as it pays (#695): a refusal names this one.
+        const paidVersion = versionFor(currentDraftId);
         try {
-          const result = toolData(
-            await window.openai.callTool("create_mail_checkout", {
-              draftId: currentDraftId,
-            }),
-          );
+          const checkoutArgs = { draftId: currentDraftId };
+          if (anotherCopy) checkoutArgs.sendAnotherCopy = true;
+          // What it showed (#695): mail changed since is refused before any charge, and drawn again.
+          if (paidVersion) checkoutArgs.contentVersion = paidVersion;
+          const raw = await host.callTool("create_mail_checkout", checkoutArgs);
+          if (raw?.isError) {
+            const duplicate = duplicateDetails(raw, null);
+            if (duplicate) {
+              showDuplicate(duplicate, "pay");
+              showPickerAgain();
+              return;
+            }
+            throw new Error(resultText(raw) || "Checkout URL was not returned");
+          }
+          const result = toolData(raw);
+          // The draft's Pay & Send order already took a payment that did not send it (#679), and the draft is
+          // still pending. The server answers with that order, not a checkout. Nothing more is charged; the card follows
+          // the order, as after a checkout it opened, and keeps that it found it paid, not that it opened one.
+          if (!result.checkoutUrl && typeof result.orderId === "string" && result.orderId && typeof result.status === "string" && result.status !== "checkout_pending") {
+            trackedOrderId = result.orderId;
+            idLabel.textContent = "Purchase";
+            idValue.textContent = result.orderId;
+            button.classList.remove("loading");
+            button.disabled = true;
+            buttonText.textContent = "Already paid";
+            document.getElementById("checkout-note").style.display = "none";
+            keep({ draftId: currentDraftId, checkout: true, orderId: result.orderId, alreadyPaid: true });
+            startStatusPolling("Checking the purchase...");
+            void refreshPurchaseStatus();
+            return;
+          }
           if (!result.checkoutUrl) {
             throw new Error(result.message || "Checkout URL was not returned");
           }
@@ -1249,8 +3158,15 @@
           // the link above, and this card has to update on that path too.
           startStatusPolling("Checkout open - waiting for payment");
 
+          // An open checkout whose mail date has passed since it opened (#726): said
+          // first, and opened only from the link, so nothing is paid unread.
+          if (showScheduleMissed(result.scheduleMissed)) {
+            buttonText.textContent = "Read the note, then use the checkout link below";
+            return;
+          }
+
           try {
-            await window.openai.openExternal({ href: result.checkoutUrl });
+            if (isHttpsUrl(result.checkoutUrl)) await host.openLink(result.checkoutUrl);
             buttonText.textContent = "Checkout Opened";
           } catch {
             // The host declined to open a tab. Not an error worth showing as
@@ -1259,7 +3175,21 @@
             buttonText.textContent = "Use the checkout link below";
           }
         } catch (error) {
-          errorMessage.textContent = `Unable to open checkout: ${error.message || "Unknown error"}`;
+          const duplicate = duplicateDetails(null, error);
+          if (duplicate) {
+            showDuplicate(duplicate, "pay");
+            showPickerAgain();
+            return;
+          }
+          // Refused for a change since (#695), as an error result or, in ChatGPT, a rejection wrapping its text.
+          if (String(error?.message ?? "").includes(CHANGED_SINCE_SHOWN)) {
+            showChanged("pay", currentDraftId, paidVersion);
+            showPickerAgain();
+            return;
+          }
+          // No checkout: the date row comes back with the button.
+          showPickerAgain();
+          errorMessage.textContent = `Unable to open checkout: ${readableError(error)}`;
           errorMessage.style.display = "block";
           button.classList.remove("loading");
           button.disabled = false;
@@ -1283,7 +3213,7 @@
         errorMessage.style.display = "none";
         try {
           const listed = toolData(
-            await window.openai.callTool("list_letter_packs", {}),
+            await host.callTool("list_letter_packs", {}),
           );
           const packs = Array.isArray(listed.packs) ? listed.packs : [];
           if (!packs.length) {
@@ -1296,7 +3226,7 @@
           // Deliberately NOT a fallback to buying the smallest pack. After a
           // click that now means "show me the options", a surprise purchase is
           // the worst outcome available.
-          errorMessage.textContent = `Unable to load letter packs: ${error.message || "Unknown error"}`;
+          errorMessage.textContent = `Unable to load letter packs: ${readableError(error)}`;
           errorMessage.style.display = "block";
         } finally {
           button.disabled = false;
@@ -1337,7 +3267,7 @@
           // expected outcome. A tool call creates the session for the
           // authenticated user, and that whole class of failure goes away.
           const result = toolData(
-            await window.openai.callTool("create_pack_checkout", { pack }),
+            await host.callTool("create_pack_checkout", { pack }),
           );
           if (!result.checkoutUrl) {
             throw new Error(result.message || "Checkout URL was not returned");
@@ -1359,12 +3289,12 @@
           render();
 
           try {
-            await window.openai.openExternal({ href: result.checkoutUrl });
+            if (isHttpsUrl(result.checkoutUrl)) await host.openLink(result.checkoutUrl);
           } catch {
             // Nothing to do: the link is already on screen.
           }
         } catch (error) {
-          errorMessage.textContent = `Unable to start the letter pack checkout: ${error.message || "Unknown error"}`;
+          errorMessage.textContent = `Unable to start the letter pack checkout: ${readableError(error)}`;
           errorMessage.style.display = "block";
           // Put the sizes back rather than stranding the customer on a card
           // with no way to retry.
@@ -1373,10 +3303,69 @@
         }
       }
 
+      const CHECKOUT_NOTE =
+        "Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.";
+      const WEBSITE_PACKS_NOTE =
+        "Letter packs are sold on the website. Sign in there with the same email you use here - this card updates when you return to this tab, or use Check status.";
+      const PAY_PAGE_NOTE =
+        "Letter packs pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send on Letter IRL's page, which sends it once you pay.";
+
+      // Mail no pack pays for, in an app with no checkout (#579): the page
+      // that takes the Pay & Send payment, as the server named it.
+      async function handlePayPage() {
+        const url = currentEligibility?.payAndSend?.pageUrl;
+        if (!isHttpsUrl(url) || typeof host.openLink !== "function") return;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.style.display = "none";
+        let opened = false;
+        try {
+          // A host that declines answers with isError rather than failing.
+          opened = !(await host.openLink(url))?.isError;
+        } catch {
+          opened = false;
+        }
+        if (!opened) {
+          errorMessage.textContent = `The page did not open. It is at ${url}`;
+          errorMessage.style.display = "block";
+        }
+      }
+
+      // Where the app takes no purchases (#475), letters are bought on the
+      // website (#474). As with a pack bought here, the balance is the only
+      // thing to watch, so the card waits for the letters the same way, and
+      // each open starts the wait afresh, as each checkout does. It waits even
+      // when the host would not open the page: the address is on the card,
+      // and the person may open it themselves.
+      async function handleWebsitePacks() {
+        const url = currentEligibility?.letterPack?.purchaseUrl;
+        if (!isHttpsUrl(url) || typeof host.openLink !== "function") return;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.style.display = "none";
+        packPurchasePending = true;
+        startStatusPolling();
+        render();
+        let opened = false;
+        try {
+          // A host that declines answers with isError rather than failing.
+          opened = !(await host.openLink(url))?.isError;
+        } catch {
+          opened = false;
+        }
+        if (!opened) {
+          errorMessage.textContent = `The website did not open. Letter packs are at ${url}`;
+          errorMessage.style.display = "block";
+        }
+      }
+
       // Attach click handler
       document
         .getElementById("send-button")
         .addEventListener("click", handleSend);
+      document
+        .getElementById("send-page-button")
+        .addEventListener("click", () => {
+          void handleSendPage();
+        });
       document
         .getElementById("pay-send-button")
         .addEventListener("click", handlePayAndSend);
@@ -1384,8 +3373,27 @@
         .getElementById("buy-pack-button")
         .addEventListener("click", handleBuyPack);
       document
+        .getElementById("website-packs-button")
+        .addEventListener("click", () => {
+          void handleWebsitePacks();
+        });
+      document
+        .getElementById("pay-page-button")
+        .addEventListener("click", () => {
+          void handlePayPage();
+        });
+      document
         .getElementById("retry-button")
         .addEventListener("click", handleCreatePreview);
+      document
+        .getElementById("choose-image-button")
+        .addEventListener("click", handleChooseImage);
+      document
+        .getElementById("upload-image-button")
+        .addEventListener("click", handleUploadImage);
+      document
+        .getElementById("image-file-input")
+        .addEventListener("change", handleImageFile);
       document
         .getElementById("check-status-button")
         .addEventListener("click", () => {
@@ -1407,11 +3415,91 @@
         });
       });
 
+      // The draft this card shows, told to the conversation by itself (#650), as the letter card tells its own: only
+      // where the host takes model context and the preview is flagged for it (the home's selection context), and only a
+      // draft known to be ready, which is after get_draft_status says "ready": a reopened card may show a preview long
+      // since sent. A draft this card made itself (a retry preview) is ready by its making. The share is taken back (an
+      // empty update) once the draft stops being ready, and it is made again, with a later time, when the person uses the
+      // card: each card is its own instance, so several cards may share at once, and the time tells the model which one
+      // the person showed or touched last. What the person changed on the card is said with the draft (cardEditFor), and
+      // a change shares again at once. Each update replaces this card's last (ui/update-model-context is idempotent);
+      // they go one after another, each given up after 10 seconds so a host that never answers cannot hold the rest
+      // back. Failures say nothing on the card: there is nothing the person could do about them.
+      const SHARE_TIMEOUT_MS = 10000;
+      const RESHARE_AFTER_MS = 10000;
+      function shareSelection(touched = false, usedAt = 0, immediate = false) {
+        const flagged = currentMeta().modelContextEnabled === true;
+        const asks = typeof host.callTool === "function";
+        const confirmed = !asks || statusReadyFor === currentDraftId || retryResult?.output?.draftId === currentDraftId;
+        // Not while a send is out or after it (sendInProgress stays set once sent), nor once a checkout is tracked, nor
+        // for a reopened card's kept order, nor once the person was sent to the confirmation page. A draft the server
+        // says was sent or expired is never confirmed ready: get_draft_status answers once, and finally.
+        const ready =
+          flagged && typeof currentDraftId === "string" && currentDraftId && confirmed &&
+          cardIsShowingDraft() && !keptOrderShown() && !sendPageShown();
+        // In ChatGPT what carries model context opens only when there is a draft to share and no other way to share it;
+        // its answer redraws the card, which shares then (#665, #675).
+        if (ready && typeof host.updateModelContext !== "function" && typeof host.openPluginExtensions === "function") {
+          host.openPluginExtensions();
+        }
+        if (typeof host.updateModelContext !== "function") return;
+        const draftId = ready ? currentDraftId : "";
+        const edit = draftId ? cardEditFor(draftId) : "";
+        const now = Date.now();
+        // The time a share carries is the time of the use that asked for it, so a share that waited still says when.
+        if (touched && !usedAt) lastUseAt = now;
+        const at = touched ? usedAt || now : now;
+        const same = draftId === sharedDraftId && edit === sharedEdit;
+        const again = touched && draftId && same && (immediate || now - sharedAt >= RESHARE_AFTER_MS);
+        // A use too soon after the last share is not lost: one share follows when the wait is over, so the card the
+        // latest use always carries the latest time.
+        if (touched && draftId && same && !again) {
+          if (!shareLater) {
+            shareLater = true;
+            setTimeout(() => {
+              shareLater = false;
+              // A share made meanwhile already carries this use, or a later one.
+              if (lastUseAt > carriedAt) shareSelection(true, lastUseAt);
+            }, Math.max(0, RESHARE_AFTER_MS - (now - sharedAt)));
+          }
+          return;
+        }
+        if (same && !again) return;
+        sharedDraftId = draftId;
+        sharedEdit = edit;
+        sharedAt = now;
+        carriedAt = at;
+        // A sentence, not JSON: ChatGPT shows what a card shares to the person, in a chip in the message box (#668). The
+        // time is UTC to the second, written out, so the model can still tell which card shared last. It does not say the
+        // draft is ready: it may have been sent from another card, or on the confirmation page, since.
+        const stamp = new Date(at).toISOString();
+        const content = draftId
+          ? [{ type: "text", text:
+              "Shared by a Letter IRL postcard card on " + stamp.slice(0, 10) + " at " + stamp.slice(11, 19) + " UTC: the " +
+              "card shows the postcard draft " + draftId + ". Several Letter IRL cards may each share a draft; the one " +
+              "shared latest is most likely the one the person means, so ask if unsure. It may have been sent or have " +
+              "expired since: a Letter IRL tool given this draftId says so." + (edit ? " " + edit : "") }]
+          : [];
+        shareChain = shareChain
+          .then(() => Promise.race([
+            host.updateModelContext({ content }),
+            new Promise((resolve) => setTimeout(resolve, SHARE_TIMEOUT_MS)),
+          ]))
+          .catch(() => {});
+      }
+      // Using the card shows which draft the person means.
+      // A click, not a pointer going down: scrolling past a card on a phone is not a use of it. A click shares at once,
+      // since clicks are few; keys, which come many at a time while someone types, wait their turn. Both are heard as
+      // they bubble, after the card's own handler: a press of Send has already started the send, so it takes the
+      // draft back rather than sharing it again.
+      document.addEventListener("click", () => shareSelection(true, 0, true));
+      document.addEventListener("keydown", () => shareSelection(true));
+
       // Initial render (will show loading state)
       render();
 
       // Listen for data updates (per OpenAI docs)
-      window.addEventListener("openai:set_globals", () => {
+      host.onChange(() => {
         render();
       });
     </script>

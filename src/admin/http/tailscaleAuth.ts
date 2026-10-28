@@ -28,8 +28,15 @@ export interface TailscaleAuthOptions {
   expectedHost: string | null;
   whois: WhoisClient;
   sessions: AdminSessionStore;
-  /** Development on a workstation: the configured login replaces the proxy. */
-  localDev?: { login: string; name: string } | null;
+  /**
+   * Development on a workstation: the configured login replaces the proxy.
+   * `hosts` are the names the panel answers to there (localhost and
+   * 127.0.0.1 at its port): a page on another name that resolves to loopback
+   * (DNS rebinding) is refused (#730).
+   */
+  localDev?: { login: string; name: string; hosts: readonly string[] } | null;
+  /** False for a request another site sent: it may use a live session, never start one (#730). */
+  allowNewSession?: boolean;
 }
 
 export interface AuthenticatedActor {
@@ -52,6 +59,8 @@ export type AuthOutcome =
       code: Extract<AdminErrorCode, "ADMIN_UNAUTHENTICATED" | "ADMIN_FORBIDDEN">;
       reason: string;
       presentedLogin: string | null;
+      /** Refused without an audit row: a request another site sent (#730). */
+      quiet?: true;
     };
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
@@ -108,6 +117,10 @@ export async function authenticateAdminRequest(
   let nodeFromWhois: (() => Promise<string | null>) | null = null;
 
   if (options.localDev) {
+    const host = (request.header("host") ?? "").trim().toLowerCase();
+    if (!options.localDev.hosts.includes(host)) {
+      return denied("ADMIN_UNAUTHENTICATED", "host_mismatch");
+    }
     login = options.localDev.login;
     name = options.localDev.name;
     peerAddress = request.remoteAddress;
@@ -160,6 +173,14 @@ export async function authenticateAdminRequest(
     request.cookie("__Host-lirl_admin"),
     { login, peerAddress },
   );
+  if ((resolution.kind === "missing" || resolution.kind === "expired") && options.allowNewSession === false) {
+    // Another site made the browser send this, and it holds no live session:
+    // no whois, no session, no audit row (#730). A stale cookie, which every
+    // redeploy and idle expiry leaves behind, does not count as live. A cookie
+    // presented from another login or peer (binding_mismatch) is a theft
+    // signal and goes on to be recorded as before.
+    return { ok: false, code: "ADMIN_UNAUTHENTICATED", reason: "cross_site_new_session", presentedLogin: login, quiet: true };
+  }
   if (resolution.kind === "ok") {
     const session = resolution.session;
     return {

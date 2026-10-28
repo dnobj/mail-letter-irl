@@ -249,9 +249,9 @@ View in dashboard: https://dashboard.postgrid.com/letters/letter_abc123xyz456
    }
    ```
 
-3. **Check job queue processed the letter:**
-   ```bash
-   tsx scripts/check-pgboss-jobs.ts
+3. **Check the outbox processed the letter** (development database):
+   ```sql
+   SELECT status, provider_outcome, completed_at FROM letter_jobs ORDER BY created_at DESC LIMIT 5;
    ```
 
 **Success Criteria:**
@@ -587,7 +587,7 @@ Before going live, verify:
 - [ ] Letter appears in dashboard
 - [ ] Address validation works
 - [ ] Cost estimation matches expectations
-- [ ] Worker processes letter jobs
+- [ ] The outbox submits the letter job right after the send
 - [ ] Database stores tracking IDs
 - [ ] Status tracking works
 - [ ] Error handling works (invalid addresses)

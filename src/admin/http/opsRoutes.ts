@@ -2,7 +2,16 @@ import { listProviders } from "../../services/providers/index.js";
 import { runRetentionPreview, type RetentionPreviewResult } from "../../services/retentionService.js";
 import { carriedDiagnosticClass, classifyDiagnosticError } from "../../utils/diagnosticLog.js";
 import { renderRetention, renderRouting, renderSupport } from "../pages/ops.js";
-import { listFeatureRequests, listQuarantine, listRouting, listStuckLetters, readRetentionCounts, readTokenStats } from "../queries/ops.js";
+import {
+  listFeatureRequests,
+  listQuarantine,
+  listRecentRestores,
+  listRouting,
+  listStuckLetters,
+  readRetentionCounts,
+  readTokenStats,
+} from "../queries/ops.js";
+import { addressRequestPreviewPath } from "../commands/addressRequests.js";
 import type { RouteHandler } from "./app.js";
 import type { AdminRouter } from "./router.js";
 
@@ -17,9 +26,14 @@ export function registerOpsRoutes(
   seams: OpsRouteSeams = { retentionReport: () => runRetentionPreview(), providers: () => listProviders() },
 ): void {
   router.add("GET", "/retention", async (context) => {
+    // A letter, draft or account id; anything longer is not one.
+    const typed = (context.url.searchParams.get("q") ?? "").trim();
+    const search = typed.length > 0 && typed.length <= 255 ? typed : null;
+    const searchIgnored = typed.length > 255;
     const data = await context.read(async (client) => ({
       counts: await readRetentionCounts(client),
-      quarantine: await listQuarantine(client, 100),
+      quarantine: await listQuarantine(client, 100, search),
+      restores: await listRecentRestores(client, 20),
     }));
     let report: RetentionPreviewResult | null = null;
     let reportError: string | null = null;
@@ -28,7 +42,7 @@ export function registerOpsRoutes(
     } catch (error) {
       reportError = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, "database_error");
     }
-    return context.render("Retention", renderRetention({ ...data, report, reportError }));
+    return context.render("Retention", renderRetention({ ...data, search, searchIgnored, report, reportError }));
   }, { name: "retention" });
 
   router.add("GET", "/routing", async (context) => {
@@ -53,6 +67,20 @@ export function registerOpsRoutes(
       tokenStats: await readTokenStats(client),
       featureRequests: await listFeatureRequests(client, 100),
     }));
-    return context.render("Support", renderSupport(data));
+    return context.render("Support", renderSupport({ ...data, csrfToken: context.csrfToken, mode: context.config.mode }));
   }, { name: "support" });
+
+  // An address request to delete (#701), named by a pasted link or an id. A
+  // POST, so the link's token never travels in a URL: it is reduced to its
+  // fingerprint here, and the preview is reached with that.
+  router.add("POST", "/support/address-request", async (context) => {
+    const preview = addressRequestPreviewPath(context.form?.get("request") ?? "");
+    if (!preview) {
+      return context.redirect("/support", {
+        tone: "bad",
+        text: "That is not an address request link or id. Paste the whole link the person was sent, or the request id.",
+      });
+    }
+    return context.redirect(preview);
+  }, { name: "support.address_request" });
 }

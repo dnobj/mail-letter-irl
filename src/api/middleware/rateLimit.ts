@@ -10,6 +10,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { getCachedUserTier, getTierMultiplier } from '../../services/tierService.js';
 import type { UserTier } from '../../services/types.js';
+import { resetVerifiedTokens, takeExemption } from '../../auth/signInPool.js';
 
 interface RateLimitEntry {
   count: number;
@@ -29,16 +30,25 @@ const rateLimitStore = new Map<string, RateLimitEntry>();
 const blockedRequestCounts = new Map<string, number>();
 
 // Global rate limit configuration (system-wide, not per-IP)
-const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
+export const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
   'promo_public': {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 100,         // 100 total per minute (protects against distributed attacks)
+  },
+  // The address request page (#604): a token is 144 random bits, so this
+  // bounds load, not guessing.
+  'address_public': {
+    windowMs: 60 * 1000,
+    maxRequests: 200,
   },
   // Backstops for the routes that had only per-identifier limits (audit A-05).
   // A per-identifier limit bounds one client; these bound everyone at once, so
   // many addresses cannot burn JWKS verification or bcrypt compares at line
   // rate. Each sits well above its per-identifier limit and far above any
   // traffic this service has seen, so a hit is an incident, not a busy day.
+  // On mcp and api a request with a token verified here recently is neither
+  // counted nor refused (#730, src/auth/signInPool.ts), so junk tokens cannot
+  // refuse the people already signed in.
   'mcp': {
     windowMs: 60 * 1000,
     maxRequests: 1200,
@@ -50,6 +60,13 @@ const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
   'checkout': {
     windowMs: 60 * 1000,
     maxRequests: 200,
+  },
+  // The purchase start page (#730): one indexed read per checkout opened.
+  // Far above checkout traffic, so a few addresses cannot fill it for
+  // everyone; it bounds a flood, the per-address limit an abuser.
+  'purchase_start': {
+    windowMs: 60 * 1000,
+    maxRequests: 3000,
   },
   // Promo codes are operator-chosen words, so a guess is cheap and a hit is
   // spendable balance. The unauthenticated validator has had both limits
@@ -99,6 +116,12 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 60,
   },
+  // The purchase start page (#730), unauthenticated and reading the
+  // database: a person opens one checkout at a time.
+  'purchase_start': {
+    windowMs: 60 * 1000,
+    maxRequests: 30,
+  },
   // Stripe checkout per account, checked after authentication: the limit on
   // one customer creating checkout sessions.
   'checkout_account': {
@@ -146,6 +169,12 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
   'promo_public': {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 10,          // 10 per minute per IP (generous for legitimate use)
+  },
+  // The address request page (#604): one read and an answer per visit, with
+  // room for corrections after a refusal.
+  'address_public': {
+    windowMs: 60 * 1000,
+    maxRequests: 20,
   },
 };
 
@@ -278,38 +307,6 @@ export function checkRateLimit(
 }
 
 /**
- * Rate limit middleware that sends 429 response if limit exceeded
- *
- * @returns true if request was blocked (response already sent), false otherwise
- */
-export function rateLimitMiddleware(
-  req: IncomingMessage,
-  res: ServerResponse,
-  endpointType: keyof typeof RATE_LIMITS
-): boolean {
-  const result = checkRateLimit(req, endpointType);
-
-  // Set rate limit headers
-  res.setHeader('X-RateLimit-Limit', result.limit);
-  res.setHeader('X-RateLimit-Remaining', result.remaining);
-  res.setHeader('X-RateLimit-Reset', Math.ceil(result.resetMs / 1000));
-
-  if (!result.allowed) {
-    res.statusCode = 429;
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Retry-After', Math.ceil(result.resetMs / 1000));
-    res.end(JSON.stringify({
-      error: 'Too Many Requests',
-      message: `Rate limit exceeded. Please wait ${Math.ceil(result.resetMs / 1000)} seconds before retrying.`,
-      retryAfter: Math.ceil(result.resetMs / 1000),
-    }));
-    return true; // Request was blocked
-  }
-
-  return false; // Request allowed
-}
-
-/**
  * Cleanup expired entries to prevent memory leaks
  */
 function cleanupExpiredEntries(): void {
@@ -327,28 +324,6 @@ function cleanupExpiredEntries(): void {
 
 // Start cleanup interval
 setInterval(cleanupExpiredEntries, CLEANUP_INTERVAL_MS);
-
-/**
- * Get current rate limit stats (for monitoring/debugging)
- */
-export function getRateLimitStats(): {
-  totalEntries: number;
-  entriesByType: Record<string, number>;
-} {
-  const entriesByType: Record<string, number> = {};
-
-  // Use Array.from for ES5 compatibility
-  const keys = Array.from(rateLimitStore.keys());
-  for (const key of keys) {
-    const type = key.split(':')[1] || 'unknown';
-    entriesByType[type] = (entriesByType[type] || 0) + 1;
-  }
-
-  return {
-    totalEntries: rateLimitStore.size,
-    entriesByType,
-  };
-}
 
 // ============================================================================
 // Tier-Aware Rate Limiting (Async)
@@ -468,7 +443,12 @@ export async function rateLimitMiddlewareWithTier(
   }
 
   // The per-identifier limit above bounds one client. Routes with a global
-  // entry also refuse at that ceiling whatever the mix of identifiers.
+  // entry also refuse at that ceiling whatever the mix of identifiers. On the
+  // MCP and REST routes a recently verified token skips it, up to a bound per
+  // account (#730).
+  if (VERIFIED_SKIP_GLOBAL.has(endpointType) && takeExemption(req.headers.authorization)) {
+    return false;
+  }
   const globalResult = checkGlobalRateLimit(endpointType);
   if (!globalResult.allowed) {
     console.warn(`⚠️ Rate limit hit (global): ${endpointType} - system-wide limit reached`);
@@ -491,6 +471,9 @@ export async function rateLimitMiddlewareWithTier(
 
   return false;
 }
+
+/** The routes whose shared backstop a recently verified token skips (#730). */
+const VERIFIED_SKIP_GLOBAL: ReadonlySet<string> = new Set(['mcp', 'api']);
 
 /** The per-account limits a REST handler applies once it knows the account. */
 export type AccountRateLimit = 'api_account' | 'checkout_account';
@@ -594,7 +577,6 @@ export function rateLimitMiddlewareWithGlobal(
   const ipResult = checkRateLimit(req, endpointType);
 
   if (!ipResult.allowed) {
-    const clientIp = getClientIdentifier(req);
     console.warn(`⚠️ Rate limit hit (IP scope) on ${endpointType}`);
     incrementBlockedCount(endpointType, 'ip');
 
@@ -653,16 +635,10 @@ export function getBlockedRequestCounts(): Record<string, number> {
 }
 
 /**
- * Reset blocked request counts (useful for testing)
- */
-export function resetBlockedRequestCounts(): void {
-  blockedRequestCounts.clear();
-}
-
-/**
  * Clear all rate limit state (useful for testing)
  */
 export function clearRateLimitState(): void {
   rateLimitStore.clear();
   blockedRequestCounts.clear();
+  resetVerifiedTokens();
 }

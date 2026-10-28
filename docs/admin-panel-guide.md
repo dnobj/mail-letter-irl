@@ -1,6 +1,6 @@
 # Letter IRL Admin Panel
 
-**Last updated:** September 7, 2026
+**Last updated:** October 1, 2026
 
 The admin panel is a separate Railway service in each environment, built from this repository with
 `Dockerfile.admin`, which the service selects through its `RAILWAY_DOCKERFILE_PATH` variable (Railway has
@@ -31,7 +31,13 @@ has column-level `SELECT` on `users`, `letters`, `letter_drafts`, `personal_acce
 omits those columns (`src/admin/provisioning.ts`), and
 `tests/integration/adminReadModels.postgres.test.ts` proves a `SELECT content FROM letters` fails as
 that role. An email address is masked until an operator reveals it with a reason, which writes a
-`pii.reveal` audit event.
+`pii.reveal` audit event. Lookup is a form that posts (#730), so an identifier, which can be an email,
+never sits in a URL; a lookup by email writes a `pii.lookup` event with the matched account ids, never
+the address (refreshing the result page posts the form again, and writes another). An issued gift code
+is a bearer value for a free letter, so it shows only its last two characters (`••••-••9A`), and its
+void button names the letter it was printed on; a redeemed or void code shows in full. A command preview
+lists every value its link carries into the confirmation, so a crafted link cannot fill a field the
+preview does not show.
 
 The two ledger `description` columns are on that list because a derived string can carry personal
 data as surely as a source column: the send path wrote `Letter to <recipient name>` there until
@@ -44,7 +50,10 @@ direction of failure.
 The three provider-error columns operators read (`letter_jobs.last_error`, `orders.last_error` and the
 `provider.terminal_failure` order event) hold an error class and HTTP status only, `provider_rejected
 http_400`, never the provider's message: PostGrid's validation messages name the field and value that
-failed, which can be a fragment of a recipient's address (migration 031). Since migration 032 the same
+failed, which can be a fragment of a recipient's address (migration 031). Two classes of ours read differently:
+`renderer_refused` (#698) means the letter or postcard was drawn by our renderer and its provider does not print the renderer's PDF, so nothing was sent and what paid for it came back; the log line `outbox.renderer_refused` says so.
+`extra_service_refused` (#625) means the letter asked for a service (certified mail) its provider cannot sell, so
+nothing was sent and what paid for it came back; the log line `outbox.extra_service_refused` says which reason. Since migration 032 the same
 rule covers every stored error: `orders.last_error` under the fulfilment, recovery and refund codes,
 the order events, the outbox pair, pack-refund failure text, `maintenance_tasks.last_error` and the
 status-sync command's per-letter error all hold a class, never a message, and the operator's typed
@@ -86,10 +95,24 @@ requests get through and full-size ones hang, so curl works while a browser whos
 segments times out on every page. Lowering the daemon's MTU makes it advertise a smaller segment size to
 every client, which fixes all devices at once; lowering a laptop's adapter MTU fixes one.
 
+A request another site made the browser send (`Sec-Fetch-Site` of `cross-site` or `same-site`, which
+includes another node in the tailnet: an image, a script, a fetch, a frame or a prefetch) may use a live
+session but never starts one (#730). Without a live session it gets a constant 403 after every proxy
+and allowlist check (loopback, Funnel, protocol, host, peer address, login) and before whois: no
+session, no audit row (the one denial that writes none, so a flood of them cannot fill the table), and
+it does not count against the per-operator limit, as it does nothing else. A cookie presented from
+another login or peer is the exception: that is a theft signal, so the session is rotated and the
+`admin.session_start` row records it, as before. With a live session a POST is refused as a CSRF attempt
+and audited, as before. A link the operator follows from another site (a top-level GET navigation)
+still opens the page. Browsers that send no `Sec-Fetch-*` headers (Safari before 16.4) get no such
+gate. The panel holds at most 100 sessions; when full it drops the least recently used one that is not
+elevated, and only if all are elevated the oldest of those.
+
 State-changing requests additionally need `Sec-Fetch-Site` of `same-origin` or `none`, an `Origin` equal
 to the panel's origin, and the per-session CSRF token in the form. Responses carry a strict nonce-based
-Content Security Policy, `Cache-Control: no-store` and a correlation id. Denials, failures, session starts
-and reveals all write `admin_audit_events`, which is append-only at the database. Requests are limited to 240
+Content Security Policy, `Cache-Control: no-store` and a correlation id. Denials (but for the quiet
+refusal of a request another site sent, above), failures, session starts and reveals all write
+`admin_audit_events`, which is append-only at the database. Requests are limited to 240
 a minute per operator, and to 10 a minute per login on the elevation route. Individual denial rows are
 capped at sixty a minute for the process; beyond that they are counted and written as one
 `admin.request_denied_burst` row per minute with the count, the error codes and the number of distinct
@@ -281,14 +304,15 @@ problem, not a Tailscale one.
 | `ADMIN_READER_DATABASE_URL` | reader role, pooled Neon hostname of the development branch |
 | `DATABASE_URL` | the same reader URL in read-only mode; the operator URL in full mode |
 | `ADMIN_SESSION_SECRET` | 32 or more random characters, different per environment |
-| `ADMIN_TOTP_SECRET` | required in full mode only; from `npm run admin:totp-enrol` |
+| `ADMIN_TOTP_SECRETS` | required in full mode only: each operator's own secret, `login=SECRET` entries separated by commas, from `npm run admin:totp-enrol -- <environment> <login>` (#730) |
+| `ADMIN_TOTP_SECRET` | development only, and only until each operator has an entry above: the old shared secret, used by an operator with none. Production never uses it, and warns at boot to delete it |
 | `PORT` | `8080` (the health listener; set it if Railway does not inject one) |
 | `ADMIN_APP_PORT` | `8790` |
 | `ADMIN_TS_HOSTNAME`, `ADMIN_TS_TAG`, `ADMIN_TS_STATE_DIR` | optional; default to `letter-irl-admin-dev`, `tag:dev-admin`, `/data/tailscale` |
 | `STRIPE_SECRET_KEY` | a **restricted** test-mode key (Checkout Sessions read, Refunds read/write, Charges read, PaymentIntents read, Disputes read); needed for the Stripe page and the refund and repair commands. The service refuses to boot on a full `sk_` key, so this is enforced rather than advised |
 | `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED` | `true` to enable the proportional-refund command on this service; unset otherwise (the house rule: full refunds of unused packs only) |
 | `LETTER_PROVIDER`, `LETTER_PROVIDER_API_KEY`, `LETTER_PROVIDER_CONFIG` | **required for any command that talks to the mail provider** (status sync, retry, ambiguous-job resolution): without them the process falls back to the dummy provider even in production, the banner reads `mail: unset`, and a status sync answers `Letter not found` for real letters. Wire them as Railway references to the API service, `${{letter-irl-api.LETTER_PROVIDER}}` and so on, never as pasted values; the banner then reads `mail: postgrid` |
-| `TS_AUTHKEY` | the one-off key, first boot only |
+| `TS_AUTHKEY` | the one-off key, first boot only. The supervisor hands it to `tailscale up` as a file (`--auth-key=file:`, mode 600, in a temporary directory removed after the call), never on the command line where a process list would show it (#730) |
 
 The service must **not** receive the API's owner `DATABASE_URL`.
 
@@ -321,22 +345,39 @@ tunnel, which changes only `src/admin/http/tailscaleAuth.ts` and the ingress.
 
 Commands exist only in full mode. To enable it in development:
 
-1. Generate the elevation secret and enrol the authenticator:
+1. Generate each operator's elevation secret and enrol their authenticator, once per operator:
 
    ```bash
-   npm run admin:totp-enrol -- development
+   npm run admin:totp-enrol -- development <operator tailnet login>
    ```
 
-   Set the printed base32 value as `ADMIN_TOTP_SECRET` on the service and add the account to an
-   authenticator app on a device other than the one you browse from, then clear the terminal. The secret
-   is never written to disk and never printed anywhere else.
+   Add the printed `login=SECRET` line to `ADMIN_TOTP_SECRETS` on the service (entries separated by
+   commas), and the account to that operator's authenticator app on a device other than the one they
+   browse from, then clear the terminal. The secret is never written to disk and never printed anywhere
+   else. An operator whose authenticator already holds the old shared `ADMIN_TOTP_SECRET` may keep it
+   as their entry (`login=<that secret>`) only if no one else ever held that secret, as when one
+   operator is all there has been; otherwise everyone who had it could still make their codes, so
+   enrol a new one. Once every operator has an entry, remove `ADMIN_TOTP_SECRET`.
+   In production, where the shared secret is never used, set `ADMIN_TOTP_SECRETS` before the code that
+   reads it is deployed, and check it on development first: a login in it that is not in
+   `ADMIN_OPERATOR_LOGINS` stops the boot. The boot log then warns (`admin.legacy_totp_secret_ignored`)
+   that `ADMIN_TOTP_SECRET` is unused; delete it once the promotion has settled, since the release
+   before needs it to boot if it is rolled back to.
+   To remove an operator, take their login out of `ADMIN_OPERATOR_LOGINS` and their entry out of
+   `ADMIN_TOTP_SECRETS` in the same variable edit, or the boot is refused. Their row in
+   `admin_totp_counters` (their login and a counter) can then be deleted by the database owner.
+   Each code is accepted once: the last accepted counter is kept per operator in
+   `admin_totp_counters` (migration 063), so a restart does not forget it, and the admin provisioning
+   (`npm run admin:provision-access`) must be re-run once after 063 to grant it.
 2. Switch `DATABASE_URL` to the operator role (`letter_irl_admin_operator_development`), set
    `ADMIN_MODE=full`, redeploy. The boot audit event records the mode.
 
 Every command follows the same path: **preview** (what will happen, bound to the target's current
 state) → **elevation** (a six-digit code on `/elevate`; valid 60 minutes in development, 10 in
-production; five failures in fifteen minutes lock elevation for that operator, on every session
-they hold, until the window passes; success rotates the session id) →
+production; every fifth failure since that operator's last accepted code locks elevation for
+them, on every session they hold, however far apart the failures came: fifteen minutes the first
+time, and each further lock twice the one before, up to a day (#730); an accepted code starts the
+count again, and a restart clears it; success rotates the session id) →
 **typed confirmation** (`CONFIRM <id>` in development, `PRODUCTION <VERB> <id>` in production) plus a
 reason → an `admin_command_runs` row keyed by the preview's idempotency key → the domain service, which
 receives `admin:<run id>` as its own idempotency key → an `admin_audit_events` row with the before and
@@ -348,23 +389,37 @@ Commands available:
 | Command | Target | What it calls |
 | --- | --- | --- |
 | Acknowledge / resolve alert | `commerce_operational_alerts` | `transitionCommerceAlert` (advisory lock, state machine, hashed audit) |
-| Resolve ambiguous job | `letter_jobs` held on `ambiguous` | `resolveAmbiguousLetterJobAsAdmin` (locks order → letter → job, refuses compensated letters, resolves the alert) |
-| Retry failed job | `letter_jobs` in `failed / definite_failure` | `retryLetterJobAsAdmin` (same outbox row and provider key) |
+| Resolve ambiguous job | `letter_jobs` held on `ambiguous` | `resolveAmbiguousLetterJobAsAdmin` (locks order → letter → job, refuses compensated letters, resolves the alert). It refuses `accepted` from a provider that cannot have sent what the letter is: certified mail by one that does not sell it (#625), or mail our renderer drew by one that does not print its PDF, such as manual fulfilment (#698); the preview warns of both |
+| Retry failed job | `letter_jobs` in `failed / definite_failure`, its letter not yet redacted (a letter that failed for good is redacted 90 days after its creation, #730; the preview still offers the retry, and the command refuses it) | `retryLetterJobAsAdmin` (same outbox row and provider key) |
+| Send held mail now | a letter held to arrive by a date, still waiting for its mail date (#535); or a letter held for its funding (#696), its pack refunded in full or disputed, due or not, which the release ends: it mails on its own date, or at the next run if that has passed (the preview warns that its money went back) | `releaseHeldLetterJobAsAdmin` (locks order → letter → job; held mail becomes due at once, so the next hourly run sends it, and a funding hold ends with the letter keeping its own date; audit operation `mail_job_release`) |
+| Cancel mail left for the operator | a prepaid or gift letter held for its funding, or of an account whose sending is blocked (#696), never dispatched | `cancelLeftLetterJobAsAdmin` (locks letter → job → account; job and letter cancelled, what paid for it returned as a failed send's; audit operation `mail_job_cancel`). A Pay & Send letter is cancelled by refunding its order |
 | Refund unspent letters | a fulfilled `letter_pack` order | `refundPackLetters` (#323: letters leave first, then Stripe with the stored idempotency key; one per pack). Enabled only when `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED=true` on the admin service; the flag has no effect on the API |
 | Repair a missing pack grant | a fulfilled `letter_pack` order from a reconciliation finding | `repairFulfilledPackGrant` (exact match of order, session, credits and amount; idempotent) |
 | Lift send block | a blocked account | `liftSendBlock` (refused while any dispute that justifies a block stands) |
 | Adjust letter balance | an account | `adjustCreditsWithClient` (letters in the UI, credits in the ledger; removal FIFO; atomic with the run and audit rows) |
 | Grant image generations | an account | `grantOperatorImageEntitlement` (one grant per command id, one-year expiry) |
+| Restore quarantined content | a `redacted_content_quarantine` row whose window is open, over a live row that is still redacted | queues an `admin_operations` row; the next hourly maintenance run puts the content back as the database owner, before that run's sweep and purge (#153) |
+| Erase account | an account with nothing in flight | `enqueueAccountErasure`: queues an `admin_operations` row, which the next hourly maintenance run carries out as the database owner, re-checking the gate first. The panel's role gains no access to content. The run opens an `account_erasure_followup` alert for the steps done by hand: the Auth0 user and the two id lists. Resolve it with `auth0_user_deleted` once they are done ([account-erasure.md](account-erasure.md)) |
 | Release amount-mismatch quarantine | an order carrying `PAYMENT_AMOUNT_MISMATCH` | clears the code and records `operator.quarantine_released`; the hourly sweep then acts |
-| Create / change status / delete promo | `promo_campaigns` | client-taking promo service functions with a validated status machine and an `updated_at` version; delete refused once redeemed |
+| Create / change status / delete promo | `promo_campaigns` | client-taking promo service functions with a validated status machine and an `updated_at` version; delete refused once redeemed. The create form's gift budget makes a seed campaign ([gift-letters.md](gift-letters.md)); a code that reads as a printed gift code is refused |
+| Grant gift letters | an account | `grantGiftLettersWithClient` (source `operator`, keyed by the command id so a replay grants nothing; optionally bound to a seed campaign whose code the letters then print). The preview states the cost bound |
+| Void a gift code | an issued `gift_codes` row | sets it `void` with class `operator`; refused once redeemed or void |
 | Resolve ambiguous image reservation | `image_generation_reservations` in `ambiguous` | `resolveAmbiguousGenerationReservation` (issue #69's operator recovery, now reachable) |
 | Set / clear tier override | an account | `setTierOverride` (the daily calculation skips overridden accounts; the API's tier cache lasts five minutes) |
 | Change provider routing | `provider_routing` by mail type | validated against the runtime provider registry, versioned on `updated_at`; production never accepts `dummy` |
-| Provider status sync | letters of the last N days | `syncLetterStatuses` (dry run by default; apply updates statuses and history) |
+| Provider status sync | letters of the last N days | `syncLetterStatuses` (dry run by default; apply updates statuses and history, and stores a certified letter's carrier tracking number, which needs the operator role's grant from `npm run admin:provision-access` after migration 053, #625) |
+| Set a daily limit | a daily limit, for everyone or (the two per-account limits) one account | writes a `daily_limit_overrides` row and clears the one it replaces; for the rest of the UTC day or until cleared; letters, or whole dollars for spending. The API reads it on the next send or checkout, with no redeploy (see **Limits**, below) |
+| Clear a daily limit's value | a `daily_limit_overrides` row not yet cleared | stamps it cleared (kept as history); the limit returns to the value for everyone, or the configured one |
+| Delete an address request | an `address_requests` row, named on the **Support** page by the link the person was sent (reduced to its fingerprint before anything else sees it) or by its request id (#701) | `address_request.delete`: deletes the request and any address given with it, reading back only its status and when it was made. The panel reads no address request, so the preview cannot say whether it exists; the result says whether one was found. Needs the operator role's grant from `npm run admin:provision-access` after the release that brings it |
 
-Read-only pages beyond the P0 set: **Retention** (report mode counts and the quarantine's metadata; no
-restore until `retentionService`'s restore defects are fixed), **Routing** (the routing table, the
-registry, stuck letters), **Support** (token counts, feature requests without contact emails). Manual
+Read-only pages beyond the P0 set: **Gifts** (unsent gift letters, gift sends today, outstanding and
+redeemed chain codes, the newest codes with a void action; an account page adds that account's gift
+letters, the codes it printed or redeemed, and the grant form), **Retention** (the sweep's counts, the quarantine's metadata, and a restore per
+row, queued for the next hourly run; a search by letter, draft or account id for copies older than the newest
+100; and **Recent restores**, where each queued restore's outcome shows, since a copy that went back leaves
+the quarantine; a redacted letter's own page also shows its copy and the restore, and an account page links to
+its copies), **Routing** (the routing table, the
+registry, stuck letters), **Support** (token counts, feature requests without contact emails, and the form that names an address request to delete, in full mode). Manual
 cases: `ADMIN-OPS-01` to `ADMIN-OPS-03` and `ADMIN-LEGACY-01`.
 
 The **Stripe** page runs the reconciliation (`reconcileStripePayments`) with the service's restricted key
@@ -373,10 +428,53 @@ Stripe identifiers), and offers the repair preview for `missing_credit` findings
 cases: `ADMIN-STRIPE-01` and `ADMIN-STRIPE-02`; the account, promo and image cases are `ADMIN-ACCT-01` to
 `ADMIN-ACCT-04`.
 
+The **Limits** page (migration 038) shows the four daily limits: letters per account and across every
+account, spending per account, and gift letters. For each: the value the API is configured with (the API
+writes it to `daily_limit_defaults` when it starts, since the panel runs with its own environment), the
+value in force, today's use and today's refusals; then every value set here, each with a clear button, and
+the form for **Set a daily limit**. The value in force is an account's own value, then the one for
+everyone, then the configured one. Values are never deleted: clearing stamps the row.
+
+When a daily limit refuses someone, the first refusal of the UTC day for that limit opens a
+`daily_limit_reached` alert (warning), naming the first account for the per-account limits; later refusals
+that day only add to the count on the Limits page. The API also posts a one-line notice to
+`LETTER_IRL_OPERATOR_ALERT_URL` when that variable is set on the API service: an ntfy topic pushes it to a
+phone. (A healthchecks.io `/fail` URL emails only the first notice until its check is pinged up again, so
+it is not recommended.) The same URL carries the other
+notices (#699): held mail that missed its mail day, letters the provider cancelled, a dispatch whose outcome
+is unknown, mail held for its funding, a Pay & Send order refunded or disputed after its letter went, or
+may have gone, to the provider, a refund that failed or was cancelled at Stripe, and an address request link
+its recipient reported (#730). Each names no customer; the Alerts page has the detail. For a daily limit,
+review the alert, then raise the limit here if everything looks right, or leave it, and resolve the alert
+with a code such as `limit_reviewed` or `limit_raised`.
+
+**Held mail (#535).** A letter held to arrive by a date waits in the outbox until 09:00 New York time on its mail date.
+The job page and the letter page show that time as **held for its mail date until**, and the job's **next attempt** is
+the same until it is released. **Send held mail now**, on the job page, makes the job due at once, so the next hourly
+run sends it as an ordinary letter. Use it when the customer asks support to send it now, or to test held mail on
+development. The letter may then arrive well before the date the customer chose, and the customer can still cancel it
+until that run takes it. Only the job's **next attempt** and **scheduled** move: **held for its mail date until** keeps
+the original time, and the operator audit records the release.
+
+A `schedule_missed_mail_day` alert (warning, #535) names a letter held to arrive by a date that was still not at the
+printer at 18:00 New York time on its mail date, with that date. Check whether the outbox is paused, the provider is
+down, or the letter failed: its job ran out of retries or the provider refused it (the job page). Put that right. A
+letter whose job is still due goes at the next hourly run. A failed one does not go again by itself, and what paid for
+it has gone back: **Retry failed job** on its job page resends it where the provider definitely refused it and nothing
+was returned; otherwise tell the customer, who can send it again. Resolve the alert with a code such as `dispatched_late` once it has gone, or `customer_contacted`.
+
+A `provider_cancelled_mail` alert (#566) names a letter that PostGrid cancelled after accepting it. PostGrid cancels only
+before printing, so nothing was mailed. The status sync has already marked the letter failed.
+- **A warning:** what paid for it came back, as credits or a gift letter. Find out why PostGrid cancelled it (its
+  dashboard gives the reason, such as content in the address region), and tell the customer if they need to send it again.
+- **Critical:** a person decides whether, and how, to refund it. Either the letter was Pay & Send, and its order stays `fulfilled`, or our record had already seen it printing or mailed (`statusBefore` in the details), which PostGrid's own lifecycle does not allow, so nothing came back by itself. Refunding a Pay & Send order in Stripe also raises `refunded_mail_already_dispatched`, because its job reads as accepted; this mail was never printed, so resolve that one too.
+
+Resolve the alert once that is done.
+
 Accounts without an email address (issue #319) cannot be listed until `users.email` becomes nullable or a
 provisioning-failure record exists; the panel shows only rows that exist.
 
-Manual cases: `ADMIN-CMD-01` to `ADMIN-CMD-03`.
+Manual cases: `ADMIN-CMD-01` to `ADMIN-CMD-04`.
 
 ## Production gates
 
@@ -413,22 +511,26 @@ npm run admin:dev
 ```
 
 This builds, then starts the panel in `local-dev` mode on `http://localhost:8790` with the configured
-login standing in for the Serve proxy. Local-dev mode is refused on Railway, under
-`NODE_ENV=production`, and outside the development environment. There is no Tailscale involvement.
+login standing in for the Serve proxy. It answers only requests whose `Host` is `localhost` or
+`127.0.0.1` at its port, so a page on another name that resolves to loopback (DNS rebinding) is
+refused (#730). Local-dev mode is refused on Railway, under `NODE_ENV=production`, and outside the
+development environment. There is no Tailscale involvement.
 
 ## Runbook
 
 | Situation | Steps |
 | --- | --- |
+| Locked out of elevation (the lock page shows when it lifts; locks double up to a day) | Wait it out, or redeploy the admin service: the lock and its count live in the process, and a restart clears them. If you did not cause the failures, treat it as a compromised operator device: remove the device in the Tailscale console first. |
 | Re-register the node (volume replaced, tag changed, suspected key compromise) | Delete the old machine in the console; mint a new one-off, tagged, pre-approved (pre-signed with Tailnet Lock) key with 1-day expiry; set `TS_AUTHKEY`; redeploy; confirm the name and tag; delete the variable. No standing key exists to rotate. |
 | Revoke a device (lost or stolen laptop or phone) | Delete the device on the Machines page (immediate); if it was a Tailnet Lock signing node, remove and rotate it from another signing node and re-issue disablement secrets; restart the admin service, which drops every session; if the identity provider account may be compromised, rotate its credential and passkeys and review the console audit log. |
-| Panel unreachable | Read the deploy log. `NeedsLogin` on first boot: the one-off key expired, mint again. "Locked out": sign the node. Device approval pending: approve. Volume detached: re-register. `ADMIN_TAILSCALE_TAG_MISMATCH` or `ADMIN_TAILSCALE_NAME_MISMATCH`: the node carries the wrong tag or name; fix the key's tag or the hostname variable. `ADMIN_PUBLIC_DOMAIN_PRESENT`: a domain was generated; remove it. Serverless enabled: disable it. |
+| Panel unreachable | Read the deploy log. `NeedsLogin` on first boot: the one-off key expired, mint again. "Locked out": sign the node. Device approval pending: approve. Volume detached: re-register. `ADMIN_TAILSCALE_TAG_MISMATCH` or `ADMIN_TAILSCALE_NAME_MISMATCH`: the node carries the wrong tag or name; fix the key's tag or the hostname variable. `ADMIN_PUBLIC_DOMAIN_PRESENT`: a domain was generated; remove it. Serverless enabled: disable it. "could not write the auth key file" then `ADMIN_TAILSCALE_UNAVAILABLE`: the container's `/tmp` is not writable or is full; redeploy with `TS_AUTHKEY` still set. |
 | Pages hang in a browser while curl answers | Packet size, not DNS. Compare a plain request with one carrying a 1600-byte header: `curl -H "X-Pad: $(printf 'a%.0s' $(seq 1 1600))" <panel url>`. If only the padded one hangs, the path's MTU has dropped below the daemon's: confirm the deploy log shows `envknob: TS_DEBUG_MTU="1200"`, and if it does, set a lower `TS_DEBUG_MTU` on the service. Measured 2026-09-08: 1248 passed, 1260 did not. |
 | Reach the panel from the phone | Install Tailscale, sign in with the same identity, approve or sign the phone from the laptop, open the URL. Keep the TOTP authenticator on a different device from the one browsing when writes are intended. |
 | Certificate problems | Serve requests and renews the certificate itself. Confirm HTTPS is enabled on the DNS page and the node name is unchanged, then redeploy. |
 | Block everyone instantly | Remove the grant line from the policy, or delete the machine from the Machines page, or set `ADMIN_MODE=read-only` and redeploy. |
 | The container is running as root | The deploy log says `[entrypoint] WARNING: could not hand … to node`, and the newest `admin.boot` row in `/audit` carries `uid: 0`. The entrypoint stays up as root rather than refusing, because a volume-backed service that will not boot is an outage. Read the two lines above the warning to see which step failed, fix the volume's ownership, and redeploy; a healthy boot logs `[entrypoint] dropping to node` and records `uid: 1000`. |
 | Rollback | Redeploy the previous image; the node identity persists on the volume. Audit tables are never dropped. |
+| `ADMIN_READER_ROLE_TOO_WIDE` at boot or when provisioning | The reader role can read past its column grants (#730): it is a superuser or BYPASSRLS, holds a table-wide grant on a withheld table, or is a member (even without INHERIT) of a role that can read letter content, such as `neon_superuser`, `pg_read_all_data`, the owner or the operator role. As the owner, run `SELECT r.rolsuper, r.rolbypassrls, array(SELECT m.rolname FROM pg_auth_members a JOIN pg_roles m ON m.oid = a.roleid WHERE a.member = r.oid) AS member_of FROM pg_roles r WHERE r.rolname = '<reader role>'`, revoke what it lists (and any table-wide grant), re-run provisioning, and redeploy. If a revoke is refused (`neon_superuser` needs ADMIN on it), drop the role and create it again in SQL as in the setup section. Provisioning commits nothing while the check fails. Before a promotion that carries #730, run the check against the production reader once. |
 
 ## Audit
 

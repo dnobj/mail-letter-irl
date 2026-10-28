@@ -8,8 +8,12 @@
  * and restScopes.test.ts fails if the two drift. A route with no twin takes the
  * scope of the nearest equivalent, recorded here rather than inferred.
  *
- * Personal access tokens carry no scopes and pass every check, as they do on
- * MCP (requireScopes).
+ * These routes accept only JWTs (authenticateRestRequest). Personal access
+ * tokens reach MCP alone, where since #470 they carry their own scopes, read and
+ * draft (migration 037), and are checked like any other token (requireScopes).
+ * The token routes are the exception: GET /api/tokens lists with one, and
+ * nothing else there takes one. The MCP twins of letters.cancel and
+ * signature.set/clear also refuse a personal access token (#685).
  */
 
 import { PRODUCT_SCOPES } from './oauthConfig.js';
@@ -41,16 +45,32 @@ export const REST_ROUTE_SCOPES: readonly RestRouteScope[] = [
   { id: 'promo.redemptions', method: 'GET', path: '/api/promo/redemptions', scope: 'mail:read' },
   { id: 'letters.list', method: 'GET', path: '/api/letters', scope: 'mail:read', twin: 'list_orders' },
   { id: 'letters.get', method: 'GET', path: /^\/api\/letters\/[^/]+$/, scope: 'mail:read', twin: 'get_order_status' },
+  // Held mail cancelled (#535): it only ever returns value, like its tool.
+  { id: 'letters.cancel', method: 'POST', path: /^\/api\/letters\/[^/]+\/cancel$/, scope: 'mail:draft', twin: 'cancel_scheduled_mail' },
   { id: 'return_address.get', method: 'GET', path: '/api/return-address', scope: 'mail:read', twin: 'get_return_address' },
   { id: 'return_address.set', method: 'POST', path: '/api/return-address', scope: 'mail:draft', twin: 'set_return_address' },
   { id: 'return_address.clear', method: 'DELETE', path: '/api/return-address', scope: 'mail:draft', twin: 'clear_return_address' },
-  // No twin. A personal access token passes every scope check, so a token that
-  // could mint one with less than mail:send could escalate itself (audit A-02).
-  // Revoking manages the same credential and takes the same scope.
+  // The website's signature page (#608), as its tools.
+  { id: 'signature.get', method: 'GET', path: '/api/signature', scope: 'mail:read', twin: 'get_signature' },
+  { id: 'signature.set', method: 'POST', path: '/api/signature', scope: 'mail:draft', twin: 'set_signature' },
+  { id: 'signature.clear', method: 'DELETE', path: '/api/signature', scope: 'mail:draft', twin: 'clear_signature' },
+  // No twin. A token that can mint a personal access token holds a standing
+  // credential, so both need mail:send (audit A-02). A personal access token
+  // carries read and draft (037, #470) and never gets here, and
+  // patApiHandler refuses one on both regardless. Revoking manages the same
+  // credential and takes the same scope.
   { id: 'tokens.list', method: 'GET', path: '/api/tokens', scope: 'mail:read' },
   { id: 'tokens.create', method: 'POST', path: '/api/tokens', scope: 'mail:send' },
   { id: 'tokens.revoke', method: 'DELETE', path: /^\/api\/tokens\/\d+$/, scope: 'mail:send' },
-  { id: 'checkout.create', method: 'POST', path: '/api/stripe/create-checkout-session', scope: 'mail:send', twin: 'create_pack_checkout' }
+  { id: 'checkout.create', method: 'POST', path: '/api/stripe/create-checkout-session', scope: 'mail:send', twin: 'create_pack_checkout' },
+  // The confirmation page (#470). Reading a draft is a read; pressing Send is
+  // what send_letter does. Both also require the website's own application
+  // (src/api/sendConfirmationApiHandler.ts).
+  { id: 'sends.get', method: 'GET', path: /^\/api\/sends\/[^/]+$/, scope: 'mail:read' },
+  { id: 'sends.confirm', method: 'POST', path: /^\/api\/sends\/[^/]+$/, scope: 'mail:send', twin: 'send_letter' },
+  // The page takes the Pay & Send payment for mail no pack pays for (#579),
+  // which sends it once paid: create_mail_checkout's scope.
+  { id: 'sends.checkout', method: 'POST', path: /^\/api\/sends\/[^/]+\/checkout$/, scope: 'mail:send', twin: 'create_mail_checkout' }
 ];
 
 function matches(route: RestRouteScope, method: string | undefined, pathname: string): boolean {

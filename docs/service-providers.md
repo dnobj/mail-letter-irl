@@ -149,7 +149,9 @@ LETTER_PROVIDER_CONFIG='{"mode":"test","verbose":true}'
 - CASS address verification
 - Postcards: 3.5x5, 4.25x6, 5x8, 6x9, 6x11
 
-**Configuration:**
+**Configuration (had it been built):** `click2mail` is not registered (`src/services/providers/index.ts`),
+so this configuration has no provider behind it, and production refuses to boot with any provider but
+`postgrid`. Kept as the evaluation record.
 ```bash
 LETTER_PROVIDER=click2mail
 LETTER_PROVIDER_API_KEY=your_api_key
@@ -181,6 +183,13 @@ shared database so a person can print, mail and update them
 It is not an approved live provider, so the production boot validator refuses it as
 `LETTER_PROVIDER`.
 
+**What it cannot take (#698):** it does not print what our renderer drew, so it does not declare
+`printsRenderedPdf`. Any letter or postcard previewed on our renderer (its content records a
+`rendererVersion`; all mail while `LETTER_IRL_PRINT_RENDERER=pdf`) that is sent to it is refused before
+anything is submitted, and refunded (`renderer_refused`). Routing a mail type to it as a fallback during an
+outage refunds that mail, queued letters included, rather than holding it; the routing preview says so. Nor does
+it sell certified mail (#625).
+
 ---
 
 ## Provider Interface
@@ -191,6 +200,12 @@ All providers implement the `LetterFulfillmentProvider` interface:
 interface LetterFulfillmentProvider {
   // Configuration
   readonly config: ProviderConfig;
+
+  // What it can do, which the outbox asks before sending (absent means no):
+  // certified mail (#625), and mail our renderer drew (#698). Keep the name lists
+  // in src/services/providers/extraServices.ts in step; a test holds them together.
+  readonly supportsExtraServices?: boolean;
+  readonly printsRenderedPdf?: boolean;
 
   // Send a letter
   sendLetter(params: LetterParams): Promise<LetterResult>;
@@ -368,26 +383,19 @@ describe('DummyProvider', () => {
 
 ### Integration Tests
 
+There is no worker process. A confirmed send commits a `letter_jobs` outbox row, and the job is
+submitted by `processLetterJob` right after the send, or by `processDueLetterJobs` in the hourly
+maintenance run. The PostgreSQL suites drive those functions against a disposable database, with a stub
+provider (for example `tests/integration/failedSendRefund.postgres.test.ts`):
+
 ```typescript
-// Test with real worker
-import { startLetterWorker } from '../workers/letterWorker.js';
+import { processLetterJob } from '../../src/services/letterJobService.js';
 
-// Set environment
-process.env.LETTER_PROVIDER = 'dummy';
-process.env.LETTER_PROVIDER_CONFIG = '{"delayMs":100,"failureRate":0}';
+const outcome = await processLetterJob(jobId);
+expect(outcome).toMatchObject({ claimed: true, completed: true });
 
-// Start worker
-await startLetterWorker();
-
-// Create job
-await createLetterJob(testLetter);
-
-// Wait for processing
-await new Promise(resolve => setTimeout(resolve, 500));
-
-// Verify letter was sent
-const letter = await query('SELECT * FROM letters WHERE letter_id = $1', [testLetter.letter_id]);
-expect(letter.rows[0].status).toBe('sent');
+const letter = await pool.query('SELECT status, tracking_id FROM letters WHERE letter_id = $1', [letterId]);
+expect(letter.rows[0].status).toBe('accepted');
 expect(letter.rows[0].tracking_id).toBeDefined();
 ```
 
@@ -578,10 +586,11 @@ Error: Provider connection validation failed
 
 ### Letters Stuck in Queue
 
-**Check:** Is worker running?
-```bash
-ps aux | grep letterWorker
+**Check:** What does the outbox hold? Letters are dispatched from `letter_jobs` by the send itself, and the hourly maintenance run recovers any left pending. Look before running anything:
+```sql
+SELECT status, provider_outcome, attempts, created_at FROM letter_jobs WHERE status = 'pending' ORDER BY created_at;
 ```
+`npm run maintenance` runs a full pass (recovery, status sync, retention sweeps) and needs a build first: it is not a read-only check.
 
 **Check:** Is provider configured?
 ```bash
@@ -596,7 +605,7 @@ For provider integration help:
 - DummyProvider: See `src/services/providers/DummyProvider.ts`
 - Interface definition: See `src/services/providers/types.ts`
 - Factory: See `src/services/providers/index.ts`
-- Worker integration: See `src/workers/letterWorker.ts`
+- Outbox integration: See `src/services/letterJobService.ts`
 
 ---
 

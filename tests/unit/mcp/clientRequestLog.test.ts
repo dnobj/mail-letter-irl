@@ -43,6 +43,7 @@ describe("logMcpClientRequests", () => {
     expect(writeSpy).toHaveBeenCalledWith("info", "mcp.client_request", {
       rpcMethod: "tools/list",
       clientClass: "android-app",
+      protocolVersion: "none",
       steeringRev: STEERING_COPY_REV,
       widgetTemplateVersion: WIDGET_TEMPLATE_VERSION
     });
@@ -60,11 +61,13 @@ describe("logMcpClientRequests", () => {
     expect(writeSpy).toHaveBeenNthCalledWith(1, "info", "mcp.client_request", {
       rpcMethod: "tools/call",
       clientClass: "web",
+      protocolVersion: "none",
       toolName: "upload_image"
     });
     expect(writeSpy).toHaveBeenNthCalledWith(2, "info", "mcp.client_request", {
       rpcMethod: "tools/call",
       clientClass: "web",
+      protocolVersion: "none",
       toolName: "other"
     });
   });
@@ -81,12 +84,57 @@ describe("logMcpClientRequests", () => {
     expect(writeSpy).toHaveBeenNthCalledWith(1, "info", "mcp.client_request", {
       rpcMethod: "resources/read",
       clientClass: "other",
+      protocolVersion: "none",
       resourceUri: "ui://widgets/ImageUploadCard.html@v4"
     });
     expect(writeSpy).toHaveBeenNthCalledWith(2, "info", "mcp.client_request", {
       rpcMethod: "resources/read",
-      clientClass: "other"
+      clientClass: "other",
+      protocolVersion: "none"
     });
+  });
+
+  it("names the calling app by its profile when one is given (#473)", () => {
+    logMcpClientRequests(
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_started" } },
+      "node",
+      knownTools,
+      "claude"
+    );
+    expect(writeSpy).toHaveBeenCalledWith("info", "mcp.client_request", {
+      rpcMethod: "tools/call",
+      clientClass: "other",
+      protocolVersion: "none",
+      client: "claude",
+      toolName: "get_started"
+    });
+  });
+
+  it("logs the protocol revision a request speaks, from wherever it says it (#477)", () => {
+    const logged = () => writeSpy.mock.calls.map((call: unknown[]) => (call[2] as { rpcMethod: string; protocolVersion: string }));
+    // 2025-era: named in initialize, then in the header on each request.
+    logMcpClientRequests({ method: "initialize", params: { protocolVersion: "2025-11-25" } }, "x", knownTools);
+    logMcpClientRequests({ method: "tools/list" }, "x", knownTools, undefined, "2025-11-25");
+    // 2026-07-28: in every request's _meta, which wins over a header.
+    logMcpClientRequests(
+      { method: "server/discover", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } } },
+      "x",
+      knownTools,
+      undefined,
+      "2025-11-25"
+    );
+    logMcpClientRequests({ method: "subscriptions/listen" }, "x", knownTools);
+    // Whatever is not a revision date never reaches the log.
+    logMcpClientRequests({ method: "tools/list" }, "x", knownTools, undefined, "latest; drop table");
+    logMcpClientRequests({ method: "initialize", params: { protocolVersion: 20251125 } }, "x", knownTools);
+    expect(logged().map(line => [line.rpcMethod, line.protocolVersion])).toEqual([
+      ["initialize", "2025-11-25"],
+      ["tools/list", "2025-11-25"],
+      ["server/discover", "2026-07-28"],
+      ["subscriptions/listen", "none"],
+      ["tools/list", "other"],
+      ["initialize", "other"]
+    ]);
   });
 
   it("ignores notifications, unknown methods, and non-object bodies", () => {

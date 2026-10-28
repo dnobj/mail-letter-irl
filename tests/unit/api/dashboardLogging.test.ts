@@ -37,10 +37,13 @@ import {
   handleCreateCheckoutSession,
   handleStripeWebhook
 } from "../../../src/api/dashboardApiHandler.js";
+import { SpendLimitError } from "../../../src/services/betaSpendLimits.js";
 
 describe("dashboard runtime logging privacy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The website the return addresses must be on (#683).
+    vi.stubEnv("LETTER_IRL_WEBSITE_BASE_URL", "https://example.test");
     rateLimitAccount.mockResolvedValue(false);
     authenticateHttpRequest.mockResolvedValue({
       userId: "auth0|private-user",
@@ -57,6 +60,7 @@ describe("dashboard runtime logging privacy", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("does not log or return arbitrary checkout exceptions", async () => {
@@ -65,7 +69,7 @@ describe("dashboard runtime logging privacy", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -92,7 +96,7 @@ describe("dashboard runtime logging privacy", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -119,7 +123,7 @@ describe("dashboard runtime logging privacy", () => {
       const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
       const req = {
         headers: {},
-        body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+        body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
       };
       const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -131,6 +135,61 @@ describe("dashboard runtime logging privacy", () => {
       expect(res.statusCode, diagnosticClass).toBe(503);
       error.mockRestore();
     }
+  });
+
+  it("answers 403 with a fixed sentence when purchasing is disabled on the account (#449)", async () => {
+    createPackCheckout.mockRejectedValue(
+      Object.assign(new Error("Purchasing is disabled on this account"), {
+        code: "ACCOUNT_SENDS_BLOCKED",
+        diagnosticClass: "authorization_error"
+      })
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const req = {
+      headers: {},
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
+    };
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleCreateCheckoutSession(req as never, res as never);
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(String(res.end.mock.calls[0][0]));
+    expect(body).toEqual({
+      error: "purchasing_disabled",
+      message: "Purchasing is disabled on this account. Please contact support."
+    });
+    // Logged as the refusal it is, not as a database fault.
+    expect(error.mock.calls.flat().map(String).join("\n")).toContain('"errorClass":"authorization_error"');
+    error.mockRestore();
+  });
+
+  it("answers 429 with a daily limit's own sentence, not a 500 logged as database_error", async () => {
+    // 2026-09-28: the $90 Power Pack under the default $60 limit reached the
+    // page as "Unable to create checkout session", and the log said
+    // database_error.
+    const sentence =
+      "This purchase is more than one account can spend in a day, so it cannot be bought. Please choose a smaller pack.";
+    createPackCheckout.mockRejectedValue(new SpendLimitError("CHARGE_ABOVE_DAILY_CAP", sentence));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const req = {
+      headers: {},
+      body: { productId: "credit-pack-100", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
+    };
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleCreateCheckoutSession(req as never, res as never);
+
+    expect(res.statusCode).toBe(429);
+    expect(JSON.parse(String(res.end.mock.calls[0][0]))).toEqual({ error: "limit", message: sentence });
+    const logged = [...error.mock.calls, ...log.mock.calls].flat().map(String).join("\n");
+    expect(logged).toContain('"event":"credits.checkout_refused_by_limit"');
+    expect(logged).toContain('"reason":"CHARGE_ABOVE_DAILY_CAP"');
+    expect(logged).not.toContain("database_error");
+    expect(logged).not.toContain("credits.checkout_creation_failed");
+    error.mockRestore();
+    log.mockRestore();
   });
 
   it("maps a carried-only terminal class to 503, like the config fault it is", async () => {
@@ -147,7 +206,7 @@ describe("dashboard runtime logging privacy", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -173,7 +232,7 @@ describe("dashboard runtime logging privacy", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-999", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-999", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -190,7 +249,7 @@ describe("dashboard runtime logging privacy", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -209,6 +268,7 @@ describe("dashboard runtime logging privacy", () => {
     verifyWebhookSignature.mockReturnValue({
       id: "evt_private",
       type: "checkout.session.completed",
+      livemode: false,
       data: { object: { id: "cs_private" } }
     });
     processStripeWebhookEvent.mockRejectedValue(new Error(sensitive));
@@ -229,5 +289,29 @@ describe("dashboard runtime logging privacy", () => {
       expect(output).not.toContain(value);
       expect(body).not.toContain(value);
     }
+  });
+
+  it("logs a dispute event deferred for Stripe's retry as a warning, still answering 500", async () => {
+    verifyWebhookSignature.mockReturnValue({
+      id: "evt_deferred",
+      type: "charge.dispute.closed",
+      livemode: false,
+      data: { object: { id: "dp_deferred" } }
+    });
+    processStripeWebhookEvent.mockRejectedValue(
+      Object.assign(new Error("deferred"), { diagnosticClass: "dispute_order_committed_meanwhile" })
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleStripeWebhook({ headers: { "stripe-signature": "sig" }, body: "body" } as never, res as never);
+
+    expect(res.statusCode).toBe(500);
+    expect(warn.mock.calls.flat().map(String).join("\n")).toContain(
+      '"errorClass":"dispute_order_committed_meanwhile","event":"stripe.webhook_deferred"'
+    );
+    expect(error.mock.calls.flat().map(String).join("\n")).not.toContain("credits.webhook_failed");
   });
 });

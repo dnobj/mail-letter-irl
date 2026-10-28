@@ -18,6 +18,7 @@ import type {
   CostEstimate,
   ProviderConfig
 } from './types.js';
+import { mailServiceOf } from '../../config/products.js';
 
 export interface DummyProviderOptions {
   /** Simulated delay in milliseconds (default: 1000ms) */
@@ -48,6 +49,10 @@ const letterStore = new Map<string, {
 
 export class DummyProvider implements LetterFulfillmentProvider {
   public readonly config: ProviderConfig;
+  /** Simulated: it records the service it was asked for (#625). */
+  public readonly supportsExtraServices = true;
+  /** It prints nothing, so it takes what the renderer drew as readily as any mail. */
+  public readonly printsRenderedPdf = true;
   private options: Required<DummyProviderOptions>;
 
   constructor(config: ProviderConfig, options: DummyProviderOptions = {}) {
@@ -129,7 +134,10 @@ export class DummyProvider implements LetterFulfillmentProvider {
       metadata: {
         provider: 'dummy',
         simulatedDelay: this.options.delayMs,
-        messageLength: params.message.length
+        messageLength: params.message.length,
+        // The extra service it was asked for (#625), so a test can see it
+        // arrive; standard mail, however it is written, records nothing.
+        ...(mailServiceOf(params.extraService) ? { extraService: params.extraService } : {})
       }
     };
   }
@@ -183,7 +191,7 @@ export class DummyProvider implements LetterFulfillmentProvider {
   /**
    * Estimate cost for a letter
    */
-  async estimateCost(params: LetterParams): Promise<CostEstimate> {
+  async estimateCost(_params: LetterParams): Promise<CostEstimate> {
     // Simulate delay
     await this.delay(100);
 
@@ -290,7 +298,6 @@ export class DummyProvider implements LetterFulfillmentProvider {
     currentStatus: LetterStatus['status']
   ): LetterStatus['events'] {
     const events: LetterStatus['events'] = [];
-    const now = new Date();
 
     events.push({
       timestamp: sentAt,

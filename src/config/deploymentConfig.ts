@@ -20,13 +20,22 @@
  * disagree about what production requires.
  */
 
+import { maintenanceHeartbeatUrlInvalid } from '../services/maintenanceHeartbeat.js';
+import { operatorAlertUrlInvalid } from './operatorAlerts.js';
+import { enabledUnlessDisabled, offUnlessExplicitlyEnabled } from '../utils/envSettings.js';
 import {
+  CERTIFIED_MAIL_FLAG,
+  JIT_OPTION_PRICE_ENV_VARS,
   JIT_PRICE_ENV_VARS,
   PACK_PRICE_ENV_VARS,
+  POSTCARD_SIZES_FLAG,
+  ROOM_TO_WRITE_FLAG,
   normalizedCurrency,
   packCurrency
 } from './products.js';
 import { isDebugEnabled } from '../utils/debug.js';
+import { stripeCheckoutDomainInvalid } from './checkoutDomain.js';
+import { isSendConfirmationEnabled, websiteClientId } from './sendConfirmation.js';
 
 export type DeploymentMode = 'production' | 'development' | 'test';
 
@@ -53,6 +62,12 @@ export interface EnvVarRequirement {
   aliases?: readonly string[];
   requiredIn: 'always' | 'production' | 'development';
   condition?: 'when-jit-enabled' | 'when-static-dcr';
+  /**
+   * A flag that must be on as well as the condition: a mail option's price is
+   * needed only while the option is sold (#578). Read as the conditions are:
+   * the boot check by its value, the cutover preflight by its name's presence.
+   */
+  flag?: string;
   /**
    * Listed so the cutover preflight can DIFF it, but absence is not a failure:
    * the code has a working default. `checkedBy` alone was not enough - it only
@@ -184,6 +199,15 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api', 'maintenance'],
     checkedBy: 'stripe.jit_config_incomplete'
   })),
+  ...JIT_OPTION_PRICE_ENV_VARS.map(({ priceEnv, flag }): EnvVarRequirement => ({
+    name: priceEnv,
+    requiredIn: 'production',
+    condition: 'when-jit-enabled',
+    flag,
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.jit_config_incomplete'
+  })),
   /**
    * The currencies are here because #275 made them load-bearing. Every Price
    * must be denominated in its product's expected currency or the catalog
@@ -206,6 +230,18 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     secret: false,
     services: ['api', 'maintenance'],
     checkedBy: 'stripe.currency_unset'
+  },
+  /**
+   * Stripe's custom Checkout host (#373, docs/stripe-custom-domain.md). Listed
+   * so the preflight shows production and development disagreeing on it.
+   */
+  {
+    name: 'STRIPE_CHECKOUT_DOMAIN',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api'],
+    checkedBy: 'stripe.checkout_domain_invalid'
   },
   {
     name: 'JIT_CURRENCY',
@@ -266,8 +302,10 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     checkedBy: 'oauth.config_required'
   },
   {
-    // Environment isolation: validateOAuthConfig pins the issuer against the
-    // matching allowlist and errors without it. Production has never had it set.
+    // Environment isolation: validateOAuthConfig pins the issuer, and every
+    // LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS entry, against the matching allowlist
+    // and errors without it. A list: the tenant's own address and its custom
+    // domain both belong on it once the custom domain is live.
     name: 'LETTER_IRL_OAUTH_PROD_ISSUER',
     requiredIn: 'production',
     secret: false,
@@ -422,6 +460,53 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * The outbox's stop (#444): pauses handing queued letters to the printer,
+   * which the sending switch above does not. Both processes dispatch - the API
+   * right after a send, maintenance for the rest - so a pause is set on both.
+   */
+  {
+    name: 'LETTER_IRL_OUTBOX_DISPATCH_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api', 'maintenance']
+  },
+  /**
+   * The send rule (#470, src/config/sendConfirmation.ts): mail goes out only
+   * when the person sends it, from our card or the confirmation page. Required
+   * on in production (#730): off, the send tools are the model's to call. Its
+   * own rule (send_confirmation.required) says so, since a value that is set
+   * but not on passes a presence check.
+   */
+  {
+    name: 'LETTER_IRL_SEND_CONFIRMATION_ENABLED',
+    requiredIn: 'production',
+    secret: false,
+    services: ['api'],
+    checkedBy: 'send_confirmation.required'
+  },
+  /** The website, for the confirmation link. Defaults to the gift landing address. */
+  {
+    name: 'LETTER_IRL_WEBSITE_BASE_URL',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * The website's own Auth0 application: the only one whose tokens may
+   * confirm a send, or make and revoke a personal access token (#730).
+   * Missing is its own rule's finding: an error in production, a warning
+   * elsewhere while the send rule is on.
+   */
+  {
+    name: 'LETTER_IRL_WEBSITE_CLIENT_ID',
+    requiredIn: 'production',
+    secret: false,
+    services: ['api'],
+    checkedBy: 'send_confirmation.website_client_missing'
+  },
+  /**
    * Image generation, which is NOT new - and that is the point.
    *
    * LETTER_IRL_IMAGE_GEN_MODE defaults to "on", but generateImageForMail.ts
@@ -431,6 +516,10 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
    * neither variable appeared in this manifest, so the preflight reported full
    * parity while the paid path was quietly unavailable. Listing them does not
    * turn the feature on; it makes its absence something an operator can see.
+   *
+   * The mode's values are on (the default), mobile_only, redirect (never
+   * generates, the tool stays listed) and off (the feature is gone: no tool,
+   * no purchase grants, no counts). See src/config/imageGeneration.ts.
    */
   {
     name: 'OPENAI_API_KEY',
@@ -441,6 +530,359 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
   },
   {
     name: 'LETTER_IRL_IMAGE_GEN_MODE',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * Gift letters (docs/gift-letters.md). Off unless explicitly enabled, so an
+   * absent flag is the intended production state until the owner turns it on;
+   * listed so the preflight shows which environments have it. The landing URL
+   * and the daily cap have working defaults. API only: the card's link is
+   * written into the letter at send time, so the maintenance run that prints
+   * a retried letter never reads either.
+   */
+  {
+    name: 'LETTER_IRL_GIFT_LETTERS_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * Letter previews drawn by our own renderer (#534, src/config/printRenderer.ts):
+   * `pdf`, or the legacy HTML when absent. Off unless set, so absence is the
+   * intended production state until the owner switches it on; listed so the
+   * preflight shows which environments have it. API only: it is read when a
+   * letter is previewed, and the version a draft records, not this flag,
+   * decides how the maintenance run prints a letter.
+   */
+  {
+    name: 'LETTER_IRL_PRINT_RENDERER',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * Stationery (#563, src/config/stationery.ts): the letter previews offer a
+   * theme only while the flag is on and LETTER_IRL_PRINT_RENDERER draws them.
+   * Off unless set, so absence is the intended production state until the
+   * owner switches it on; listed so the preflight shows which environments
+   * have it. API only: a letter prints in the stationery its draft recorded,
+   * never by this flag.
+   */
+  {
+    name: 'LETTER_IRL_STATIONERY_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * Postcard layouts (#594, src/config/postcardLayouts.ts): the postcard
+   * preview offers a border or a greeting only while the flag is on and
+   * LETTER_IRL_PRINT_RENDERER draws it. Off unless set, so absence is the
+   * intended production state until the owner switches it on; listed so the
+   * preflight shows which environments have it. API only: a postcard prints
+   * with the front its draft recorded, never by this flag.
+   */
+  {
+    name: 'LETTER_IRL_POSTCARD_LAYOUTS_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * Postcard collages (#616, src/config/postcardCollages.ts): the postcard
+   * preview takes `images` and `imageUrls`, two to four photos drawn as one
+   * front, only while the flag is on. Off unless set, so absence is the
+   * intended production state until the owner switches it on; listed so the
+   * preflight shows which environments have it. API only: a postcard prints
+   * with the picture its draft stored, never by this flag.
+   */
+  {
+    name: 'LETTER_IRL_POSTCARD_COLLAGES_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * Address requests (#604, src/config/addressRequests.ts): the three tools
+   * are listed only while the flag is on. Off unless set, so absence is the
+   * intended production state until the owner's retention wording is in;
+   * listed so the preflight shows which environments have it. API only.
+   */
+  {
+    name: 'LETTER_IRL_ADDRESS_REQUESTS_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_ADDRESS_REQUEST_WAITING_CAP',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_ADDRESS_REQUEST_DAILY_CAP',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * Letter IRL home (src/config/letterHome.ts) and saved stationery designs
+   * (#649, src/config/customStationery.ts): each off unless set, so absence is
+   * the intended production state until the owner switches it on; listed so
+   * the preflight shows which environments have them (#682). API only.
+   */
+  {
+    name: 'LETTER_IRL_HOME_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_CUSTOM_STATIONERY_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * The ChatGPT app's id (src/services/letterHomeService.ts): the home card's
+   * link back to the app in ChatGPT. Unset, the home works without that link,
+   * so advisory; production needs it once the home is on (#682 review).
+   */
+  {
+    name: 'LETTER_IRL_CHATGPT_PLUGIN_ID',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * The words editor (#647, src/config/wordsEditor.ts): a letter's words
+   * changed in place on one page, without room to write, while the flag is on
+   * and our renderer draws letters. Off unless set; listed so the preflight
+   * shows which environments have it. API only.
+   */
+  {
+    name: 'LETTER_IRL_WORDS_EDITOR_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * Signatures (#608, src/config/signatures.ts): the three tools and the
+   * website's /api/signature routes, while the flag is on and our renderer
+   * draws letters. Off unless set, so absence is the intended production
+   * state until the owner's word and the privacy policy's wording; listed so
+   * the preflight shows which environments have it. API only.
+   */
+  {
+    name: 'LETTER_IRL_SIGNATURES_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * How many days a closed address request, and any address given with it,
+   * is kept (#604): read by the maintenance sweep, whatever the feature's flag,
+   * and by the API, which tells the recipient's page. The value is the owner's,
+   * with the privacy policy's wording; 7 by default, at most 30 (#701).
+   */
+  {
+    name: 'LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api', 'maintenance']
+  },
+  /**
+   * The envelope reveal (#576, src/config/envelope.ts): the letter previews
+   * tell their card, and the confirmation page's API tells the website, it
+   * may open the page from an envelope only while the flag is on. Off
+   * unless set, so absence is the intended production state until the owner
+   * switches it on. API only: nothing prints differently.
+   */
+  {
+    name: 'LETTER_IRL_ENVELOPE_REVEAL_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * The studio card (#580, src/config/studioCard.ts): the letter previews
+   * tell their card it may lay itself out as a studio only while the flag is
+   * on. Off unless set, so absence is the intended production state until the
+   * owner switches it on. API only: nothing prints or sends differently.
+   */
+  {
+    name: 'LETTER_IRL_STUDIO_CARD_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * The mail options' flags (#578, src/config/products.ts): each sells its
+   * options through Pay & Send and demands their prices above. Room to write's
+   * longer letters (#586) and the 4x6 and 11x6 postcards (#594) are also
+   * offered only with our renderer; certified mail (#625) is not tied to it.
+   * Off unless set, so absence is the intended production state until the
+   * owner approves the prices; listed so the preflight shows which
+   * environments and services have them. Both services, as the prices they
+   * demand are.
+   */
+  ...[ROOM_TO_WRITE_FLAG, POSTCARD_SIZES_FLAG, CERTIFIED_MAIL_FLAG].map((name): EnvVarRequirement => ({
+    name,
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api', 'maintenance']
+  })),
+  /**
+   * Arrive-by (#535, src/config/arriveBy.ts): the preview tools offer and
+   * accept an arrival date only while the flag is on. Off unless set, so
+   * absence is the intended production state until the owner switches it on;
+   * the lead time and horizon have working defaults. Listed so the preflight
+   * shows which environments have them. API only: the send and the outbox
+   * hold and release mail by the dates on the draft, never by these.
+   */
+  {
+    name: 'LETTER_IRL_ARRIVE_BY_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_SCHEDULE_LEAD_DAYS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_SCHEDULE_HORIZON_DAYS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  // Letters held for one mail date (#700); the send refuses past it, so the
+  // preflight shows where it is set.
+  {
+    name: 'LETTER_IRL_SCHEDULE_DAILY_CAP',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_GIFT_DAILY_SEND_CAP',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_GIFT_LANDING_BASE_URL',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * The maintenance cron's dead man's switch (#408). A capability: anyone
+   * holding it can report the job alive, so the preflight treats it as secret.
+   * Required in production (#699): without it nobody is told the run stopped,
+   * the outbox is paused, or a letter missed its mail day. Development may
+   * leave it unset; a value it cannot call is an error in production and a
+   * warning elsewhere (maintenance.heartbeat_url_invalid).
+   */
+  {
+    name: 'MAINTENANCE_HEARTBEAT_URL',
+    requiredIn: 'production',
+    secret: true,
+    services: ['maintenance']
+  },
+  /**
+   * Where the operator is told what needs a person (src/services/operatorNotify.ts):
+   * a daily limit that refused someone (migration 038) from the API, and from
+   * both the API and maintenance, held mail that missed its mail day, letters
+   * the provider cancelled, a dispatch whose outcome is unknown, mail held for
+   * its funding, and a Pay & Send order refunded or disputed after its letter
+   * went, or may have gone, to the provider (#699). A capability, like the heartbeat, so the preflight
+   * treats it as secret. Required in production on both services (#699); a
+   * value it cannot post to is an error in production and a warning elsewhere
+   * (limits.operator_alert_url_invalid).
+   */
+  {
+    name: 'LETTER_IRL_OPERATOR_ALERT_URL',
+    requiredIn: 'production',
+    secret: true,
+    services: ['api', 'maintenance']
+  },
+  /**
+   * The retention sweep (#153): reports what is past the published window
+   * unless this is `enforce`, which production switches to at the launch
+   * promotion. Required in production (#699), so the mode is chosen rather
+   * than left to the default; a value that is neither `enforce` nor
+   * `report` is warned of (retention.mode_unknown).
+   */
+  {
+    name: 'CONTENT_RETENTION_MODE',
+    requiredIn: 'production',
+    secret: false,
+    services: ['maintenance']
+  },
+  /**
+   * Photo upload through the card in apps with no file store (#474,
+   * src/config/cardUpload.ts). Off unless explicitly on, and meant to stay
+   * off in production until it is proven on development, so its absence
+   * there is the intended state; listed so the preflight shows where it is on.
+   */
+  {
+    name: 'LETTER_IRL_CARD_UPLOAD_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_PHOTO_UPLOADS_PER_DAY',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * The ChatGPT plugin portal's domain-verification token (#407), served at
+   * /.well-known/openai-apps-challenge. Set on production at submission; it
+   * is served publicly, so it is not a secret.
+   */
+  {
+    name: 'OPENAI_APPS_CHALLENGE_TOKEN',
     requiredIn: 'production',
     advisory: true,
     secret: false,
@@ -658,6 +1100,18 @@ function validateStripe(
     });
   }
 
+  // #373: once the custom domain is active in Stripe, every Checkout URL is
+  // on it, and the start page forwards only to hosts it can parse from this
+  // setting. A value it cannot use would strand every checkout on our page.
+  if (stripeCheckoutDomainInvalid(env)) {
+    findings.push({
+      severity: production ? 'error' : 'warning',
+      rule: 'stripe.checkout_domain_invalid',
+      message:
+        'STRIPE_CHECKOUT_DOMAIN must be a bare host name such as pay.letterirl.com, with no scheme, port or path'
+    });
+  }
+
   // Packs are always sellable, so their config is checked whenever this is a
   // deployed environment. Test mode skips it: unit fixtures configure only
   // what they exercise.
@@ -715,11 +1169,22 @@ function validateStripe(
     }
 
     if (env.JIT_PURCHASE_ENABLED === 'true') {
-      for (const price of JIT_PRICE_ENV_VARS) {
+      // The options' prices join only while their flags sell them (#578), read
+      // by the same reader the product table uses.
+      const required = [
+        ...JIT_PRICE_ENV_VARS.map(price => ({ price, when: 'JIT_PURCHASE_ENABLED=true' })),
+        ...JIT_OPTION_PRICE_ENV_VARS
+          .filter(option => offUnlessExplicitlyEnabled(option.flag, env))
+          .map(option => ({
+            price: option.priceEnv,
+            when: `JIT_PURCHASE_ENABLED=true and ${option.flag} is on`
+          }))
+      ];
+      for (const { price, when } of required) {
         const problems: string[] = [];
         // Trimmed, like the catalog - see the pack loop above (#278 round 9).
         const priceValue = (env[price] ?? '').trim();
-        if (!priceValue) problems.push(`${price} is required when JIT_PURCHASE_ENABLED=true`);
+        if (!priceValue) problems.push(`${price} is required when ${when}`);
         else if (!priceValue.startsWith('price_')) problems.push(`${price} must be a Stripe price id (price_...)`);
         for (const message of problems) {
           findings.push({
@@ -983,6 +1448,10 @@ export function validateDeploymentConfig(
     ) {
       continue;
     }
+    // The flag, as the advisory skip above: every entry carrying one today has
+    // an owning rule and never reaches this loop, so this changes nothing now
+    // and stops the next one from being demanded with its option off (#578).
+    if (entry.flag && !offUnlessExplicitlyEnabled(entry.flag, env)) continue;
     if (!resolveAliased(entry, env)) {
       findings.push({
         severity: 'error',
@@ -1000,6 +1469,80 @@ export function validateDeploymentConfig(
   validateStripe(env, mode, findings);
   validateBucket(env, mode, findings);
   validatePlaceholders(env, findings);
+
+  // #408: the maintenance service's heartbeat (src/services/maintenanceHeartbeat.ts).
+  // A URL maintenance cannot call leaves its monitor alerting every hour for a
+  // job that is running fine. An error for production maintenance, where the
+  // heartbeat is required (#699); a warning elsewhere, the API included, which
+  // never calls it.
+  if (maintenanceHeartbeatUrlInvalid(env)) {
+    findings.push({
+      severity: production && service === 'maintenance' ? 'error' : 'warning',
+      rule: 'maintenance.heartbeat_url_invalid',
+      message: 'MAINTENANCE_HEARTBEAT_URL must be an https URL, such as a healthchecks.io ping URL'
+    });
+  }
+
+  // The operator's notices (src/services/operatorNotify.ts): a URL they
+  // cannot be posted to means what needs a person tells nobody but the admin
+  // panel. An error in production, where it is required (#699); a warning
+  // elsewhere.
+  if (operatorAlertUrlInvalid(env)) {
+    findings.push({
+      severity: production ? 'error' : 'warning',
+      rule: 'limits.operator_alert_url_invalid',
+      message: 'LETTER_IRL_OPERATOR_ALERT_URL must be an https URL, such as an ntfy topic URL'
+    });
+  }
+
+  // The retention sweep's mode: only `enforce` acts, and anything else runs
+  // the report, so a misspelt `enforce` reports quietly. Said, never refused.
+  const retentionMode = (env.CONTENT_RETENTION_MODE ?? '').trim().toLowerCase();
+  if (retentionMode !== '' && retentionMode !== 'enforce' && retentionMode !== 'report') {
+    findings.push({
+      severity: 'warning',
+      rule: 'retention.mode_unknown',
+      message: 'CONTENT_RETENTION_MODE is neither enforce nor report, so the retention sweep only reports'
+    });
+  }
+
+  // #444: the outbox's stop, the same reading as letterJobService's
+  // outboxDispatchEnabled. A pause is set on purpose, so a warning and never a
+  // boot error; but a pause left on holds every letter, so the API says so at
+  // every boot and maintenance at every run (#451 review).
+  if (!enabledUnlessDisabled('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', env)) {
+    findings.push({
+      severity: 'warning',
+      rule: 'outbox.dispatch_paused',
+      message:
+        'LETTER_IRL_OUTBOX_DISPATCH_ENABLED pauses the outbox: nothing goes to the print provider until it is set to true'
+    });
+  }
+
+  // #730: the send rule is on in production. Off, send_letter, send_postcard
+  // and create_mail_checkout are offered to the model as ordinary tools, and
+  // the person's press on a card or the confirmation page is no longer what
+  // sends. The API only: maintenance never offers a tool.
+  if (production && surface === 'server' && !isSendConfirmationEnabled(env)) {
+    findings.push({
+      severity: 'error',
+      rule: 'send_confirmation.required',
+      message: 'LETTER_IRL_SEND_CONFIRMATION_ENABLED must be true in production, so mail goes out only when the person sends it'
+    });
+  }
+
+  // #470: with no website application named, the confirmation page refuses
+  // every send, and apps without our card cannot send at all; nor can anyone
+  // make or revoke a personal access token (#730). An error in production,
+  // where that is a customer outage. The API only: maintenance serves neither.
+  if (surface === 'server' && !websiteClientId(env) && (production || isSendConfirmationEnabled(env))) {
+    findings.push({
+      severity: production ? 'error' : 'warning',
+      rule: 'send_confirmation.website_client_missing',
+      message:
+        'LETTER_IRL_WEBSITE_CLIENT_ID is not set, so nobody can send from the confirmation page or make a personal access token'
+    });
+  }
 
   if (production && surface === 'server') {
     // The origin/host allowlists have LOCALHOST fallbacks, and an unset one is

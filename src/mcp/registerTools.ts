@@ -1,12 +1,18 @@
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ToolAnnotations, McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { McpServer, ProtocolError, ProtocolErrorCode, ResourceTemplate } from "@modelcontextprotocol/server";
+import type { ServerContext, ToolAnnotations } from "@modelcontextprotocol/server";
+import { isLetterHomeEnabled } from "../config/letterHome.js";
+import { openLetterHomeInputZ, openLetterHomeOutputZ } from "../zodSchemas.js";
 import { z } from "zod";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { LetterIrlServer } from "../server.js";
-import { toolInputSchemas } from "./toolSchemas.js";
 import { WIDGET_TEMPLATE_VERSION, widgetTemplateUri } from "./widgetUris.js";
+import {
+  DUPLICATE_MAIL_META_KEY,
+  type DuplicateMailError,
+  isDuplicateMailError
+} from "../services/duplicateMailService.js";
 import {
   quoteAndPreviewInputZ,
   quoteAndPreviewLetterWithHeaderImageInputZ,
@@ -19,12 +25,34 @@ import {
   getPurchaseStatusInputZ,
   getOrderStatusInputZ,
   getAccountBalanceInputZ,
+  getProfileInputZ,
   listOrdersInputZ,
   setReturnAddressInputZ,
   getReturnAddressInputZ,
   clearReturnAddressInputZ,
   quoteAndPreviewPostcardInputZ,
+  postcardSixByNineZ,
   sendPostcardInputZ,
+  requestSendInputZ,
+  getDraftStatusInputZ,
+  setArrivalDateInputZ,
+  setStationeryInputZ,
+  setStationeryThemeRequiredZ,
+  setMailServiceInputZ,
+  setLetterWordsInputZ,
+  setPostcardStyleInputZ,
+  cancelScheduledMailInputZ,
+  requestAddressInputZ,
+  getAddressRequestInputZ,
+  cancelAddressRequestInputZ,
+  setSignatureInputZ,
+  getSignatureInputZ,
+  clearSignatureInputZ,
+  saveStationeryDesignInputZ,
+  listStationeryDesignsInputZ,
+  deleteStationeryDesignInputZ,
+  setLetterSignatureInputZ,
+  uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
   getStartedInputZ,
   uploadImageInputZ,
@@ -39,12 +67,32 @@ import {
   getPurchaseStatusOutputZ,
   getOrderStatusOutputZ,
   getAccountBalanceOutputZ,
+  getProfileOutputZ,
   listOrdersOutputZ,
   setReturnAddressOutputZ,
   getReturnAddressOutputZ,
   clearReturnAddressOutputZ,
   quoteAndPreviewPostcardOutputZ,
   sendPostcardOutputZ,
+  requestSendOutputZ,
+  getDraftStatusOutputZ,
+  setArrivalDateOutputZ,
+  setStationeryOutputZ,
+  setMailServiceOutputZ,
+  setLetterWordsOutputZ,
+  setPostcardStyleOutputZ,
+  cancelScheduledMailOutputZ,
+  requestAddressOutputZ,
+  getAddressRequestOutputZ,
+  cancelAddressRequestOutputZ,
+  setSignatureOutputZ,
+  getSignatureOutputZ,
+  clearSignatureOutputZ,
+  saveStationeryDesignOutputZ,
+  listStationeryDesignsOutputZ,
+  deleteStationeryDesignOutputZ,
+  setLetterSignatureOutputZ,
+  uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
   uploadImageOutputZ,
@@ -54,9 +102,18 @@ import {
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
 import { ToolMeta } from "../contracts/types.js";
-import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
-import { SESSION_SCOPES } from "../auth/oauthConfig.js";
+import {
+  authorizeTool,
+  getRequiredToolScopes,
+  PERSONAL_TOKEN_REFUSAL,
+  PersonalTokenRefusedError
+} from "../auth/toolScopes.js";
+import { SESSION_SCOPES, IDENTITY_SCOPES } from "../auth/oauthConfig.js";
 import { prepareAuthenticatedUser } from "../auth/identity.js";
+import { AccountErasedError } from "../auth/accountErased.js";
+import { VerifiedEmailRequiredError } from "../auth/verifiedEmail.js";
+import { EmailAlreadyLinkedError } from "../services/userService.js";
+import { widgetRedirectOrigins } from "../config/checkoutDomain.js";
 import {
   classifyDiagnosticError,
   writeDiagnostic
@@ -65,6 +122,32 @@ import {
   buildInsufficientScopeToolResult,
   InsufficientScopeError
 } from "../auth/oauthChallenge.js";
+import {
+  callingApp,
+  clientProfileNamed,
+  resolveClientProfile,
+  type ClientProfile,
+  type ClientProfileName
+} from "../auth/clientProfiles.js";
+import { inlineHostBridge } from "./widgetHost.js";
+import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
+import { isArriveByEnabled } from "../config/arriveBy.js";
+import { isCustomStationeryOffered } from "../config/customStationery.js";
+import { isExtraService } from "../config/products.js";
+import { isPostcardSizesOffered } from "../config/postcardSizes.js";
+import { isPostcardCollagesOffered } from "../config/postcardCollages.js";
+import { APP_ONLY_TOOLS, CARD_ONLY_SEND_TOOLS, CARD_RESULT_FIELDS, withheldInputKeys } from "./toolCatalog.js";
+import { ENVELOPE_REVEAL_META, isEnvelopeRevealEnabled } from "../config/envelope.js";
+import { STUDIO_CARD_META, isStudioCardEnabled } from "../config/studioCard.js";
+import { scheduleSentence } from "../tools/arriveByInput.js";
+import { uploadsThroughCard } from "../config/cardUpload.js";
+import {
+  REQUEST_SEND_TOOL,
+  type RequestSendOutput
+} from "../tools/requestSend.js";
+
+/** What every tool answers with, instead of running, when the caller has no usable account. */
+type AccountRefusal = VerifiedEmailRequiredError | EmailAlreadyLinkedError | AccountErasedError;
 
 /**
  * Build MCP tool annotations from tool definition.
@@ -94,11 +177,23 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
   const readOnlyTools = [
     'get_started',
     'get_account_balance',
+    'get_profile',
     'list_orders',
+    'open_letter_home',
     'get_order_status',
     'get_purchase_status',
     'get_return_address',
-    'list_letter_packs'
+    'list_letter_packs',
+    // Hands back a link; the person sends from the page it opens (#470).
+    'request_send',
+    // The preview card's question about its draft (#474).
+    'get_draft_status',
+    // What became of an address request (#604).
+    'get_address_request',
+    // Whether a signature is saved (#608).
+    'get_signature',
+    // The account's saved stationery designs (#649).
+    'list_stationery_designs'
   ];
 
   // Tools that call external APIs (PostGrid for validation or mail fulfillment)
@@ -112,7 +207,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'create_mail_checkout',
     'create_pack_checkout',
     'set_return_address',  // Validates address via PostGrid
-    'generate_image_for_mail' // Calls the OpenAI Images API when credits allow
+    'generate_image_for_mail', // Calls the OpenAI Images API when credits allow
+    'set_signature',       // Fetches the picture from its link (#608)
+    'set_postcard_style'   // On a new size, fetches the picture again from its link (#594)
   ];
 
   // Tools where repeated calls with same args have no additional effect
@@ -123,9 +220,21 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'send_postcard',         // Draft consumption makes retries safe
     'create_mail_checkout',  // Reuses the active checkout for a draft
     'redeem_promo_code',     // A spent code is refused, so repeats do nothing
+    'upload_photo_chunk',    // A chunk sent again changes nothing (#474)
     'set_return_address',    // Setting same address twice = no change
     'clear_return_address',  // Clearing twice = no additional effect
-    'confirm_uploaded_image' // Repeating the same relay overwrites with the same value
+    'confirm_uploaded_image', // Repeating the same relay overwrites with the same value
+    'set_arrival_date',       // The same date twice changes nothing more (#535)
+    'set_stationery',         // The same style twice changes nothing more (#563)
+    'set_mail_service',       // The same service twice changes nothing more (#625)
+    'set_letter_words',       // The same words twice change nothing more (#586)
+    'set_postcard_style',     // The same size and front twice change nothing more (#594)
+    'cancel_scheduled_mail',  // A repeat answers as already cancelled (#535)
+    'cancel_address_request', // A repeat answers as already closed (#604)
+    'clear_signature',        // A repeat answers that none was saved (#608)
+    'set_letter_signature',   // The same choice twice changes nothing more (#608)
+    'save_stationery_design', // The same design twice changes nothing more (#649)
+    'delete_stationery_design' // A repeat answers that none was found (#649)
   ];
 
   // Destructive tools. OpenAI's app-review guidance asks for destructiveHint on
@@ -137,7 +246,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
   // starts a payment the customer cannot undo alone (for Pay & Send it
   // authorises the mail itself). A spent promo code and a consumed image
   // generation are additive for the customer, and the upload relay overwrites
-  // only a pointer to the latest upload, so those stay non-destructive.
+  // only a pointer to the latest upload, so those stay non-destructive. So
+  // does set_arrival_date (#535): it changes only a draft's dates, and a draft
+  // sends nothing and expires on its own.
   // See docs/learnings/tool-annotation-decision.md (addendum, September 2026).
   const destructiveTools = [
     'send_letter',
@@ -145,7 +256,17 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'set_return_address',
     'create_mail_checkout',
     'create_pack_checkout',
-    'clear_return_address'
+    'clear_return_address',
+    // A cancelled order cannot be restored: it must be sent again (#535).
+    'cancel_scheduled_mail',
+    // A cancelled address request's link cannot be restored (#604).
+    'cancel_address_request',
+    // A saved signature, replaced or removed, cannot be brought back (#608).
+    'set_signature',
+    'clear_signature',
+    // A saved design, replaced or deleted, cannot be brought back (#649).
+    'save_stationery_design',
+    'delete_stationery_design'
   ];
 
   return {
@@ -312,9 +433,9 @@ const WIDGET_PACKS_ORIGIN = normalizeHttpsOrigin(
 // /purchase/start there through openExternal, and only for an allowlisted
 // origin does ChatGPT skip the safe-link modal and append the redirectUrl
 // that the start page keeps as the way back into the conversation (#372).
-const WIDGET_REDIRECT_ORIGINS = Array.from(
-  new Set(["https://checkout.stripe.com", WIDGET_PACKS_ORIGIN, WIDGET_API_ORIGIN])
-);
+// The checkout hosts lead: checkout.stripe.com, and our custom checkout
+// domain when STRIPE_CHECKOUT_DOMAIN names one (#373).
+const WIDGET_REDIRECT_ORIGINS = widgetRedirectOrigins(WIDGET_PACKS_ORIGIN, WIDGET_API_ORIGIN);
 
 /**
  * Content Security Policy for widgets.
@@ -370,49 +491,109 @@ export function buildToolSecuritySchemes(
       // tool's securitySchemes. Every grant recorded exactly
       // "mail:draft mail:read mail:send", the union of the enforced scopes.
       //
-      // Session scopes go here and nowhere else. They must never reach
-      // getRequiredToolScopes: PAT callers authorize with no scopes at all, so
-      // a tool demanding one would deny them permanently
-      // (tests/unit/auth/sessionScopes.test.ts pins that).
+      // Identity scopes ride along too (#425), but they are not what ChatGPT
+      // needs to connect, and Auth0 never grants them to it: Auth0 registers
+      // CIMD clients in strict third-party mode, which supports no OIDC
+      // scopes and no ID token in its current release (#424).
+      //
+      // OBSERVED, development and production, from ChatGPT's multi-account
+      // rollout on 2026-09-17 until 2026-09-22: Auth0 logged a successful
+      // login and code exchange, this server was never called, and ChatGPT's
+      // own callback answered 400 OAUTH_OWNER_PROFILE_ID_MISSING - shown as
+      // "We couldn't connect this account". The cause was the connector's
+      // "OIDC enabled" Advanced OAuth setting, which ChatGPT pre-ticks when
+      // the authorization server publishes OpenID discovery: with it on,
+      // ChatGPT wants an ID token inside its callback and gets none. With it
+      // off, ChatGPT links, lists the tools and calls the profile tool
+      // (src/tools/getProfile.ts) for the account's identity. Create
+      // connectors with OIDC off.
+      //
+      // These stay because the advertised and requested sets must agree
+      // (validated in validateOAuthConfig), because a client registered
+      // outside strict mode can use them, and because they cost nothing:
+      // tool calls work although Auth0 never grants them.
+      //
+      // Session and identity scopes go here and nowhere else. They must never
+      // reach getRequiredToolScopes: a personal access token carries product
+      // scopes only (migration 037, #470), so a tool demanding one would deny
+      // it permanently (tests/unit/auth/sessionScopes.test.ts pins that).
       //
       // Applied to every tool deliberately. A typed @-mention scopes the turn's
-      // toolset, so a session scope carried by only some tools would be
-      // requested only sometimes.
-      scopes: [...getRequiredToolScopes(toolName), ...SESSION_SCOPES]
+      // toolset, so a scope carried by only some tools would be requested only
+      // sometimes.
+      scopes: [...getRequiredToolScopes(toolName), ...SESSION_SCOPES, ...IDENTITY_SCOPES]
     }
   ];
 }
 
+/**
+ * The tools that send, card-only under the send rule (#470), and the tools only a card asks (#474): both in the
+ * tool catalogue (src/mcp/toolCatalog.ts, #687), exported here as they were.
+ */
+export { APP_ONLY_TOOLS, CARD_ONLY_SEND_TOOLS } from "./toolCatalog.js";
+
+/**
+ * Pay & Send: the person pays for the previewed mail and payment sends it.
+ * Card-only like the sends, and one step further: an app that may not take a
+ * purchase gets the link instead, even from its card.
+ */
+export const PAY_AND_SEND_TOOL = "create_mail_checkout";
+
 export function buildToolMeta(
   toolName: string,
   meta: ToolMeta,
-  requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
+  requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false",
+  sendRule = isSendConfirmationEnabled()
 ): ToolMeta {
   const outputTemplate = meta["openai/outputTemplate"] as string | undefined;
   const widgetAccessible = meta["openai/widgetAccessible"] as boolean | undefined;
   const existingUi = (meta.ui as Record<string, unknown> | undefined) ?? {};
+  // Hidden from the model and left callable by the card: MCP Apps'
+  // ui.visibility ["app"], ChatGPT's own "private". An app that honours
+  // neither shows the tool to its model, and the wrapper below answers that
+  // app with a link instead of a send. Claude Code asks before every call of
+  // a tool marked as needing the person.
+  const cardOnly = sendRule && CARD_ONLY_SEND_TOOLS.has(toolName);
+  const hidden = cardOnly || APP_ONLY_TOOLS.has(toolName);
 
   return {
     securitySchemes: buildToolSecuritySchemes(toolName, requireAuth),
     ...meta,
+    // The postcard preview's collage photos are file parameters too, while collages are offered (#616).
+    ...(toolName === "quote_and_preview_postcard" && isPostcardCollagesOffered()
+      ? { "openai/fileParams": [...((meta["openai/fileParams"] as string[] | undefined) ?? []), "images"] }
+      : {}),
+    ...(hidden ? { "openai/visibility": "private" } : {}),
+    ...(cardOnly ? { "anthropic/requiresUserInteraction": true } : {}),
     ui: {
       ...existingUi,
       ...(outputTemplate ? { resourceUri: outputTemplate } : {}),
-      ...(widgetAccessible !== undefined ? { widgetAccessible } : {})
+      ...(widgetAccessible !== undefined ? { widgetAccessible } : {}),
+      ...(hidden ? { visibility: ["app"] } : {})
     }
   };
 }
 
-export function buildWidgetResourceMeta(description: string) {
+/**
+ * A card's resource metadata, for the app that reads it. The card address
+ * (`ui.domain`) is per app (#474): ChatGPT's is our API origin, and every
+ * other app gets none, because Claude refuses to draw a card whose domain is
+ * not its own hashed form.
+ */
+export function buildWidgetResourceMeta(
+  description: string,
+  client: ClientProfile = clientProfileNamed("chatgpt")
+) {
+  const withDomain = client.cardDomain === "origin";
   return {
     ui: {
       description,
-      domain: WIDGET_DOMAIN,
+      ...(withDomain ? { domain: WIDGET_DOMAIN } : {}),
       csp: WIDGET_CSP_CANONICAL,
       prefersBorder: true
     },
     "openai/widgetPrefersBorder": true,
-    "openai/widgetDomain": WIDGET_DOMAIN,
+    ...(withDomain ? { "openai/widgetDomain": WIDGET_DOMAIN } : {}),
     "openai/widgetCSP": WIDGET_CSP_LEGACY,
     "openai/widgetDescription": description
   };
@@ -423,14 +604,31 @@ export function buildWidgetResourceMeta(description: string) {
  * they publish, for resolving a client-supplied template variable. Covers the
  * cards and their preview-tool variants (#411).
  */
+export const LETTER_HOME_WIDGET = { name: "LetterHomeCard", description: "Your active drafts, recent mail, and recent recipients" };
+
+export function listedWidgets() {
+  return isLetterHomeEnabled() ? [...WIDGET_DEFINITIONS, LETTER_HOME_WIDGET] : WIDGET_DEFINITIONS;
+}
+
 const WIDGET_BY_NAME = new Map<string, { file: string; description: string }>([
-  ...WIDGET_DEFINITIONS.map(
+  ...[...WIDGET_DEFINITIONS, LETTER_HOME_WIDGET].map(
     (widget) => [widget.name, { file: widget.name, description: widget.description }] as const
   ),
   ...WIDGET_VARIANTS.map(
     (variant) => [variant.name, { file: variant.file, description: variant.description }] as const
   )
 ]);
+
+/**
+ * A card's file name, for the /widgets web route, or null if `name` is not a
+ * card this deployment serves (the Letter Home card while its flag is off).
+ * Resolved against WIDGET_BY_NAME, so a caller's string never reaches a path.
+ */
+export function servedWidgetFile(name: string): string | null {
+  const widget = WIDGET_BY_NAME.get(name);
+  if (!widget || (name === LETTER_HOME_WIDGET.name && !isLetterHomeEnabled())) return null;
+  return widget.file;
+}
 
 /**
  * Read one widget's HTML as an MCP resource payload, or null if `name` is not
@@ -460,10 +658,15 @@ const WIDGET_BY_NAME = new Map<string, { file: string; description: string }>([
  * handler before our code runs and is NOT logged here - so silence in this log
  * means "no read arrived", not "no read was attempted".
  */
-async function readWidgetResource(name: string, uri: string, version: number | undefined) {
+async function readWidgetResource(
+  name: string,
+  uri: string,
+  version: number | undefined,
+  client: ClientProfile
+) {
   const widget = WIDGET_BY_NAME.get(name);
 
-  if (!widget) {
+  if (!widget || (name === LETTER_HOME_WIDGET.name && !isLetterHomeEnabled())) {
     console.warn(`🎨 Widget resource requested but not served: ${uri}`);
     return null;
   }
@@ -475,7 +678,7 @@ async function readWidgetResource(name: string, uri: string, version: number | u
   );
   // `name` has been resolved against WIDGET_BY_NAME above, so it is one of our
   // own template names by the time it indexes the preview-tool map.
-  const text = stampPreviewTool(html, previewToolFor(name, version));
+  const text = stampPreviewTool(inlineHostBridge(html, DEFAULT_WIDGET_DIR), previewToolFor(name, version));
   console.log(`🎨 Returning widget HTML (${text.length} bytes)`);
 
   return {
@@ -483,7 +686,7 @@ async function readWidgetResource(name: string, uri: string, version: number | u
       uri,
       mimeType: WIDGET_MIME_TYPE,
       text,
-      _meta: buildWidgetResourceMeta(widget.description)
+      _meta: buildWidgetResourceMeta(widget.description, client)
     }]
   };
 }
@@ -498,8 +701,11 @@ async function readWidgetResource(name: string, uri: string, version: number | u
  *
  * The widget HTML profile signals the client to inject the runtime bridge.
  */
-export async function registerWidgetResources(mcpServer: McpServer) {
-  for (const widget of WIDGET_DEFINITIONS) {
+export async function registerWidgetResources(
+  mcpServer: McpServer,
+  client: ClientProfile = clientProfileNamed("chatgpt")
+) {
+  for (const widget of listedWidgets()) {
     const filePath = path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`);
 
     // Check if widget file exists before registering
@@ -533,10 +739,10 @@ export async function registerWidgetResources(mcpServer: McpServer) {
         uri,
         {},  // Empty options per docs
         async () => {
-          const result = await readWidgetResource(widget.name, uri, version);
+          const result = await readWidgetResource(widget.name, uri, version, client);
           // Unreachable: the name comes from WIDGET_DEFINITIONS itself.
           if (!result) {
-            throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
+            throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Resource ${uri} not found`);
           }
           return result;
         }
@@ -562,9 +768,9 @@ export async function registerWidgetResources(mcpServer: McpServer) {
       uri,
       {},
       async () => {
-        const result = await readWidgetResource(variant.name, uri, WIDGET_TEMPLATE_VERSION);
+        const result = await readWidgetResource(variant.name, uri, WIDGET_TEMPLATE_VERSION, client);
         if (!result) {
-          throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
+          throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Resource ${uri} not found`);
         }
         return result;
       }
@@ -602,12 +808,12 @@ export async function registerWidgetResources(mcpServer: McpServer) {
       const name = Array.isArray(raw) ? raw[0] : raw;
       const rawVersion = Array.isArray(variables.version) ? variables.version[0] : variables.version;
       const version = /^\d{1,6}$/.test(String(rawVersion ?? "")) ? Number(rawVersion) : undefined;
-      const result = await readWidgetResource(String(name ?? ""), uri.toString(), version);
+      const result = await readWidgetResource(String(name ?? ""), uri.toString(), version, client);
       if (!result) {
         // Same error the SDK raises for an unregistered URI, so an unknown
         // widget name is indistinguishable to the client from one we never
         // advertised - it just gets logged on our side now.
-        throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
+        throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Resource ${uri} not found`);
       }
       return result;
     }
@@ -616,7 +822,12 @@ export async function registerWidgetResources(mcpServer: McpServer) {
   console.log(`📦 Registered widget resource template: ui://widgets/{name}.html@v{version}`);
 }
 
-type ToolName = keyof typeof toolInputSchemas;
+/**
+ * A tool's name, as the input map below names it; the output map must take exactly the same names (its type says
+ * so). A tool the server defines but the maps miss fails registration, which the served-tools snapshot reaches for
+ * every tool (#688: Zod is the one tool contract; the typed copy that named them, src/mcp/toolSchemas.ts, is gone).
+ */
+type ToolName = keyof typeof zodInputSchemaMap;
 
 const DEFAULT_USER_ID = process.env.LETTER_IRL_DEFAULT_USER_ID ?? "mcp-user";
 
@@ -645,7 +856,7 @@ function resolveToolUserId(authInfo: AuthenticatedUser | null): string {
   return DEFAULT_USER_ID;
 }
 
-const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
+const zodInputSchemaMap = {
   // Letter tools - three separate tools for different layouts
   quote_and_preview_letter: quoteAndPreviewInputZ,
   quote_and_preview_letter_with_header_image: quoteAndPreviewLetterWithHeaderImageInputZ,
@@ -659,13 +870,34 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Account and order management tools
   get_order_status: getOrderStatusInputZ,
   get_account_balance: getAccountBalanceInputZ,
+  get_profile: getProfileInputZ,
   list_orders: listOrdersInputZ,
+  open_letter_home: openLetterHomeInputZ,
   set_return_address: setReturnAddressInputZ,
   get_return_address: getReturnAddressInputZ,
   clear_return_address: clearReturnAddressInputZ,
   // Postcard tools
   quote_and_preview_postcard: quoteAndPreviewPostcardInputZ,
   send_postcard: sendPostcardInputZ,
+  request_send: requestSendInputZ,
+  get_draft_status: getDraftStatusInputZ,
+  set_arrival_date: setArrivalDateInputZ,
+  set_stationery: setStationeryInputZ,
+  set_mail_service: setMailServiceInputZ,
+  set_letter_words: setLetterWordsInputZ,
+  set_postcard_style: setPostcardStyleInputZ,
+  cancel_scheduled_mail: cancelScheduledMailInputZ,
+  request_address: requestAddressInputZ,
+  get_address_request: getAddressRequestInputZ,
+  cancel_address_request: cancelAddressRequestInputZ,
+  set_signature: setSignatureInputZ,
+  get_signature: getSignatureInputZ,
+  clear_signature: clearSignatureInputZ,
+  save_stationery_design: saveStationeryDesignInputZ,
+  list_stationery_designs: listStationeryDesignsInputZ,
+  delete_stationery_design: deleteStationeryDesignInputZ,
+  set_letter_signature: setLetterSignatureInputZ,
+  upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
   get_started: getStartedInputZ,
@@ -675,6 +907,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageInputZ
 };
+const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = zodInputSchemaMap;
 
 const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Letter tools - three separate tools for different layouts
@@ -690,13 +923,34 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Account and order management tools
   get_order_status: getOrderStatusOutputZ,
   get_account_balance: getAccountBalanceOutputZ,
+  get_profile: getProfileOutputZ,
   list_orders: listOrdersOutputZ,
+  open_letter_home: openLetterHomeOutputZ,
   set_return_address: setReturnAddressOutputZ,
   get_return_address: getReturnAddressOutputZ,
   clear_return_address: clearReturnAddressOutputZ,
   // Postcard tools
   quote_and_preview_postcard: quoteAndPreviewPostcardOutputZ,
   send_postcard: sendPostcardOutputZ,
+  request_send: requestSendOutputZ,
+  get_draft_status: getDraftStatusOutputZ,
+  set_arrival_date: setArrivalDateOutputZ,
+  set_stationery: setStationeryOutputZ,
+  set_mail_service: setMailServiceOutputZ,
+  set_letter_words: setLetterWordsOutputZ,
+  set_postcard_style: setPostcardStyleOutputZ,
+  cancel_scheduled_mail: cancelScheduledMailOutputZ,
+  request_address: requestAddressOutputZ,
+  get_address_request: getAddressRequestOutputZ,
+  cancel_address_request: cancelAddressRequestOutputZ,
+  set_signature: setSignatureOutputZ,
+  get_signature: getSignatureOutputZ,
+  clear_signature: clearSignatureOutputZ,
+  save_stationery_design: saveStationeryDesignOutputZ,
+  list_stationery_designs: listStationeryDesignsOutputZ,
+  delete_stationery_design: deleteStationeryDesignOutputZ,
+  set_letter_signature: setLetterSignatureOutputZ,
+  upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestOutputZ,
   get_started: getStartedOutputZ,
@@ -712,6 +966,66 @@ export function getZodInputShape(name: string) {
   return schema?.shape;
 }
 
+/**
+ * A tool's input as this deployment serves it. The preview tools' `arriveBy`
+ * (#535) is offered only while LETTER_IRL_ARRIVE_BY_ENABLED is on, and the
+ * letter previews' stationery (#563) only while it is offered, and the postcard
+ * preview's collage photos (#616) only while collages are, so no model is
+ * shown a field the preview would refuse; read at each registration, so
+ * switching a flag needs a reconnect, not a deploy.
+ *
+ * Unoffered is not unaccepted: the SDK validates in strip mode and hands the
+ * handler only declared fields, so a client still holding the schema from
+ * while a flag was on (apps cache it until a refresh) would have its date
+ * dropped and its mail sent at once, or its theme dropped and its letter
+ * printed plain. While a field is withheld, its tool is served as an object
+ * that passes unknown keys through, so the preview sees the field and
+ * refuses it: its JSON Schema then reads `additionalProperties: {}`, where
+ * a raw shape's says nothing (tests/unit/mcp/arriveByServed.test.ts,
+ * stationeryServed.test.ts). Every other tool is served its raw shape, as
+ * before, set_arrival_date included: its own arriveBy is offered with it,
+ * only while the flag is on.
+ *
+ * The postcard preview's `size` and `message` are served narrowed rather
+ * than withheld (servesPostcardSixByNineOnly): the 6x9 alone and its
+ * message's room, as before the 4x6 and 11x6 (#594). A client holding the
+ * wider schema has a 4x6 refused by validation, never printed as a 6x9.
+ */
+export function getServedInputSchema(name: string): z.ZodRawShape | z.ZodObject | undefined {
+  const declared = getZodInputShape(name);
+  let shape = declared && servesPostcardSixByNineOnly(name) ? { ...declared, ...postcardSixByNineZ } : declared;
+  if (shape && servesStationeryThemeOnly(name)) {
+    const { stationeryDesignId: _design, ...rest } = shape;
+    shape = { ...rest, stationery: setStationeryThemeRequiredZ };
+  }
+  const withheld = withheldInputKeys(name);
+  if (!shape || withheld.length === 0) return shape;
+  const served = Object.fromEntries(Object.entries(shape).filter(([key]) => !withheld.includes(key))) as z.ZodRawShape;
+  return z.looseObject(served);
+}
+
+/**
+ * Whether this deployment serves the postcard preview as it was before the
+ * 4x6 and 11x6 (#594): its `size` the 6x9 alone and its `message` described
+ * by the 6x9's room (in /manifest.json its limit too), while those sizes are
+ * not offered.
+ */
+export function servesPostcardSixByNineOnly(name: string): boolean {
+  return name === "quote_and_preview_postcard" && !isPostcardSizesOffered();
+}
+
+/**
+ * Whether this deployment serves set_stationery as it was before saved designs
+ * (#649): a theme required and no stationeryDesignId, while designs are not
+ * offered, so its served schema is exactly as it was until they are.
+ */
+export function servesStationeryThemeOnly(name: string): boolean {
+  return name === "set_stationery" && !isCustomStationeryOffered();
+}
+
+/** The fields withheld while their feature is off, and their groups: in the tool catalogue (#687). */
+export { POSTCARD_COLLAGE_INPUT_KEYS, POSTCARD_FRONT_INPUT_KEYS, STATIONERY_INPUT_KEYS, withheldInputKeys } from "./toolCatalog.js";
+
 export function getZodOutputShape(name: string) {
   const schema = zodOutputSchemas[name as ToolName];
   return schema?.shape;
@@ -725,55 +1039,33 @@ type PartitionedToolResult = {
 /** Keep widget-only previews out of model context while retaining chainable URLs. */
 export function partitionToolResult(
   result: Record<string, unknown>,
-  meta: Record<string, unknown> = {}
+  meta: Record<string, unknown> = {},
+  // Where the app is not proven to hand a card the result's _meta (#474), the
+  // card's small copy also stays in structuredContent, or the card could have
+  // nothing to show. Large previews are never duplicated.
+  keepCardCopy = false
 ): PartitionedToolResult {
-  const {
-    previewHtml,
-    previewFrontHtml,
-    previewBackHtml,
-    inlineImageData,
-    headerImageData,
-    frontImageData,
-    generatedImagePreview,
-    headerImagePreview,
-    inlineImagePreview,
-    // get_started's card copy. Display-only: the model does not act on any of
-    // it, and when it could see it, it restated the whole card in prose
-    // directly beneath a card already showing it. Same reasoning as the
-    // preview HTML above - a widget needs it, the model does not.
-    title,
-    overview,
-    purchaseStep,
-    examplePrompts,
-    ...modelFacingData
-  } = result;
+  // Each field for a card, and what becomes of it, is in the tool catalogue (CARD_RESULT_FIELDS, #687): moved to
+  // _meta, moved and kept as the card's copy where its _meta may not reach it, or dropped. Everything else is the
+  // model's. A generated image's URL is the model's and the card's: it chains into a preview tool.
+  const modelFacingData: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(result)) {
+    if (!Object.hasOwn(CARD_RESULT_FIELDS, key)) modelFacingData[key] = value;
+  }
+  const cardMeta: Record<string, unknown> = {};
+  const cardCopy: Record<string, unknown> = {};
+  for (const [key, use] of Object.entries(CARD_RESULT_FIELDS) as Array<[string, string]>) {
+    const value = result[key];
+    if (value === undefined || use === "drop") continue;
+    cardMeta[key] = value;
+    if (use === "copy" && keepCardCopy) cardCopy[key] = value;
+  }
 
   return {
-    structuredContent: modelFacingData,
+    structuredContent: { ...modelFacingData, ...cardCopy },
     _meta: {
       ...meta,
-      ...(previewHtml !== undefined ? { previewHtml } : {}),
-      ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
-      ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
-      // The letter card's images. Small by construction - the builder
-      // compresses them to roughly 3KB for exactly this trip - so unlike the
-      // *ImageData fields above they are forwarded rather than dropped. They
-      // travel here rather than in structuredContent for the same reason as
-      // everything else in this list: a widget needs them, the model does not.
-      //
-      // Before this they were in neither channel. The output schema does not
-      // declare them, so ChatGPT dropped them when it filtered
-      // structuredContent against the published schema, and nothing put them
-      // in _meta - a letter with a header or inline image rendered its card
-      // without one, silently. (The filtering is client-side: at SDK 1.29.0
-      // the server validates the result and ships it unstripped. Issue #257.)
-      ...(title !== undefined ? { title } : {}),
-      ...(overview !== undefined ? { overview } : {}),
-      ...(purchaseStep !== undefined ? { purchaseStep } : {}),
-      ...(examplePrompts !== undefined ? { examplePrompts } : {}),
-      ...(headerImagePreview !== undefined ? { headerImagePreview } : {}),
-      ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {}),
-      ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
+      ...cardMeta,
       ...(modelFacingData.generatedImageUrl !== undefined
         ? { generatedImageUrl: modelFacingData.generatedImageUrl }
         : {})
@@ -781,36 +1073,114 @@ export function partitionToolResult(
   };
 }
 
+/**
+ * What an account check found: an account to act on, a refusal, or no answer
+ * because reading the account failed.
+ *
+ * A refusal is held rather than thrown: the session is fine, and every tool in
+ * it answers with one sentence the customer can act on. Throwing would fail
+ * registration, which reaches ChatGPT as "this connector is broken", and
+ * swallowing it (what this did until 2026-09-19) left every tool to fail
+ * separately on a foreign key naming whichever table it reached first.
+ */
+type AccountCheck =
+  | { status: "ok" }
+  | { status: "refused"; refusal: AccountRefusal }
+  | { status: "unavailable" };
+
+async function checkAccount(authInfo: AuthenticatedUser): Promise<AccountCheck> {
+  try {
+    await prepareAuthenticatedUser(authInfo);
+    return { status: "ok" };
+  } catch (error) {
+    if (
+      error instanceof VerifiedEmailRequiredError ||
+      error instanceof EmailAlreadyLinkedError ||
+      error instanceof AccountErasedError
+    ) {
+      // Already reported, by name, where it was decided. Logging it again
+      // here would classify it as `database_error` - it carries no pg code -
+      // and make a refused customer look like a database outage on every
+      // request they make.
+      return { status: "refused", refusal: error };
+    }
+    writeDiagnostic("error", "auth.user_preparation_failed", {
+      errorClass: classifyDiagnosticError(error, "database_error")
+    });
+    return { status: "unavailable" };
+  }
+}
+
+/** Fixed text: nothing from the request or the failure reaches it. */
+export const ACCOUNT_UNAVAILABLE_MESSAGE = "Letter IRL could not read your account just now. Please try again.";
+
+export interface RegisterToolsOptions {
+  /**
+   * Decide the account on every tool call, from that call alone. For the
+   * legacy SSE transport (retired, #730), where one server served the whole
+   * stream, and kept for any transport whose server outlives a call: without it
+   * an account erased mid-session (#289) kept every tool until the connection
+   * closed. A call whose check cannot read the account is refused rather than
+   * run, since a tombstone is exactly what it may be about to write to (#446
+   * review). The streamable HTTP transport builds a server per request, so it
+   * decides per call already.
+   */
+  recheckAccountPerCall?: boolean;
+}
+
 export async function registerLetterTools(
   mcpServer: McpServer,
   appServer: LetterIrlServer,
-  authInfo: AuthenticatedUser | null = null
+  authInfo: AuthenticatedUser | null = null,
+  options: RegisterToolsOptions = {}
 ) {
   const userId = resolveToolUserId(authInfo);
   writeDiagnostic("info", "mcp.tools_registering", {
     authType: authInfo?.authType ?? "disabled"
   });
 
-  if (authInfo) {
-    try {
-      await prepareAuthenticatedUser(authInfo);
-    } catch (error) {
-      writeDiagnostic("error", "auth.user_preparation_failed", {
-        errorClass: classifyDiagnosticError(error, "database_error")
-      });
-    }
-  }
+  // A caller with no account, and no confirmed address to open one from. When
+  // the account cannot be read the tools still register - failing
+  // registration reads as a broken connector - but a call answers "try again"
+  // rather than run against an account nobody could check (#446 review).
+  const initialCheck: AccountCheck = authInfo ? await checkAccount(authInfo) : { status: "ok" };
+  const accountRefusal: AccountRefusal | null = initialCheck.status === "refused" ? initialCheck.refusal : null;
 
-  // Register widget resources for ChatGPT UI rendering
-  await registerWidgetResources(mcpServer);
+  // The send rule (#470), decided once for this registration: which app is
+  // calling (#473), and whether the rule is on.
+  const sendRule = isSendConfirmationEnabled();
+  const client = resolveClientProfile(authInfo);
 
-  const toolDefs = appServer.listTools();
+  // The cards, served for this app: its card address, and the shared bridge
+  // inlined (#474).
+  await registerWidgetResources(mcpServer, client);
+
+  // Each description in this app's words (#484).
+  const toolDefs = appServer.listTools(client);
   for (const tool of toolDefs) {
-    const inputShape = getZodInputShape(tool.name);
+    const inputShape = getServedInputSchema(tool.name);
     const outputShape = getZodOutputShape(tool.name);
+    // Every tool the server defines has both (#687): one without fails the connection that lists it, loudly, rather
+    // than being quietly left unregistered. Both shape maps list every tool whatever the flags, and the served-tools
+    // snapshot registers them all, so CI finds a gap before any connection does.
     if (!inputShape || !outputShape) {
-      continue;
+      throw new Error(`Tool ${tool.name} has no ${inputShape ? "output" : "input"} schema in src/zodSchemas.ts`);
     }
+
+    // From an app that cannot be trusted to keep a card-only tool away from
+    // its model, a send tool is the model asking to send - so it gets the
+    // link the person sends from, and is authorized as request_send is. A
+    // token that can preview but not send gets the link rather than a scope
+    // error, which is the point of read-and-draft tokens.
+    //
+    // Pay & Send too (round 1 of #480): payment sends the mail, and Stripe's
+    // page never shows the preview. So it runs only where the app takes
+    // purchases AND shows our card, which is where the person saw the
+    // preview; anywhere else the person pays and sends from the page.
+    const sendsByLinkOnly =
+      sendRule &&
+      ((CARD_ONLY_SEND_TOOLS.has(tool.name) && !client.honorsCardOnlyTools) ||
+        (tool.name === PAY_AND_SEND_TOOL && !(client.inAppPurchases && client.rendersCards)));
 
     // Build annotations for ChatGPT to classify tools as READ or WRITE
     const annotations = buildAnnotations(tool);
@@ -821,38 +1191,110 @@ export async function registerLetterTools(
     mcpServer.registerTool(
       tool.name,
       {
-        title: tool.title ?? tool.description,  // Short label when provided; description otherwise
+        // The short label an app shows for the tool. It used to fall back to
+        // the description, which Claude then showed where the name belongs
+        // (#484); every tool has a title now.
+        title: tool.title,
         description: tool.description,
-        inputSchema: inputShape,
-        outputSchema: outputShape,
+        // An object, or for the previews while a field is withheld one that
+        // passes unknown keys through (getServedInputSchema). SDK v2 takes
+        // objects: a raw shape is deprecated there. Typed loosely, as it always
+        // was: the SDK's generics cannot infer through the union (TS2589), and
+        // the handler below takes its arguments loosely anyway.
+        inputSchema: (inputShape instanceof z.ZodObject ? inputShape : z.object(inputShape)) as z.ZodObject,
+        outputSchema: z.object(outputShape) as z.ZodObject,
         annotations,
         _meta: buildToolMeta(tool.name, tool.meta)
       },
-      async (args: Record<string, unknown>, extra: any) => {
+      async (args: Record<string, unknown>, ctx: ServerContext) => {
         try {
-          authorizeTool(tool.name, authInfo);
+          authorizeTool(sendsByLinkOnly ? REQUEST_SEND_TOOL : tool.name, authInfo);
         } catch (error) {
           if (error instanceof InsufficientScopeError) {
+            // A personal access token can never be granted more (#470), so an
+            // OAuth challenge would point its agent at a dead end.
+            if (authInfo?.authType === "pat") return buildTokenScopeToolResult(tool.name);
             return buildInsufficientScopeToolResult(error);
           }
+          if (error instanceof PersonalTokenRefusedError) return buildPersonalTokenRefusedToolResult(tool.name);
           throw error;
+        }
+        if (options.recheckAccountPerCall && authInfo) {
+          // This call's own answer, not the one from when the stream opened.
+          const now = await checkAccount(authInfo);
+          if (now.status === "refused") return buildAccountRefusalToolResult(now.refusal);
+          if (now.status === "unavailable") return buildAccountUnavailableToolResult();
+        } else if (accountRefusal) {
+          return buildAccountRefusalToolResult(accountRefusal);
+        } else if (initialCheck.status === "unavailable") {
+          return buildAccountUnavailableToolResult();
+        }
+        if (sendsByLinkOnly) {
+          return buildSendByLinkToolResult(
+            await appServer.execute<{ draftId: unknown }, RequestSendOutput>({
+              toolName: REQUEST_SEND_TOOL,
+              input: { draftId: args.draftId },
+              userId,
+              client
+            }),
+            client.name
+          );
         }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
-        const extraMeta = extra._meta as Record<string, unknown> | undefined;
+        // SDK v2 carries the request's _meta on ctx.mcpReq (v1's extra._meta): typed, so a rename fails the build.
+        const extraMeta = ctx?.mcpReq?._meta as Record<string, unknown> | undefined;
         const userAgent = extractUserAgent(argsMeta, extraMeta);
         const isMobile = userAgent ? isMobileClient(userAgent) : undefined;
 
         console.log(`Tool request ${tool.name} (mobile: ${isMobile ?? 'unknown'})`);
 
-        const { result, meta } = await appServer.execute({
-          toolName: tool.name,
-          input: args,
-          userId,
-          isMobile
-        });
+        let executed;
+        try {
+          executed = await appServer.execute({
+            toolName: tool.name,
+            input: args,
+            userId,
+            isMobile,
+            client
+          });
+        } catch (error) {
+          // #412: a refusal the card acts on, so its details travel with it.
+          if (isDuplicateMailError(error)) return buildDuplicateMailToolResult(error);
+          // #579: mail no pack pays for, sent from our card in an app that
+          // cannot open Pay & Send there. Answered as the send rule answers a
+          // send it cannot run: with the page, which takes the payment.
+          if (
+            sendRule &&
+            CARD_ONLY_SEND_TOOLS.has(tool.name) &&
+            (error as { code?: unknown } | null)?.code === "PACK_CANNOT_PAY" &&
+            !(client.inAppPurchases && client.rendersCards)
+          ) {
+            return buildSendByLinkToolResult(
+              await appServer.execute<{ draftId: unknown }, RequestSendOutput>({
+                toolName: REQUEST_SEND_TOOL,
+                input: { draftId: args.draftId },
+                userId,
+                client
+              }),
+              client.name,
+              "pack_cannot_pay"
+            );
+          }
+          throw error;
+        }
+        const { result, meta } = executed;
 
-        const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
+        let summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>, client);
+        const draftId = (result as Record<string, unknown>).draftId;
+        if (sendRule && PREVIEW_TOOLS.has(tool.name) && typeof draftId === "string") {
+          summaryText += ` ${howToSendText(
+            draftId,
+            client,
+            cardOffersPayAndSend(result as Record<string, unknown>),
+            previewPayment(result as Record<string, unknown>)
+          )}`;
+        }
 
         // Per OpenAI docs, response has three sibling payloads:
         // - structuredContent: data for model + widget (→ window.openai.toolOutput)
@@ -863,8 +1305,11 @@ export async function registerLetterTools(
         // The model doesn't need raw HTML; it gets the summaryText narration instead.
         const { structuredContent, _meta } = partitionToolResult(
           result as Record<string, unknown>,
-          meta
+          meta,
+          !client.passesResultMetaToCards
         );
+        Object.assign(_meta, cardSwitches(tool.name));
+        if (isLetterHomeEnabled()) _meta.modelContextEnabled = true;
 
         const response = {
           structuredContent,
@@ -887,11 +1332,432 @@ export async function registerLetterTools(
 
 }
 
+/**
+ * The refusal of a caller who has no account and cannot be given one.
+ *
+ * An error result, so the model reads it as "nothing happened" and repeats the
+ * sentence rather than narrating a success. Nothing from the request reaches
+ * the text - both messages are fixed constants - so it is safe to hand back
+ * whole, the way BETA_ACCESS_MESSAGE is.
+ */
+/** A call refused because its account could not be read (recheck mode only). */
+export function buildAccountUnavailableToolResult() {
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: ACCOUNT_UNAVAILABLE_MESSAGE }]
+  };
+}
+
+export function buildAccountRefusalToolResult(error: AccountRefusal) {
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: error.message }]
+  };
+}
+
+/**
+ * The refusal of a send or checkout for mail that went out recently (#412).
+ * An error result, so the model reads it as "nothing happened", with the
+ * details the card needs in _meta. Error results skip output-schema
+ * validation, so nothing here has to match a tool's output schema.
+ */
+export function buildDuplicateMailToolResult(error: DuplicateMailError) {
+  const { kind, mailType, recipientName, ageSeconds } = error.duplicate;
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: error.message }],
+    _meta: {
+      [DUPLICATE_MAIL_META_KEY]: {
+        kind,
+        mailType,
+        recipientName,
+        ageMinutes: Math.floor(Math.max(0, ageSeconds) / 60)
+      }
+    }
+  };
+}
+
+/**
+ * What a personal access token is told when a tool needs more than it carries
+ * (#470): it reads and drafts, and no sign-in can widen it, so the answer says
+ * what to do instead and carries no OAuth challenge.
+ */
+export const TOKEN_SCOPE_REFUSAL =
+  "A personal access token can read your Letter IRL account and make previews, but it can't send, pay or buy. " +
+  "To buy letters, use your Letter IRL dashboard at letterirl.com; to send, use an app signed in with your Letter IRL account.";
+
+/** A personal access token's refusal of a tool it may not use (#685), in words its agent can pass on. */
+export function buildPersonalTokenRefusedToolResult(toolName: string) {
+  writeDiagnostic("info", "auth.pat_tool_refused", { toolName });
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: PERSONAL_TOKEN_REFUSAL }]
+  };
+}
+
+export function buildTokenScopeToolResult(toolName: string) {
+  writeDiagnostic("info", "auth.pat_scope_refused", { toolName });
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: TOKEN_SCOPE_REFUSAL }]
+  };
+}
+
+/**
+ * The sentence that says why mail is paid per send, for the narration (#579):
+ * the pack rule, or for certified mail (#625) what is true of it, since the
+ * rule's "one-page letters" would contradict a one-page certified letter.
+ */
+function packRuleText(certified: boolean): string {
+  return certified
+    ? "Certified mail is paid with Pay & Send, never with a letter pack or a gift letter. "
+    : "Letter packs and gift letters pay only for one-page letters and 6x9 postcards. ";
+}
+
+/**
+ * The link, in words the model can pass on (#470). Nothing is sent until the
+ * person presses Send on the page, and the text says so, so a model cannot
+ * report the mail as sent.
+ */
+export function sendLinkText(result: RequestSendOutput): string {
+  const what = result.mailType === "postcard" ? "postcard" : "letter";
+  // Quoted (#730): a recipient may have typed the name on a public page.
+  const to = result.recipientSummary?.name ? ` to ${JSON.stringify(result.recipientSummary.name)}` : "";
+  // Mail no pack pays for is paid on that page, with Pay & Send (#579).
+  if (result.paidPerSend === true) {
+    return (
+      `Ask the person to open ${result.confirmationUrl} to check the ${what}${to}, then pay for it with Pay & Send there, which sends it. ` +
+      whenSentText(result) +
+      packRuleText(isExtraService(result.mailService)) +
+      `Nothing is sent until they pay there. The link works until ${result.expiresAtISO}.`
+    );
+  }
+  return (
+    `Ask the person to open ${result.confirmationUrl} to check the ${what}${to} and send it themselves. ` +
+    whenSentText(result) +
+    `Nothing is sent until they press Send there. The link works until ${result.expiresAtISO}.`
+  );
+}
+
+/** For a preview with an arrival date (#535): when, once sent, it goes to the printer. */
+function whenSentText(result: RequestSendOutput): string {
+  const schedule = result.schedule;
+  if (typeof schedule?.arriveBy !== "string" || typeof schedule.mailOn !== "string") return "";
+  const sentence = scheduleSentence({ arriveBy: schedule.arriveBy, mailOn: schedule.mailOn }, new Date());
+  return `Once sent, it ${sentence.charAt(0).toLowerCase()}${sentence.slice(1)} `;
+}
+
+/**
+ * A send tool's answer to an app that cannot show our card (#470): not sent,
+ * and the link where the person sends it. An error result, because nothing
+ * was sent and the tool's output schema describes a sent order - and because
+ * a client then puts this text in front of the model rather than treating the
+ * call as done.
+ */
+export function buildSendByLinkToolResult(
+  executed: { result: RequestSendOutput },
+  client: ClientProfileName,
+  // Why the link and not a send: the send rule, or mail no pack pays for in
+  // an app that cannot take its payment (#579).
+  reason: "send_rule" | "pack_cannot_pay" = "send_rule"
+) {
+  writeDiagnostic("info", "send.link_instead", {
+    client,
+    mailType: executed.result.mailType,
+    reason
+  });
+  return {
+    isError: true,
+    content: [
+      {
+        type: "text" as const,
+        text: `Not sent: Letter IRL sends mail only when the person sends it. ${sendLinkText(executed.result)}`
+      }
+    ]
+  };
+}
+
+/**
+ * Appended to a preview's narration while the send rule is on (#470). It
+ * carries the draft id for an app that shows the model only the text. Where
+ * our card shows, the card's Send button is the way, and the link is for a
+ * card that did not appear; elsewhere the link is the only way. When the card
+ * offers Pay & Send, it is named instead, because the model cannot start one
+ * (#475).
+ */
+export function howToSendText(
+  draftId: string,
+  client: Pick<ClientProfile, "rendersCards" | "inAppPurchases">,
+  cardOffersPayAndSend = false,
+  pay: { packPays: boolean; payOnPage: boolean; certified?: boolean } = { packPays: true, payOnPage: false }
+): string {
+  if (!client.rendersCards) {
+    // Mail no pack pays for (#579) is paid on that page, which sends it.
+    return pay.packPays
+      ? `Nothing has been sent. To send it, call request_send with draftId ${draftId} and give the person its link, ` +
+          `where they check it and send it themselves.`
+      : `Nothing has been sent. To send it, call request_send with draftId ${draftId} and give the person its link, ` +
+          `where they check it and pay for it with Pay & Send, which sends it. ` +
+          packRuleText(pay.certified === true).trimEnd();
+  }
+  const how =
+    client.inAppPurchases && cardOffersPayAndSend
+      ? "The person pays for it and sends it with Pay & Send on the preview card; point them to it when they ask you to send it or pay for it. "
+      : pay.payOnPage
+        ? "The person pays for it with Pay & Send on letterirl.com, which the preview card's button opens; point them to it when they ask you to send it or pay for it. "
+        : pay.packPays
+          ? "The person sends it with Send on the preview card; point them to it when they ask you to send. "
+          : "It is paid with Pay & Send, which is not available for it right now. ";
+  // Mail no pack pays for (#579): said, so the model does not offer a pack.
+  const packRule = pay.packPays ? "" : packRuleText(pay.certified === true);
+  return `Nothing has been sent. ${how}${packRule}Only if the card is not showing, call request_send with draftId ${draftId} and give them its link.`;
+}
+
+/**
+ * How a preview's mail is paid, as its eligibility says (#579): whether a
+ * pack pays for it, and whether the card's button opens the page that takes
+ * a Pay & Send payment.
+ */
+export function previewPayment(result: Record<string, unknown>): { packPays: boolean; payOnPage: boolean; certified: boolean } {
+  const eligibility = result.sendEligibility as
+    | { packPays?: unknown; payAndSend?: { pageUrl?: unknown } }
+    | undefined;
+  return {
+    packPays: eligibility?.packPays !== false,
+    payOnPage: typeof eligibility?.payAndSend?.pageUrl === "string",
+    // Certified mail (#625): its sentence is not the pack rule's, which would contradict a one-page letter.
+    certified: isExtraService(result.mailService)
+  };
+}
+
+/**
+ * Whether a preview's card shows Pay & Send: as the card decides it, only
+ * when the server offers it and the balance cannot pay (widgets'
+ * payAndSendAvailable). With letters in hand, for a gift, or with Pay & Send
+ * switched off, the card shows no such button, so the text must not name one.
+ */
+export function cardOffersPayAndSend(result: Record<string, unknown>): boolean {
+  const eligibility = result.sendEligibility as { payAndSend?: { available?: unknown } } | undefined;
+  return eligibility?.payAndSend?.available === true && result.canSendNow !== true;
+}
+
+const PREVIEW_TOOLS: ReadonlySet<string> = new Set([
+  "quote_and_preview_letter",
+  "quote_and_preview_letter_with_header_image",
+  "quote_and_preview_letter_with_image",
+  "quote_and_preview_postcard"
+]);
+
+/** The previews that take stationery (#563): the letters. A postcard has none. */
+const LETTER_PREVIEW_TOOLS: ReadonlySet<string> = new Set([
+  "quote_and_preview_letter",
+  "quote_and_preview_letter_with_header_image",
+  "quote_and_preview_letter_with_image"
+]);
+
+/**
+ * Card-only switches a tool's result carries in _meta, each while its flag is
+ * on: the letter previews tell their card it may open the page from an
+ * envelope (#576), and every preview tells its card it may lay itself out as
+ * a studio (#580), the postcard's as a postcard maker. In _meta, never
+ * structuredContent, so never the model's.
+ */
+export function cardSwitches(toolName: string): Record<string, unknown> {
+  if (!PREVIEW_TOOLS.has(toolName)) return {};
+  return {
+    ...(LETTER_PREVIEW_TOOLS.has(toolName) && isEnvelopeRevealEnabled() ? { [ENVELOPE_REVEAL_META]: true } : {}),
+    ...(isStudioCardEnabled() ? { [STUDIO_CARD_META]: true } : {})
+  };
+}
+
+/**
+ * A letter preview's stationery (#563), for the narration: the theme it was
+ * drawn in, and a remembered one as such, so the person hears why. Nothing
+ * for Classic by default, or while stationery is not offered.
+ */
+function stationerySentence(result: Record<string, unknown>): string {
+  const stationery = result.stationery as { theme?: unknown; source?: unknown; name?: unknown } | undefined;
+  if (typeof stationery?.theme !== "string") return "";
+  // A saved design (#649) is named by the name it was saved under.
+  const named = stationery.theme === "custom" && typeof stationery.name === "string"
+    ? `the saved design "${stationery.name}"`
+    : stationery.theme;
+  if (stationery.source === "remembered") {
+    return ` Stationery: ${named}, the account's last choice; stationery in the call or set_stationery changes it.`;
+  }
+  return stationery.source === "asked" ? ` Stationery: ${named}.` : "";
+}
+
+/**
+ * Where the app shows our letter card and its words editor is offered (the
+ * preview gives a wordsVersion), the person can change the words on the card,
+ * and the model does not see it: said beside the preview it reads, so before
+ * saying a word is or is not in the letter it asks set_letter_words. In
+ * STUDIO-01 (DEV 2026-10-18) Claude answered from the preview's words that the
+ * letter had no "roses" the card had added: what the card shares never reached
+ * Claude's model (HOME-02), and set_letter_words' description alone did not
+ * steer it.
+ */
+function cardWordsSentence(result: Record<string, unknown>, client: Pick<ClientProfile, "rendersCards">): string {
+  const wordsVersion = result.wordsVersion;
+  // The card's editor is on its studio's Words tab (#809 review round 2), shown beside the Style row, which a preview
+  // without stationery has none of (#809 review round 1).
+  const cardHasEditor = isStudioCardEnabled() && typeof result.stationery === "object" && result.stationery !== null;
+  if (!client.rendersCards || typeof wordsVersion !== "string" || !cardHasEditor) return "";
+  // Only a read is asked for: a change sent with the version last seen is refused the same way (#809 review round 1).
+  return (
+    ` The person can change the words on the card, and you do not see those changes. Before saying a word is or ` +
+    `is not in the letter, call set_letter_words with the words you last saw and their wordsVersion ` +
+    `(${wordsVersion} for this preview's): if they changed on the card, its answer gives them as they are now.`
+  );
+}
+
+/**
+ * A letter preview's signature (#608 review round 1), for the narration:
+ * whether the saved signature prints, and when the account's choice decided
+ * it, so the person hears why, and that set_letter_signature changes it in
+ * place (#608 part 4). Nothing while signatures are not offered, with none
+ * saved, or for a call that said no signature.
+ */
+function signatureSentence(result: Record<string, unknown>): string {
+  const signature = result.signature as { printed?: unknown; source?: unknown } | undefined;
+  if (typeof signature?.printed !== "boolean") return "";
+  if (signature.source === "remembered") {
+    return signature.printed
+      ? " Signed with the person's saved signature, the account's choice; set_letter_signature with signature: false takes it off this letter."
+      : " Not signed: the account's choice is no signature; set_letter_signature with signature: true signs this letter.";
+  }
+  return signature.source === "asked" && signature.printed ? " Signed with the person's saved signature." : "";
+}
+
+/**
+ * Certified mail (#625), for the narration: which service the preview is, so
+ * the model says what the person is paying for. Empty for an ordinary letter.
+ */
+function mailServiceSentence(result: Record<string, unknown>): string {
+  switch (result.mailService) {
+    case "certified":
+      return " Once sent, it goes by USPS Certified Mail, which gives a tracking number.";
+    case "certified_return_receipt":
+      return " Once sent, it goes by USPS Certified Mail with an electronic return receipt, which gives a tracking number.";
+    default:
+      return "";
+  }
+}
+
+/**
+ * What a preview costs, for the narration's lead: the letters it takes from
+ * the balance, or Pay & Send for mail no pack pays for (#579), such as a
+ * letter of more than one page (#586). Never "requires 1 letter" for mail no
+ * number of letters pays for (#590 review round 1).
+ */
+function previewCost(result: Record<string, unknown>, lettersRequired: number | undefined): string {
+  const eligibility = result.sendEligibility as { packPays?: unknown } | undefined;
+  if (eligibility?.packPays === false) return "paid with Pay & Send";
+  const letters = lettersRequired ?? 1;
+  return `requires ${letters} ${letters === 1 ? 'letter' : 'letters'}`;
+}
+
+/**
+ * A letter of more than one page (#586), for the narration: its pages and the
+ * sheets they print on. Empty for one page.
+ */
+function pagesSentence(result: Record<string, unknown>): string {
+  const pages = result.pages;
+  if (pages !== 2 && pages !== 3) return "";
+  return pages === 2
+    ? " A two-page letter, printed on both sides of one sheet."
+    : " A three-page letter, printed on both sides of two sheets.";
+}
+
+/**
+ * A held preview's dates (#535), for the narration: the sentence the preview
+ * built with its own clock (its deliveryEstimate), and what a send then does.
+ * Empty for mail sent at once.
+ */
+function heldMailSentence(result: Record<string, unknown>): string {
+  const schedule = result.schedule as { arriveBy?: unknown; mailOn?: unknown } | undefined;
+  if (typeof schedule?.arriveBy !== "string" || typeof schedule.mailOn !== "string") return "";
+  const sentence = typeof result.deliveryEstimate === "string" && result.deliveryEstimate.startsWith("Goes to the printer")
+    ? result.deliveryEstimate
+    : scheduleSentence({ arriveBy: schedule.arriveBy, mailOn: schedule.mailOn }, new Date());
+  return ` Scheduled: ${sentence} If it is sent, it is held until then; USPS does not guarantee First-Class dates.`;
+}
+
+/**
+ * When mail sent at once usually arrives (#630), for a preview's narration: the
+ * preview's own deliveryEstimate, so an app whose model reads only the text
+ * can still say it. Empty for held mail, whose dates heldMailSentence gives.
+ */
+function deliverySentence(result: Record<string, unknown>): string {
+  if (heldMailSentence(result)) return "";
+  const estimate = result.deliveryEstimate;
+  return typeof estimate === "string" && estimate ? ` ${estimate}.` : "";
+}
+
+/**
+ * The sentence for mail sent with an arrival date that still waits for its
+ * mail date (#535), on a send or an order status: when it goes to the
+ * printer, and that it can be cancelled until then. The cancel is named only
+ * while cancel_scheduled_mail is listed (the flag); mail held before the flag
+ * went off still goes on its date.
+ */
+function scheduledOrderSentence(result: Record<string, unknown>): string {
+  const schedule = result.schedule as { arriveBy?: unknown; mailOn?: unknown } | undefined;
+  const arriveBy = typeof schedule?.arriveBy === "string" ? schedule.arriveBy : result.arriveBy;
+  const mailOn = typeof schedule?.mailOn === "string" ? schedule.mailOn : result.mailOn;
+  if (typeof arriveBy !== "string" || typeof mailOn !== "string") return "";
+  const cancel =
+    result.cancellable === true && isArriveByEnabled()
+      ? " It can be cancelled free until then with cancel_scheduled_mail."
+      : "";
+  return ` ${scheduleSentence({ arriveBy, mailOn }, new Date())}${cancel}`;
+}
+
+/**
+ * Mail whose status is "delivered" only passed the printer's estimated delivery
+ * date; no carrier confirmed it. Said in the text of every tool that gives a
+ * model an order's status (the output schemas' status descriptions say it for
+ * the models that read only the structured result), or the model says the mail
+ * was delivered (HOME-01).
+ */
+export const DELIVERED_IS_ESTIMATED =
+  "A delivered status means the printer's estimated delivery date has passed; no carrier confirmed it. Say its delivery is estimated, not that it was delivered.";
+
+/**
+ * The home's card shows its lists, so where an app draws our cards the model is
+ * asked not to list them again (#662): a turn that repeats twenty items as a
+ * table pushes the conversation away, as HOME-01 found. Where no card shows,
+ * the model needs the lists, so nothing is said.
+ */
+export const HOME_CARD_SHOWS_THE_LIST =
+  "The card shows these lists, so do not repeat them unless the person asks: mention only what needs the person, if anything (a draft to finish, scheduled mail, or mail that was returned or did not go out).";
+
+function deliveredSentence(orders: unknown): string {
+  return Array.isArray(orders) && orders.some(order => (order as { status?: unknown } | null)?.status === "delivered")
+    ? ` ${DELIVERED_IS_ESTIMATED}`
+    : "";
+}
+
+/** An address on one line, as get_address_request's text gives it (#604). */
+function addressLine(address: Record<string, unknown>): string {
+  const part = (key: string) => (typeof address[key] === "string" ? (address[key] as string).trim() : "");
+  const street = [part("name"), part("addressLine1"), part("addressLine2")].filter(Boolean).join(", ");
+  return `${street}, ${part("city")}, ${part("state")} ${part("postalCode")}`.trim();
+}
+
 export function summarizeToolResult(
   toolName: string,
-  result: Record<string, unknown>
+  result: Record<string, unknown>,
+  client: ClientProfile = callingApp(undefined)
 ): string {
   switch (toolName) {
+    case "get_profile": {
+      // Model-facing narration only; the id travels in structuredContent for
+      // ChatGPT, and the model has no use for it.
+      const email = result.email as string | undefined;
+      return email ? `Account: ${email}` : "Account identified.";
+    }
     case "get_account_balance": {
       const message = result.message as string;
       // Now returns lettersRemaining directly
@@ -911,7 +1777,7 @@ export function summarizeToolResult(
       // once a pack landed, and permanent in a transcript beside a card
       // reading "Ready to send". canSendNow and reasonCannotSend are still in
       // structuredContent, so the model can still offer to help buy.
-      let summary = `Preview ready: requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'}. The card shows whether it can be sent now and the options to proceed.`;
+      let summary = `Preview ready: ${previewCost(result, lettersRequired)}. The card shows whether it can be sent now and the options to proceed.${deliverySentence(result)}`;
       if (layoutType && layoutType !== 'text_only') {
         summary += ` Layout: ${layoutType.replace('_', ' ')}.`;
       }
@@ -922,13 +1788,62 @@ export function summarizeToolResult(
       if (warnings?.length) {
         summary += ` Note: ${warnings.join(' ')}`;
       }
+      summary += heldMailSentence(result);
+      summary += stationerySentence(result);
+      summary += signatureSentence(result);
+      summary += pagesSentence(result);
+      summary += mailServiceSentence(result);
+      summary += cardWordsSentence(result, client);
       return summary;
+    }
+    case "request_send":
+      return sendLinkText(result as unknown as RequestSendOutput);
+    case "set_arrival_date":
+      // The tool's own sentence, which also travels in structuredContent for
+      // the apps whose model reads only that (Claude Code).
+      return typeof result.message === "string" ? result.message : "The arrival date was updated.";
+    case "set_stationery":
+      // As for set_arrival_date: the tool's own sentence (#563).
+      return typeof result.message === "string" ? result.message : "The stationery was changed.";
+    case "set_mail_service":
+      // As for set_stationery: the tool's own sentence (#625).
+      return typeof result.message === "string" ? result.message : "How the letter travels was changed.";
+    case "set_letter_words":
+      // As for set_stationery: the tool's own sentence, with any change in pages (#586).
+      return typeof result.message === "string" ? result.message : "The letter's words were changed.";
+    case "set_postcard_style":
+      // As for set_stationery: the tool's own sentence, with how a new size is paid (#594).
+      return typeof result.message === "string" ? result.message : "The postcard's size or layout was changed.";
+    case "cancel_scheduled_mail":
+      // As for set_arrival_date: the sentence saying what went back.
+      return typeof result.message === "string" ? result.message : "The scheduled mail was cancelled.";
+    case "upload_photo_chunk":
+      // Card-only: a model sees this only in an app that shows card-only
+      // tools to it.
+      return result.done ? "The photo is uploaded." : "Part of the photo is uploaded.";
+    case "get_draft_status": {
+      // Card-only: a model sees this only in an app that shows card-only
+      // tools to it, and then it is a plain fact.
+      const orderId = typeof result.orderId === "string" ? ` as order ${result.orderId}` : "";
+      switch (result.status) {
+        case "sent":
+          return `That preview has been sent${orderId}.`;
+        case "expired":
+          return "That preview has expired.";
+        case "ready":
+          return "That preview has not been sent and can still be sent.";
+        default:
+          return "That preview was not found.";
+      }
     }
     case "send_letter": {
       const status = result.currentStatus ?? "unknown";
       const order = result.orderId ?? "(no id)";
       const note = result.saveReturnAddressNote as string | undefined;
-      let summary = `Letter ${order} queued with status ${status}.`;
+      let summary =
+        status === "scheduled"
+          ? `Letter ${order} is scheduled.${scheduledOrderSentence(result)}`
+          : `Letter ${order} queued with status ${status}.${status === "delivered" ? ` ${DELIVERED_IS_ESTIMATED}` : ""}`;
       if (note) {
         summary += ` ${note}`;
       }
@@ -936,12 +1851,26 @@ export function summarizeToolResult(
     }
     case "get_order_status": {
       const status = result.currentStatus ?? "unknown";
-      return `Latest order status: ${status}.`;
+      const summary =
+        status === "scheduled"
+          ? `Latest order status: scheduled.${scheduledOrderSentence(result)}`
+          : `Latest order status: ${status}.${status === "delivered" ? ` ${DELIVERED_IS_ESTIMATED}` : ""}`;
+      // Certified mail (#625): its tracking number, or that there is none yet, in the words the output carries.
+      return typeof result.certifiedNote === "string" ? `${summary} ${result.certifiedNote}` : summary;
     }
+    case "open_letter_home":
+      return `Letter IRL home: ${(result.drafts as unknown[]).length} active drafts and ${(result.orders as unknown[]).length} recent mail items (up to ${result.limit} each).${client.rendersCards ? ` ${HOME_CARD_SHOWS_THE_LIST}` : ""}${deliveredSentence(result.orders)}`;
     case "list_orders": {
       const orders = result.orders as any[];
       const total = result.total ?? 0;
-      return `Found ${orders?.length ?? 0} recent orders (${total} total).`;
+      const certified = (orders ?? []).filter(order => order?.mailService !== undefined).length;
+      return (
+        `Found ${orders?.length ?? 0} recent orders (${total} total).` +
+        deliveredSentence(orders) +
+        (certified > 0
+          ? ` ${certified} ${certified === 1 ? "is" : "are"} USPS Certified Mail: ${certified === 1 ? "its entry carries" : "their entries carry"} the USPS tracking number and link once the printer has given one, which Letter IRL looks for during the month after the printer accepts the letter.`
+          : "")
+      );
     }
     case "set_return_address": {
       const message = result.message as string;
@@ -959,7 +1888,7 @@ export function summarizeToolResult(
       const lettersRequired = result.lettersRequired as number | undefined;
       const usedSaved = result.usedSavedReturnAddress as boolean | undefined;
       // Same reasoning as the letter branch: no expiring claim about balance.
-      let summary = `Postcard preview ready: requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'}. The card shows whether it can be sent now and the options to proceed.`;
+      let summary = `Postcard preview ready: ${previewCost(result, lettersRequired)}. The card shows whether it can be sent now and the options to proceed.${deliverySentence(result)}`;
       if (usedSaved) {
         summary += " Using your saved return address.";
       }
@@ -967,13 +1896,17 @@ export function summarizeToolResult(
       if (warnings?.length) {
         summary += ` Note: ${warnings.join(' ')}`;
       }
+      summary += heldMailSentence(result);
       return summary;
     }
     case "send_postcard": {
       const status = result.currentStatus ?? "unknown";
       const order = result.orderId ?? "(no id)";
       const note = result.saveReturnAddressNote as string | undefined;
-      let summary = `Postcard ${order} queued with status ${status}.`;
+      let summary =
+        status === "scheduled"
+          ? `Postcard ${order} is scheduled.${scheduledOrderSentence(result)}`
+          : `Postcard ${order} queued with status ${status}.${status === "delivered" ? ` ${DELIVERED_IS_ESTIMATED}` : ""}`;
       if (note) {
         summary += ` ${note}`;
       }
@@ -984,6 +1917,21 @@ export function summarizeToolResult(
       return message || "Feature request submitted.";
     }
     case "get_started": {
+      if (!client.rendersCards) {
+        // No card shows the guide in this app, so the text carries it; the
+        // card-only wording below would have the model point at nothing
+        // (#484).
+        const examples = Array.isArray(result.examplePrompts) ? (result.examplePrompts as string[]) : [];
+        return [
+          result.overview,
+          result.purchaseStep,
+          examples.length ? `Things to try: ${examples.map((example) => `"${example}"`).join(", ")}.` : "",
+          // Claude dropped the letter packs link when paraphrasing (#475).
+          "Pass this on to the person in your own words, including any link."
+        ]
+          .filter((part): part is string => typeof part === "string" && part.length > 0)
+          .join(" ");
+      }
       // The summary used to be the card's own `overview` sentence, so the
       // model received the card's copy as its account of what happened and
       // dutifully restated it - overview, purchase step, and all three example
@@ -997,6 +1945,14 @@ export function summarizeToolResult(
       );
     }
     case "upload_image": {
+      // Where the card sends the photo itself there is no imageUrl (#474).
+      if (result.cardUploadAvailable === true && uploadsThroughCard(client)) {
+        return (
+          "The upload card is showing. Once the person has uploaded their photo, the card asks for the preview in " +
+          "the conversation. Then call the preview tool with no image and no imageUrl: Letter IRL uses the photo " +
+          "they just uploaded."
+        );
+      }
       const message = result.message as string;
       return message || "Photo picker ready. Waiting for user to select a photo.";
     }
@@ -1015,6 +1971,33 @@ export function summarizeToolResult(
       const suggestedNextStep = result.suggestedNextStep as string;
       return suggestedNextStep || "Photo uploaded. Use the imageUrl with a preview tool.";
     }
+    case "request_address":
+      // The sentence carries the link, which is given only here (#604).
+      return typeof result.message === "string" ? result.message : "The address request is ready.";
+    case "get_address_request": {
+      // With the address once answered, for an app whose model reads only the text (#604). The recipient typed it on
+      // a public page, so it is given as their quoted words, never as the tool's own sentence (#682).
+      const message = typeof result.message === "string" ? result.message : "The address request was checked.";
+      const recipient = result.recipient as Record<string, unknown> | undefined;
+      return recipient
+        ? `${message} The address the recipient gave, in their own words or as corrected for USPS: ${JSON.stringify(addressLine(recipient))}.`
+        : message;
+    }
+    case "cancel_address_request":
+      return typeof result.message === "string" ? result.message : "The address request was cancelled.";
+    case "set_letter_signature":
+      // As for set_stationery: the tool's own sentence, with any change in pages (#608).
+      return typeof result.message === "string" ? result.message : "The letter's signature was changed.";
+    case "save_stationery_design":
+    case "list_stationery_designs":
+    case "delete_stationery_design":
+      // The tool's own sentence (#649): the designs themselves are in its output.
+      return typeof result.message === "string" ? result.message : "The stationery designs were checked.";
+    case "set_signature":
+    case "get_signature":
+    case "clear_signature":
+      // The sentence only: the picture is the card's, in _meta (#608).
+      return typeof result.message === "string" ? result.message : "The signature was checked.";
     default:
       return JSON.stringify(result);
   }

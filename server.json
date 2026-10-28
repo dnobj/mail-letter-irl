@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.letterirl/letter-irl",
+  "title": "Letter IRL",
+  "description": "Write, preview and mail real letters and postcards to US addresses from your AI app.",
+  "version": "1.0.0",
+  "websiteUrl": "https://letterirl.com/connect",
+  "icons": [
+    {
+      "src": "https://letterirl.com/icon-512.png",
+      "mimeType": "image/png",
+      "sizes": ["512x512"]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.letterirl.com/mcp"
+    }
+  ]
+}

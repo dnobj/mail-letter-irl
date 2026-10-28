@@ -1,3 +1,4 @@
+import { ERASURE_FOLLOWUP_ALERT, ERASURE_FOLLOWUP_RESOLUTION } from "../../services/accountErasureService.js";
 import type { AlertFilter, AlertView, WebhookEventView } from "../queries/alerts.js";
 import type { BlockedAccountView, DisputeView } from "../queries/disputes.js";
 import type { JobView } from "../queries/jobs.js";
@@ -35,13 +36,13 @@ export function renderAlerts(input: {
   )}</p>
 ${table(
   "Alerts",
-  ["Alert", "Type", "Severity", "Status", "Order", "Source event", "Raised", "Updated"],
+  ["Alert", "Type", "Severity", "Status", "Order or account", "Source event", "Raised", "Updated"],
   input.alerts.map((alert) => [
     alertLink(alert.alertId),
     html`${alert.alertType}`,
     statusBadge(alert.severity),
     statusBadge(alert.status),
-    orderLink(alert.orderId),
+    alertSubjectLink(alert),
     html`<span class="mono">${alert.sourceEventId ?? "—"}</span>`,
     when(alert.createdAt),
     when(alert.updatedAt),
@@ -66,22 +67,47 @@ ${table(
 )}`;
 }
 
+/** An alert's order, or the account its details name when it has no order. */
+export function alertSubjectLink(alert: AlertView): SafeHtml {
+  return alert.orderId ? orderLink(alert.orderId) : accountLink(alert.accountUserId);
+}
+
 export function renderAlertDetail(input: { alert: AlertView; actions: SafeHtml }): SafeHtml {
   const { alert } = input;
+  const account: Array<[string, SafeHtml]> = alert.accountUserId
+    ? [["account", html`${accountLink(alert.accountUserId)} ${copyButton(alert.accountUserId)}`]]
+    : [];
   return html`<h1>Alert <span class="mono">${alert.alertId}</span> ${copyButton(alert.alertId)}</h1>
 ${definitionList([
   ["type", alert.alertType],
   ["severity", statusBadge(alert.severity)],
   ["status", statusBadge(alert.status)],
   ["order", orderLink(alert.orderId)],
+  ...account,
   ["source event", html`<span class="mono">${alert.sourceEventId ?? "—"}</span>`],
   ["raised", html`${formatDate(alert.createdAt)} (${when(alert.createdAt)})`],
   ["acknowledged", when(alert.acknowledgedAt)],
   ["resolved", html`${alert.resolvedAt ? when(alert.resolvedAt) : "—"} ${alert.resolutionCode ? html`<code>${alert.resolutionCode}</code>` : ""}`],
 ])}
+${alert.alertType === ERASURE_FOLLOWUP_ALERT ? erasureFollowupSteps(alert) : ""}
 <h2>Details</h2>
 <pre>${alert.details}</pre>
 ${input.actions}`;
+}
+
+/**
+ * What an erasure leaves by hand (#453, docs/account-erasure.md). No service
+ * can delete an Auth0 user, so the steps are written out where the alert is
+ * resolved.
+ */
+function erasureFollowupSteps(alert: AlertView): SafeHtml {
+  return html`<h2>What is left to do</h2>
+<p>The account was erased. These steps are done by hand:</p>
+<ol>
+  <li>In this environment's Auth0 tenant, open User Management → Users, search for <span class="mono">${alert.accountUserId ?? "the account id"}</span> and delete the user. That removes the name and email Auth0 holds, and every sign-in method linked to it.</li>
+  <li>If the id is listed in <code>LETTER_IRL_BETA_ALLOWED_SUBJECTS</code> or <code>LETTER_IRL_ADMIN_USER_IDS</code> on the API service, take it out.</li>
+  <li>Then resolve this alert with the code <code>${ERASURE_FOLLOWUP_RESOLUTION}</code>.</li>
+</ol>`;
 }
 
 export function renderJobs(input: { attention: JobView[]; recent: JobView[] }): SafeHtml {
@@ -119,6 +145,7 @@ ${definitionList([
   ["attempts", html`${job.attempts} of ${job.maxAttempts}`],
   ["scheduled", when(job.scheduledAt)],
   ["next attempt", when(job.nextAttemptAt)],
+  ["held for its mail date until", when(job.heldUntil)],
   ["locked", when(job.lockedAt)],
   ["provider order id", yesNo(job.hasProviderOrderId)],
   ["dispatch started", when(job.providerDispatchStartedAt)],
@@ -178,7 +205,7 @@ ${definitionList([
   ["database marker", html`<code>${health.marker ?? "missing"}</code>`],
   ["latest migration", html`<code>${health.latestMigration ?? "unknown"}</code>`],
   ["stuck orders (paid / fulfilment pending / refund pending for 30+ min)", health.stuckOrders],
-  ["orders in amount-mismatch quarantine", health.quarantinedOrders],
+  ["orders held for a person (amount mismatch, or a refund that did not complete)", health.quarantinedOrders],
   ["outbox due now", health.outbox.pendingDue],
   ["outbox scheduled later", health.outbox.pendingLater],
   ["processing for 10+ min", health.outbox.processingStale],

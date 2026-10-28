@@ -3,3 +3,8 @@ widgets/*.html text eol=lf
 # A CRLF here makes the kernel read the shebang as "/bin/sh\r" and the
 # container fails to start with a misleading "no such file" error.
 *.sh text eol=lf
+# Vitest compares a file snapshot as written, so it keeps vitest's own LF on every checkout.
+tests/**/__snapshots__/*.json text eol=lf
+
+# The renderer's fonts are pinned by their hash (#697): never converted on checkout.
+assets/fonts/*.ttf binary

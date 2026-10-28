@@ -13,11 +13,15 @@ import {
 } from './priceCatalog.js';
 import { BACKGROUND_REQUEST_OPTIONS, getStripeClient } from './stripeClient.js';
 import {
+  JIT_PRODUCTS,
   PACK_PRODUCTS,
   getConfiguredProduct,
+  isJitProductSold,
   jitCurrency,
-  jitProductDefinition,
+  jitProductFor,
   packCurrency,
+  type JitProductDefinition,
+  type MailOption,
   type PackProductId
 } from '../config/products.js';
 
@@ -70,11 +74,33 @@ export function getPackProductConfig(productId: PackProductId): CommerceProductC
   };
 }
 
-export function getJitProductConfig(mailType: MailType): CommerceProductConfig {
-  // The shared lookup, so the unknown-mail-type fallback policy is not
-  // written once here and once in jitProductCode - the quote path kicks and
-  // clears through one and prices through the other (#278 round 9).
-  const definition = jitProductDefinition(mailType);
+/**
+ * The Pay & Send config for a mail option, or null when this deployment sells
+ * no product that matches it (#578). Null is not the unpriced sentinel: no
+ * price exists to resolve, so a quote offers no Pay & Send and a checkout is
+ * refused, rather than charging a smaller option's price.
+ */
+export function getJitProductConfig(option: MailOption): CommerceProductConfig | null {
+  // The shared lookup, so the unknown-mail-type fallback policy is written
+  // once, in products.ts - the quote path kicks and clears through the same
+  // product it prices (#278 round 9).
+  const definition = jitProductFor(option);
+  return definition ? jitProductConfig(definition, option.mailType) : null;
+}
+
+/**
+ * The Pay & Send config for the product an order recorded, or null when it is
+ * no longer sold. A checkout is priced by the order's own product, so an
+ * option's order can never be re-priced as another option (#578).
+ */
+export function getJitProductConfigForCode(productCode: string): CommerceProductConfig | null {
+  const definition = JIT_PRODUCTS.find(product => product.productCode === productCode);
+  return definition && isJitProductSold(definition)
+    ? jitProductConfig(definition, definition.mailType)
+    : null;
+}
+
+function jitProductConfig(definition: JitProductDefinition, mailType: MailType): CommerceProductConfig {
   const configured = getConfiguredProduct(definition.productCode);
   const resolved = getResolvedPriceForProduct(definition.productCode);
   return {
@@ -324,39 +350,72 @@ export async function createPartialPaymentRefund(params: {
 /**
  * Every refund on a payment, newest first. The pack-refund sweep lists BEFORE
  * it retries a create, because Stripe may prune an idempotency key after 24
- * hours and a retry past that point would create a second refund.
+ * hours and a retry past that point would create a second refund. Refused
+ * rather than partial when there is more than one page (#730): the sweep
+ * compensates on "not in the list", which a partial list would make wrong.
+ * A pack is at most 50 letters, so a hundred refunds on one payment is not a
+ * real case.
  */
 export async function listPaymentRefunds(paymentIntentId: string): Promise<Stripe.Refund[]> {
   const refunds = await getStripeClient().refunds.list(
     { payment_intent: paymentIntentId, limit: 100 },
     BACKGROUND_REQUEST_OPTIONS
   );
-  return refunds.data;
+  return wholeRefundList(refunds);
+}
+
+/** A page of refunds that is the whole list, or an error. */
+export function wholeRefundList(page: { data: Stripe.Refund[]; has_more: boolean }): Stripe.Refund[] {
+  if (page.has_more) {
+    throw Object.assign(new Error('More refunds than one page; not deciding on part of the list'), {
+      diagnosticClass: 'refund_list_incomplete'
+    });
+  }
+  return page.data;
 }
 export async function retrieveRefund(refundId: string): Promise<Stripe.Refund> {
   return getStripeClient().refunds.retrieve(refundId, undefined, BACKGROUND_REQUEST_OPTIONS);
 }
 
+/**
+ * What a payment's refunds say about one order's full refund (#730).
+ *
+ * `live` is the refund to adopt: one the app made for this order (it names
+ * the order in metadata), or one made in the Stripe dashboard, which names
+ * nothing, for at least the whole known amount. `ended` is such a refund
+ * that failed or was cancelled: the sweep then holds the order for a person
+ * rather than make another. A proportional refund carries its command id and
+ * is never the order's refund: adopting one would finalise a whole-pack
+ * revocation against a partial payment (#323). A refund naming another order
+ * is not this one's, and one naming nothing is adopted only against a known
+ * amount, so a dashboard partial is never taken for the whole.
+ */
+export interface OrderRefundSearch {
+  live: Stripe.Refund | null;
+  ended: Stripe.Refund | null;
+}
+
+export function classifyOrderRefunds(
+  refunds: Stripe.Refund[],
+  orderId: string,
+  knownAmountCents: number | null
+): OrderRefundSearch {
+  const theOrders = refunds.filter(refund => {
+    if (refund.metadata?.packRefundId) return false;
+    if (refund.metadata?.orderId) return refund.metadata.orderId === orderId;
+    return knownAmountCents !== null && knownAmountCents > 0 && refund.amount >= knownAmountCents;
+  });
+  const ended = (refund: Stripe.Refund) => ['failed', 'canceled'].includes(refund.status || '');
+  return {
+    live: theOrders.find(refund => !ended(refund)) ?? null,
+    ended: theOrders.find(ended) ?? null
+  };
+}
+
 export async function findPaymentRefund(
   paymentIntentId: string,
-  orderId: string
-): Promise<Stripe.Refund | null> {
-  const refunds = await getStripeClient().refunds.list(
-    {
-      payment_intent: paymentIntentId,
-      limit: 100
-    },
-    BACKGROUND_REQUEST_OPTIONS
-  );
-  return (
-    refunds.data.find(
-      refund =>
-        refund.metadata?.orderId === orderId &&
-        // A proportional refund carries the command id and is never 'the'
-        // refund of an order: adopting one here would finalise a whole-pack
-        // revocation against a partial payment (#323).
-        !refund.metadata?.packRefundId &&
-        !['failed', 'canceled'].includes(refund.status || '')
-    ) || null
-  );
+  orderId: string,
+  knownAmountCents: number | null
+): Promise<OrderRefundSearch> {
+  return classifyOrderRefunds(await listPaymentRefunds(paymentIntentId), orderId, knownAmountCents);
 }

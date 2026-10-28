@@ -5,15 +5,17 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promises as fs } from "node:fs";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { McpServer, createMcpHandler, type McpHttpHandler } from "@modelcontextprotocol/server";
+import { toNodeHandler, type NodeIncomingMessageLike } from "@modelcontextprotocol/node";
 import { LetterIrlServer } from "../server.js";
-import { registerLetterTools } from "./registerTools.js";
+import { registerLetterTools, servedWidgetFile, type RegisterToolsOptions } from "./registerTools.js";
 import { logMcpClientRequests } from "./clientRequestLog.js";
-import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
+import { hostOrOriginRefusal, PARSE_ERROR_BODY, toSdkAuthInfo, userFromSdkAuthInfo } from "./mcpEndpoint.js";
+import { buildServerInstructions } from "./serverInstructions.js";
+import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
 import { stringifyManifest } from "./manifest.js";
+import { inlineHostBridge } from "./widgetHost.js";
 import {
   AuthenticatedUser,
   validateAuthorizationHeader
@@ -23,16 +25,22 @@ import { handleCreditApiRequest } from "../api/creditApiHandler.js";
 import { handlePATApiRequest } from "../api/patApiHandler.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
 import { handleReturnAddressApiRequest } from "../api/returnAddressApiHandler.js";
+import { handleSignatureApiRequest, SIGNATURE_API_PATH } from "../api/signatureApiHandler.js";
+import { handleSendConfirmationApiRequest } from "../api/sendConfirmationApiHandler.js";
+import { ADDRESS_REQUEST_API_PREFIX, handleAddressRequestApiRequest } from "../api/addressRequestApi.js";
 import { handleTempImageRequest } from "../api/tempImageHandler.js";
 import {
   handleCreateCheckoutSession,
   handleStripeWebhook
 } from "../api/dashboardApiHandler.js";
 import { validatePromoCodePublic } from "../services/promoService.js";
+import { lookupGiftCodePublic } from "../services/giftLetterService.js";
+import { giftCodeFromPath } from "../services/giftCodes.js";
+import { ourCheckoutUrl } from "../services/commerceService.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
 import {
-  decidePurchaseStart,
+  resolvePurchaseStart,
   purchaseReturnDiagnostics,
   purchaseStartDiagnostics,
   readReturnCookie,
@@ -56,16 +64,21 @@ import {
   classifyDiagnosticError,
   writeDiagnostic
 } from "../utils/diagnosticLog.js";
-import { buildWwwAuthenticateChallenge } from "../auth/oauthChallenge.js";
+import { buildWwwAuthenticateChallenge, InsufficientScopeError } from "../auth/oauthChallenge.js";
 import { validatePublicServerAdminConfiguration } from "../admin/config.js";
 import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
 import { getReadiness } from "./readiness.js";
 import { kickPriceCatalog } from "../services/priceCatalog.js";
+import { reportDailyLimitDefaults } from "../services/dailyLimits.js";
+import { settleOperatorNotices } from "../services/operatorNotify.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 import { resolveCorsOriginFor } from "./corsOrigin.js";
 import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js";
+import { APPS_CHALLENGE_PATH, appsChallengeResponse } from "./appsChallenge.js";
 import { logRestRequestOnFinish } from "../api/restRequestLog.js";
+import { CAPABILITIES_PATH, handleCapabilitiesRequest } from "../api/capabilitiesApi.js";
 import { OAUTH_NOT_CONFIGURED } from "../auth/oauthErrors.js";
+import { clientLogFields, resolveClientProfile } from "../auth/clientProfiles.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,18 +88,18 @@ const DEFAULT_HOST = process.env.LETTER_IRL_HTTP_HOST ?? "0.0.0.0";
 // Railway sets PORT env var; fall back to LETTER_IRL_HTTP_PORT for local dev
 const DEFAULT_PORT = Number(process.env.PORT ?? process.env.LETTER_IRL_HTTP_PORT ?? "8090");
 const MCP_PATH = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
-const SSE_PATH = process.env.LETTER_IRL_SSE_PATH ?? "/mcp/sse";
-const SSE_MESSAGES_PATH =
-  process.env.LETTER_IRL_SSE_MESSAGES_PATH ?? "/mcp/sse/messages";
+/**
+ * The legacy SSE transport's paths, retired (#730). Its message POSTs carried
+ * no credential, only the session id in the query string, and a stream ran on
+ * the token it opened with until it closed. Every client Letter IRL supports
+ * speaks streamable HTTP at MCP_PATH; these answer 410 and say so. Both
+ * deployments ran it at GET /mcp with its messages at /messages
+ * (set by two SSE path variables this code no longer reads); the
+ * defaults were /mcp/sse and /mcp/sse/messages.
+ */
+const RETIRED_SSE_PATHS: ReadonlySet<string> = new Set(["/mcp/sse", "/mcp/sse/messages", "/messages"]);
 const WIDGET_PATH = process.env.LETTER_IRL_WIDGET_PATH ?? "/widgets";
 const MANIFEST_ROUTE = process.env.LETTER_IRL_MANIFEST_ROUTE ?? "/manifest.json";
-const OPENID_CONFIG_ROUTE =
-  process.env.LETTER_IRL_OPENID_ROUTE ?? "/.well-known/openid-configuration";
-const PROTECTED_RESOURCE_ROUTE =
-  process.env.LETTER_IRL_PROTECTED_RESOURCE_ROUTE ??
-  "/.well-known/oauth-protected-resource";
-const AUTHORIZATION_SERVER_ROUTE =
-  process.env.LETTER_IRL_AUTH_SERVER_ROUTE ?? "/.well-known/oauth-authorization-server";
 const FALLBACK_ORIGIN =
   process.env.LETTER_IRL_DEFAULT_ORIGIN ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const PUBLIC_BASE_URL =
@@ -166,12 +179,6 @@ export function validateEnvironment() {
   }
 }
 
-type SseSession = {
-  server: McpServer;
-  transport: SSEServerTransport;
-  authInfo: AuthenticatedUser | null;
-};
-
 /**
  * Parse request body with timeout and error handling
  */
@@ -228,16 +235,21 @@ function getAllowedOrigins(): string[] {
     .filter(Boolean);
 }
 
-function matchesWellKnownRoute(pathname: string, baseRoute: string) {
-  return pathname === baseRoute || pathname === `${baseRoute}${MCP_PATH}`;
-}
-
 function firstHeaderValue(value: string | string[] | undefined): string | undefined {
   const raw = Array.isArray(value) ? value[0] : value;
   return raw?.split(",")[0]?.trim();
 }
 
+/**
+ * The origin the manifest, the OAuth metadata and the 401 challenge name.
+ * Pinned to LETTER_IRL_PUBLIC_BASE_URL wherever it is set (#730): taken from a
+ * request's forwarded headers, a caller could name another host in the URLs
+ * those documents hand to clients. Both deployments set it; a local run or a
+ * test without it still reads the request.
+ */
 export function getPublicBaseUrl(req: Pick<http.IncomingMessage, "headers">): string {
+  const configured = process.env.LETTER_IRL_PUBLIC_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
   const host = firstHeaderValue(req.headers["x-forwarded-host"]) ?? firstHeaderValue(req.headers.host);
   if (!host) {
     return PUBLIC_BASE_URL;
@@ -250,16 +262,25 @@ export function getPublicBaseUrl(req: Pick<http.IncomingMessage, "headers">): st
   return `${proto}://${host}`;
 }
 
-async function serveWidget(
+export async function serveWidget(
   widgetName: string,
   res: http.ServerResponse
 ): Promise<boolean> {
-  const safeName = path.basename(widgetName);
-  const filePath = path.join(DEFAULT_WIDGET_DIR, safeName);
+  // Only a card the app serves, by its own file name (#730): the directory
+  // also holds notes and shared parts, and a card while its flag is off.
+  const file = servedWidgetFile(widgetName.replace(/\.html$/, ""));
+  if (!file) return false;
+  const filePath = path.join(DEFAULT_WIDGET_DIR, `${file}.html`);
   try {
-    const file = await fs.readFile(filePath, "utf-8");
+    // With the shared bridge inlined (#474), as resources/read serves it.
+    const file = inlineHostBridge(await fs.readFile(filePath, "utf-8"), DEFAULT_WIDGET_DIR);
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
+    // No page may frame a card from here (#684): hosts load cards through
+    // resources/read, never this URL. Opened directly, a card runs as an
+    // opaque origin with no network, so it is a picture of itself (#730).
+    res.setHeader("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'none'");
+    res.setHeader("X-Frame-Options", "DENY");
     res.end(file);
     return true;
   } catch (error) {
@@ -272,15 +293,56 @@ async function serveWidget(
   }
 }
 
-async function createMcpServer(letterServer: LetterIrlServer, authInfo: AuthenticatedUser | null) {
+/** One MCP server for one request or stream, in the calling app's words (#484). */
+export async function createMcpServer(
+  letterServer: LetterIrlServer,
+  authInfo: AuthenticatedUser | null,
+  options: RegisterToolsOptions = {}
+) {
   const mcpServer = new McpServer({
     name: "letter-irl",
     version: "0.1.0"
   }, {
-    instructions: LETTER_IRL_SERVER_INSTRUCTIONS
+    // In the calling app's words (#484), as its tool descriptions are. SDK v2 also answers server/discover with
+    // them, so a 2026-07-28 client reads its own app's instructions too.
+    instructions: buildServerInstructions(isSendConfirmationEnabled(), resolveClientProfile(authInfo)),
+    cacheHints: MCP_CACHE_HINTS
   });
-  await registerLetterTools(mcpServer, letterServer, authInfo);
+  await registerLetterTools(mcpServer, letterServer, authInfo, options);
   return mcpServer;
+}
+
+/**
+ * How long a 2026-07-28 client may keep each list or read, and who may share it (#477): not at all, and only the
+ * caller. The tools, their descriptions, the instructions and the cards all differ by app and by flag, so a list
+ * cached as public could be handed to another token's app. These are the SDK's defaults today, said here so a
+ * change of default cannot change them (tests/unit/mcp/mcpEndpoint.test.ts).
+ */
+export const MCP_CACHE_HINTS = Object.fromEntries(
+  ["tools/list", "prompts/list", "resources/list", "resources/templates/list", "resources/read", "server/discover"].map(method => [
+    method,
+    { ttlMs: 0, cacheScope: "private" as const }
+  ])
+);
+
+/**
+ * The /mcp handler (#477): SDK v2 serves 2026-07-28 requests and, statelessly, 2025-era ones, from one factory, so
+ * the two eras are served the same tools. One server per request, as before, for the caller we signed in, which
+ * reaches the factory as the request's authInfo. A 2026-07-28 request is answered in JSON (responseMode): nothing
+ * here streams. A 2025 one is answered as SDK v1 answered it, one event on an SSE response, which the SDK's
+ * stateless leg does whatever responseMode says.
+ * No subscriptions/listen streams either: we publish no change events, and the SDK's cap on open streams is one count
+ * for the whole process, so one client holding streams open could refuse every other client's.
+ */
+export function createLetterMcpHandler(letterServer: LetterIrlServer): McpHttpHandler {
+  return createMcpHandler(async ({ authInfo }) => createMcpServer(letterServer, userFromSdkAuthInfo(authInfo)), {
+    legacy: "stateless",
+    responseMode: "json",
+    maxSubscriptions: 0,
+    onerror: (error) => {
+      writeDiagnostic("warn", "mcp.handler_error", { errorClass: classifyDiagnosticError(error, "transport_error") });
+    }
+  });
 }
 
 export async function startHttpServer() {
@@ -289,9 +351,14 @@ export async function startHttpServer() {
 
   const letterServer = new LetterIrlServer();
   let cachedToolNames: Set<string> | null = null;
-  const sseSessions = new Map<string, SseSession>();
   const allowedHosts = getAllowedHosts();
   const allowedOrigins = getAllowedOrigins();
+  const mcpHandler = createLetterMcpHandler(letterServer);
+  const serveMcp = toNodeHandler(mcpHandler, {
+    onerror: (error) => {
+      writeDiagnostic("error", "mcp.request_failed", { errorClass: classifyDiagnosticError(error, "transport_error") });
+    }
+  });
 
   // Allowlist or fallback, never a wildcard: see corsOrigin.ts for the
   // "null" origin case this used to special-case.
@@ -305,125 +372,9 @@ export async function startHttpServer() {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Methods": "GET, POST, DELETE, PATCH, OPTIONS",
-      "Access-Control-Allow-Headers": "authorization, content-type, mcp-session-id"
+      "Access-Control-Allow-Headers": "authorization, content-type, mcp-session-id, mcp-protocol-version, mcp-method, mcp-name"
     });
     res.end();
-  };
-
-  const handleSseStreamRequest = async (
-    req: http.IncomingMessage,
-    res: http.ServerResponse
-  ) => {
-    const origin = resolveCorsOrigin(req.headers.origin);
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
-
-    const acceptHeader = req.headers.accept ?? "";
-    if (!acceptHeader.includes("text/event-stream")) {
-      res.writeHead(406, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          error: "Not Acceptable: Client must accept text/event-stream"
-        })
-      );
-      return;
-    }
-
-    const authInfo = await authenticateRequest(req, res, getPublicBaseUrl(req));
-    if (authInfo === null) {
-      return;
-    }
-
-    const sessionServer = await createMcpServer(letterServer, authInfo);
-
-    const sseTransport = new SSEServerTransport(SSE_MESSAGES_PATH, res, {
-      allowedHosts,
-      allowedOrigins,
-      enableDnsRebindingProtection: true
-    });
-
-    sseTransport.onclose = async () => {
-      sseSessions.delete(sseTransport.sessionId);
-      await sessionServer.close();
-    };
-    sseTransport.onerror = (error) => {
-      writeDiagnostic("error", "mcp.sse_transport_error", {
-        errorClass: classifyDiagnosticError(error, "transport_error")
-      });
-    };
-
-    try {
-      await sessionServer.connect(sseTransport);
-      sseSessions.set(sseTransport.sessionId, {
-        server: sessionServer,
-        transport: sseTransport,
-        authInfo
-      });
-      writeDiagnostic("info", "mcp.sse_session_established", {
-        authType: authInfo?.authType ?? "disabled"
-      });
-    } catch (error) {
-      writeDiagnostic("error", "mcp.sse_session_start_failed", {
-        errorClass: classifyDiagnosticError(error, "transport_error")
-      });
-      try {
-        await sessionServer.close();
-      } catch (closeError) {
-        writeDiagnostic("warn", "mcp.sse_session_close_failed", {
-          errorClass: classifyDiagnosticError(closeError, "transport_error")
-        });
-      }
-      if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Failed to establish SSE connection" }));
-      }
-    }
-  };
-
-  const handleSsePostRequest = async (
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-    url: URL
-  ) => {
-    const origin = resolveCorsOrigin(req.headers.origin);
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "authorization, content-type, mcp-session-id"
-    );
-
-    const sessionId = url.searchParams.get("sessionId");
-    if (!sessionId) {
-      res.writeHead(400).end("Missing sessionId query parameter");
-      return;
-    }
-
-    const session = sseSessions.get(sessionId);
-    if (!session) {
-      res.writeHead(404).end("Unknown session");
-      return;
-    }
-
-    (req as any).auth = session.authInfo ?? undefined;
-
-    // Tool calls arrive here on the legacy transport. Until 2026-09-13 this
-    // route had no limiter at all, so one SSE stream bought unlimited tool
-    // calls. It runs after the session lookup, which is where the account
-    // becomes known, so the limit is per account like the modern transport's.
-    if (await rateLimitMiddlewareWithTier(req, res, 'mcp_account')) {
-      return;
-    }
-
-    try {
-      await session.transport.handlePostMessage(req, res);
-    } catch (error) {
-      writeDiagnostic("error", "mcp.sse_message_failed", {
-        errorClass: classifyDiagnosticError(error, "transport_error")
-      });
-      if (!res.headersSent) {
-        res.writeHead(500).end("Failed to process message");
-      }
-    }
   };
 
   // Every route runs inside one exception boundary (src/mcp/requestBoundary.ts):
@@ -450,6 +401,14 @@ export async function startHttpServer() {
       return;
     }
 
+    if (url.pathname === APPS_CHALLENGE_PATH) {
+      // The plugin portal's domain verification (src/mcp/appsChallenge.ts).
+      const answer = appsChallengeResponse(req.method);
+      res.writeHead(answer.status, answer.headers);
+      res.end(answer.body);
+      return;
+    }
+
     if (url.pathname === "/readyz") {
       // Readiness as distinct from liveness (issue #155): configured, database
       // reachable, mail routing pointed at real providers. /healthz stays a
@@ -464,30 +423,18 @@ export async function startHttpServer() {
       return;
     }
 
-    if (
-      req.method === "OPTIONS" &&
-      (url.pathname === SSE_PATH || url.pathname === SSE_MESSAGES_PATH)
-    ) {
-      respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
+    if (RETIRED_SSE_PATHS.has(url.pathname)) {
+      res.writeHead(410, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({
+        error: "gone",
+        message: `The SSE transport is retired. Connect with streamable HTTP at ${MCP_PATH}.`
+      }));
       return;
     }
 
-    if (req.method === "GET" && url.pathname === SSE_PATH) {
-      // Rate limit SSE connection attempts
-      if (await rateLimitMiddlewareWithTier(req, res, 'mcp')) {
-        return; // Rate limited
-      }
-      await handleSseStreamRequest(req, res);
-      return;
-    }
-
-    if (url.pathname === SSE_MESSAGES_PATH) {
-      if (req.method === "POST") {
-        await handleSsePostRequest(req, res, url);
-        return;
-      }
-      res.writeHead(405, { Allow: "POST, OPTIONS" });
-      res.end();
+    // What Letter IRL does and costs, for agents and the website (#630).
+    if (url.pathname === CAPABILITIES_PATH) {
+      handleCapabilitiesRequest(req, res, { mcpServer: `${getPublicBaseUrl(req)}${MCP_PATH}` });
       return;
     }
 
@@ -595,14 +542,31 @@ export async function startHttpServer() {
 
     // Checkout start page (#372): the card opens this through openExternal so
     // ChatGPT can append the way back into the conversation; the page keeps it
-    // in a same-site cookie and forwards to Stripe. Stateless; only Stripe's
-    // hosted checkout is an accepted destination and only ChatGPT origins an
-    // accepted return, so it is not an open redirect.
+    // in a same-site cookie and forwards to Stripe. It forwards only to the
+    // checkout address one of our orders recorded for the link's session
+    // (#730), looked up by the session's indexed id, and only to a ChatGPT
+    // origin as the return, so it is not an open redirect.
     if (url.pathname === '/purchase/start' && req.method === 'GET') {
-      const decision = decidePurchaseStart({
-        to: url.searchParams.get('to'),
-        redirectUrl: url.searchParams.get('redirectUrl')
-      });
+      // Its own limits, per address and in all: it reads the database
+      // without a sign-in (#730).
+      if (rateLimitMiddlewareWithGlobal(req, res, 'purchase_start')) return;
+      let decision: Awaited<ReturnType<typeof resolvePurchaseStart>>;
+      try {
+        decision = await resolvePurchaseStart(
+          { to: url.searchParams.get('to'), redirectUrl: url.searchParams.get('redirectUrl') },
+          ourCheckoutUrl
+        );
+      } catch (error) {
+        writeDiagnostic('error', 'purchase.start_lookup_failed', {
+          errorClass: classifyDiagnosticError(error, 'database_error')
+        });
+        res.statusCode = 503;
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Retry-After', '5');
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end('Checkout could not be opened just now. Try again in a moment.');
+        return;
+      }
       // Presence, hosts and outcome only: the return link names a
       // conversation and the target is a live checkout session.
       writeDiagnostic("info", "purchase.start", purchaseStartDiagnostics({
@@ -682,6 +646,18 @@ export async function startHttpServer() {
       return;
     }
 
+    // The address request page's API (#604): public, signed out, the token
+    // in the body. Its own rate limits, and 404 while address requests are off.
+    if (url.pathname.startsWith(ADDRESS_REQUEST_API_PREFIX)) {
+      const origin = resolveCorsOrigin(req.headers.origin);
+      if (req.method === 'OPTIONS') {
+        respondToCorsPreflight(res, origin);
+        return;
+      }
+      await handleAddressRequestApiRequest(req, res, url.pathname, origin);
+      return;
+    }
+
     // Public promo validation endpoint (no auth required - for preview access)
     if (url.pathname.startsWith('/api/public/promo/validate/') && req.method === 'GET') {
       const origin = resolveCorsOrigin(req.headers.origin);
@@ -716,8 +692,41 @@ export async function startHttpServer() {
       return;
     }
 
-    // Handle CORS preflight for public promo endpoint
-    if (url.pathname.startsWith('/api/public/promo/') && req.method === 'OPTIONS') {
+    // Public gift code lookup (docs/gift-letters.md): what the claim page may
+    // know before sign-in. Validity, kind and a redeem-by date; never who sent
+    // it. Shares the promo_public budget, since both answer "is this a code".
+    if (url.pathname.startsWith('/api/public/gift/') && req.method === 'GET') {
+      const origin = resolveCorsOrigin(req.headers.origin);
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Content-Type', 'application/json');
+      if (rateLimitMiddlewareWithGlobal(req, res, 'promo_public')) return;
+
+      // Empty, or a malformed percent-encoding: a bad request, not a fault.
+      const code = giftCodeFromPath(url.pathname);
+      if (!code) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ valid: false, reason: 'not_found' }));
+        return;
+      }
+      try {
+        const result = await lookupGiftCodePublic(code);
+        res.statusCode = 200;
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        writeDiagnostic('error', 'gift.public_lookup_failed', {
+          errorClass: classifyDiagnosticError(error, 'database_error')
+        });
+        res.statusCode = 500;
+        res.end(JSON.stringify({ valid: false, reason: 'unavailable' }));
+      }
+      return;
+    }
+
+    // Handle CORS preflight for public promo and gift endpoints
+    if (
+      (url.pathname.startsWith('/api/public/promo/') || url.pathname.startsWith('/api/public/gift/')) &&
+      req.method === 'OPTIONS'
+    ) {
       respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
       return;
     }
@@ -863,14 +872,53 @@ export async function startHttpServer() {
       return;
     }
 
+    // The saved signature (#608), for the website's signature page.
+    if (url.pathname === SIGNATURE_API_PATH) {
+      if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+    }
+    if (await handleSignatureApiRequest(req, res, url.pathname)) {
+      return;
+    }
+
+    // The confirmation page's API (#470): where the person sends a preview.
+    if (url.pathname.startsWith('/api/sends')) {
+      if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+    }
+    const sendsApiHandled = await handleSendConfirmationApiRequest(req, res, url.pathname);
+    if (sendsApiHandled) {
+      return;
+    }
+
+    if (url.pathname === MCP_PATH && req.method === "OPTIONS") {
+      // A browser's preflight carries no credential: answered before the
+      // limiter and sign-in, as the SSE route answered it until #730. Every
+      // client today is a server-side one; /mcp's POST sets no CORS origin.
+      respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
+      return;
+    }
+
+    if (url.pathname === MCP_PATH && req.method === "GET") {
+      // No server-initiated stream (#730): every request builds its own
+      // server and transport, so a GET stream would carry nothing and only
+      // hold a connection open. The MCP spec allows 405 here.
+      res.writeHead(405, { Allow: "POST, OPTIONS", "Cache-Control": "no-store" });
+      res.end();
+      return;
+    }
+
     if (url.pathname === MCP_PATH) {
       // Rate limit MCP tool calls
       if (await rateLimitMiddlewareWithTier(req, res, 'mcp')) {
         return; // Rate limited
       }
 
-      // Cached once: the registry is static for the process lifetime.
-      cachedToolNames ??= new Set(letterServer.listTools().map((tool) => tool.name));
+      // Cached once: the registry is static for the process lifetime. Every
+      // tool, not one app's list, or a checkout call logs as "other" (#520).
+      cachedToolNames ??= new Set(letterServer.toolNames());
 
       // No Origin header means a non-browser client, which is what every MCP
       // backend is. The transport's DNS-rebinding check only validates an Origin
@@ -897,48 +945,58 @@ export async function startHttpServer() {
         return;
       }
 
+      // Which app is calling (#473), so a tool call can be traced to ChatGPT,
+      // Claude, Codex or a personal access token from the log alone.
+      const clientFields = clientLogFields(authInfo);
       writeDiagnostic("info", "mcp.request_received", {
         method: req.method ?? "unknown",
-        authType: authInfo?.authType ?? "disabled"
+        authType: authInfo?.authType ?? "disabled",
+        ...clientFields
       });
 
-      const sessionTransport = new StreamableHTTPServerTransport({
-        allowedHosts,
-        allowedOrigins,
-        enableDnsRebindingProtection: true
-      });
-
-      // Create per-session MCP server with auth context
-      const sessionServer = await createMcpServer(letterServer, authInfo);
-
-      // Clean up when response closes
-      res.on('close', async () => {
-        writeDiagnostic("info", "mcp.connection_closed");
-        await sessionServer.close();
-      });
+      // SDK v1's transport checked these; v2's handler checks nothing (#477), so they are checked here, at the same
+      // point: after the sign-in and the limiters, before any server is made.
+      const refused = hostOrOriginRefusal(req.headers, allowedHosts, allowedOrigins);
+      if (refused) {
+        writeDiagnostic("warn", "mcp.request_refused", { reason: refused.reason });
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(refused.body));
+        return;
+      }
 
       try {
-        // Connect the MCP server to the transport
-        console.log('Connecting MCP server to Streamable HTTP transport...');
-        await sessionServer.connect(sessionTransport);
-        writeDiagnostic("info", "mcp.server_connected");
-
-        // For Streamable HTTP POST, parse body and handle request with timeout
+        // Read under our own limit: the SDK's applies only to a body it reads itself.
         const body = await parseRequestBody(req, MCP_BODY_LIMIT_BYTES);
-
-        const parsedBody = body ? JSON.parse(body) : undefined;
+        let parsedBody: unknown;
+        try {
+          parsedBody = body ? JSON.parse(body) : undefined;
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(PARSE_ERROR_BODY));
+          return;
+        }
         writeDiagnostic("info", "mcp.request_parsed");
 
         // Issue #235 observability: which client class asked for what, and
-        // which metadata revisions a tools/list response served.
+        // which metadata revisions a tools/list response served; and which
+        // protocol revision it spoke (#477).
         logMcpClientRequests(
           parsedBody,
           req.headers["user-agent"],
-          cachedToolNames ?? new Set()
+          cachedToolNames ?? new Set(),
+          clientFields.client,
+          firstHeaderValue(req.headers["mcp-protocol-version"])
         );
 
-        await sessionTransport.handleRequest(req, res, parsedBody);
-        console.log(`Request handled successfully`);
+        // The adapter hands the request's auth to the handler as its authInfo: our caller, in the SDK's words.
+        const forwarded: NodeIncomingMessageLike = {
+          method: req.method,
+          url: req.url,
+          headers: req.headers,
+          auth: authInfo ? toSdkAuthInfo(authInfo) : undefined,
+          [Symbol.asyncIterator]: () => req[Symbol.asyncIterator]()
+        };
+        await serveMcp(forwarded, res, parsedBody);
       } catch (error) {
         writeDiagnostic("error", "mcp.request_failed", {
           errorClass: classifyDiagnosticError(error, "transport_error")
@@ -960,6 +1018,8 @@ export async function startHttpServer() {
   await new Promise<void>((resolve) => {
     server.listen(DEFAULT_PORT, DEFAULT_HOST, () => {
       console.log(`Letter IRL MCP HTTP server listening on http://${DEFAULT_HOST}:${DEFAULT_PORT}`);
+      // A Railway service variable sets it (#730, #745); this line is how a deploy shows it took.
+      writeDiagnostic("info", "boot.thread_pool", { size: Number(process.env.UV_THREADPOOL_SIZE) || 4 });
       // Price warmup AFTER the port binds, fire-and-forget (#275 stage A). An
       // earlier revision awaited this above, ~650 lines before listen, which
       // meant a Stripe outage held the socket closed - a probe against a
@@ -967,11 +1027,10 @@ export async function startHttpServer() {
       // would answer was false (#278 review). Resolution is lazy at every
       // consuming path anyway; this only saves the first request the latency.
       kickPriceCatalog(undefined, "http_listen");
+      // The daily limits this process runs with, for the admin panel, which
+      // has its own environment (migration 038). Never throws.
+      void reportDailyLimitDefaults();
       console.log(`  MCP endpoint: http://${DEFAULT_HOST}:${DEFAULT_PORT}${MCP_PATH}`);
-      console.log(`  SSE stream: http://${DEFAULT_HOST}:${DEFAULT_PORT}${SSE_PATH}`);
-      console.log(
-        `  SSE messages: http://${DEFAULT_HOST}:${DEFAULT_PORT}${SSE_MESSAGES_PATH}?sessionId=...`
-      );
       console.log(`  Widget assets: http://${DEFAULT_HOST}:${DEFAULT_PORT}${WIDGET_PATH}/<name>.html`);
       resolve();
     });
@@ -981,6 +1040,10 @@ export async function startHttpServer() {
 
   const close = async () => {
     console.log('\n🛑 Shutting down gracefully...');
+    // Notices to the operator started without waiting (#699) are posted
+    // before the process ends, for at most three seconds: Railway's teardown
+    // is short, and the alert row in the database is what lasts.
+    await Promise.race([settleOperatorNotices(), new Promise(resolve => setTimeout(resolve, 3000).unref())]);
     try {
       await closePool();
     } catch (error) {
@@ -1022,6 +1085,46 @@ function writeBetaRefusal(res: http.ServerResponse): void {
   };
   res.writeHead(403, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
+}
+
+/**
+ * What a 401 says, in the body and in the challenge's error_description: a
+ * fixed sentence, never the error's own text (#730). A database fault in the
+ * personal-token lookup carried the driver's message, and the token
+ * validator's "revoked" or "expired" told a guesser that a token with that
+ * suffix exists. A missing header and a scope the token lacks keep their own
+ * words: the client acts on them, and they are this server's.
+ */
+export function publicAuthFailureMessage(error: unknown): string {
+  if (error instanceof InsufficientScopeError) return error.message;
+  if (error instanceof Error && error.message === "Missing Authorization header") return error.message;
+  return "The access token is not valid. Sign in again, or make a new access token.";
+}
+
+/**
+ * Why a token was refused, for the log alone, from a fixed set (#730): the
+ * answer no longer says, so support reads it here. Never the error's text.
+ */
+export function authFailureLogFields(error: unknown, authorization: string | undefined): {
+  authType: "none" | "pat" | "jwt";
+  reason: "header" | "revoked" | "expired" | "not_found" | "format" | "other";
+} {
+  const header = authorization ?? "";
+  const token = /^Bearer\s+(.+)$/i.exec(header)?.[1] ?? "";
+  const authType = !token ? "none" : token.startsWith("lirl_pat_") ? "pat" : "jwt";
+  const text = (error instanceof Error ? error.message : "").toLowerCase();
+  const reason = !token
+    ? "header"
+    : text.includes("revoked")
+      ? "revoked"
+      : text.includes("expired") || text.includes('"exp"')
+        ? "expired"
+        : text.includes("not found")
+          ? "not_found"
+          : text.includes("format") || text.includes("invalid compact") || text.includes("malformed")
+            ? "format"
+            : "other";
+  return { authType, reason };
 }
 
 async function authenticateRequest(
@@ -1076,7 +1179,8 @@ async function authenticateRequest(
       }));
       return null;
     }
-    const message = error instanceof Error ? error.message : String(error);
+    writeDiagnostic("warn", "auth.mcp_rejected", authFailureLogFields(error, req.headers.authorization));
+    const message = publicAuthFailureMessage(error);
     const challenge = buildWwwAuthenticateChallenge(message, publicBaseUrl);
     const body = {
       jsonrpc: "2.0",

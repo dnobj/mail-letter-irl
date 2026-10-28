@@ -10,20 +10,68 @@
  */
 
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
-import { validateAddressesWithProvider, outputValidationStatus } from "./letterHelpers.js";
-import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import {
-  quoteAndPreviewPostcardInputSchema,
-  quoteAndPreviewPostcardOutputSchema
-} from "../schemas.js";
-import type { AddressValidationInput, AddressValidationResult } from "../services/providers/types.js";
+  previewSendEligibility,
+  reasonCannotSend,
+  validateAddressesWithProvider,
+  validatePrintableCharacters,
+  outputValidationStatus,
+  withDisplayImage
+} from "./letterHelpers.js";
+import { printRenderer } from "../config/printRenderer.js";
+import { isPostcardSizesOffered, offeredPostcardSizes } from "../config/postcardSizes.js";
+import { isPostcardLayoutsOffered } from "../config/postcardLayouts.js";
+import { frontChoice, frontPrintedText, previewPostcardFront, type PostcardLayoutChoice } from "./postcardFrontInput.js";
+import { type MailOption } from "../config/products.js";
+import { isPackPayable } from "../services/mailOptions.js";
+import {
+  drawsGrapheme,
+  GiftStripOverflow,
+  layoutPostcard,
+  layoutPostcardBack,
+  POSTCARD_GEOMETRY,
+  readImageDataUri,
+  renderPreviewSvg,
+  POSTCARD_FRONT_RENDERER_VERSION,
+  RENDERER_VERSION,
+  type GiftStripCopy
+} from "../render/index.js";
+import {
+  renderPostcardPreviewDocument,
+  stampedAddressLines,
+  stampedPostcardReturnLines
+} from "../services/previewService.js";
+import { callingApp } from "../auth/clientProfiles.js";
+import { giftCardSummary, longestSendCard, resolveGiftSendChoice } from "./giftSendChoice.js";
+import {
+  previewArrivalWindow,
+  previewScheduleWithRoom,
+  scheduleSentence,
+  type ArrivalWindow,
+  type PreviewScheduleOutput
+} from "./arriveByInput.js";
+import { previewSendStep } from "./previewSendStep.js";
+import {
+  giftPostcardBlockSvg,
+  giftPostcardStripCopy,
+  type GiftCardContent,
+  type GiftCardState
+} from "../services/giftCardRenderer.js";
+import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import { createPostcardDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
-import { downloadAndProcessPostcardImageWithPreview, ImageProcessingError, type ImageInput } from "../services/imageService.js";
+import {
+  downloadAndProcessCollageWithPreview,
+  downloadAndProcessPostcardImageWithPreview,
+  ImageProcessingError,
+  type ImageInput
+} from "../services/imageService.js";
+import { collageSources } from "./collageSources.js";
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
-import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
+import type { SendEligibility } from "../services/commerceService.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
-import { getRecentUploadedImage } from "../services/recentUploadStore.js";
+import { resolvePreviewImageSource, type PreviewImageSource } from "../services/previewImageSource.js";
+import { isUnresolvedImageReference, usableImageFile } from "../utils/imageFileParam.js";
 import {
   DELIVERY_CLASS,
   DELIVERY_DISCLAIMER,
@@ -39,16 +87,34 @@ interface QuoteAndPreviewPostcardInput {
   recipient: Address;
   message: string;
   size?: PostcardSize;
+  /** The front's layout, caption and place while layouts are offered (#594); checked by previewPostcardFront. */
+  layout?: unknown;
+  caption?: unknown;
+  place?: unknown;
   // Image from OpenAI fileParams - injected by MCP framework
   // Union type handles ChatGPT mobile sending '' when no file attached
   image?: ImageFileParam | string;
   // Alternative: direct image URL (for when fileParams isn't available)
   imageUrl?: string;
+  /** Two to four photos for a collage front, while collages are offered (#616); checked by collageSources. */
+  images?: unknown;
+  imageUrls?: unknown;
+  /** Send as the account's gift letter (docs/gift-letters.md). */
+  sendAsGift?: boolean;
+  /** The date it should arrive by, YYYY-MM-DD (#535); served only while the flag is on. */
+  arriveBy?: string;
 }
 
 export interface QuoteAndPreviewPostcardOutput {
+  /** The version of the draft as stored (#695): the send takes it back, so what is mailed is what was shown. */
+  contentVersion?: string;
   previewFrontHtml: string;
   previewBackHtml: string;
+  /**
+   * The postcard as it prints, front and back, when our renderer drew it
+   * (#534): the card shows these pages instead of its own front and back.
+   */
+  previewHtml?: string;
   lettersRequired: number;  // Number of letters from balance (always 1 for postcard)
   canSendNow: boolean;
   reasonCannotSend?: string;
@@ -95,6 +161,22 @@ export interface QuoteAndPreviewPostcardOutput {
     errors?: string[];
     suggestions?: string;
   };
+  /** Present on a gift send: the card printed across the foot of the message half. */
+  giftCard?: { state: GiftCardState; description: string };
+  /** Unsent gift letters on the account, when there are any. */
+  giftLettersAvailable?: number;
+  /** The arrival date asked for (#535), when there was one. */
+  schedule?: PreviewScheduleOutput;
+  /** The arrival dates on offer (#535), while the feature is on: a card's date picker. */
+  arrivalWindow?: ArrivalWindow;
+  /** While the 4x6 and 11x6 are offered (#594): its size, which the postcard maker changes with set_postcard_style. */
+  size?: PostcardSize;
+  /** While the layouts are offered (#594): its front, with its caption or place, which the maker changes too. */
+  layout?: PostcardLayoutChoice;
+  caption?: string;
+  place?: string;
+  /** How many photos the front draws, when it is a collage (#616). */
+  collagePhotos?: number;
 }
 
 // ============================================================================
@@ -103,6 +185,29 @@ export interface QuoteAndPreviewPostcardOutput {
 
 const OUTPUT_TEMPLATE = widgetTemplateUri("PostcardPreviewCard");
 const MAX_MESSAGE_LENGTH = 500;
+/**
+ * On the legacy print a gift postcard gives the foot of the message half,
+ * about 1.3in of 5.2in, to the card, so its message is shorter. Checked only
+ * once the preview knows it is a gift send. Our renderer counts lines instead:
+ * 11 above the card (POSTCARD_STRIP).
+ */
+const MAX_GIFT_MESSAGE_LENGTH = 350;
+/**
+ * On our renderer the back is measured, line by line, so the character limit
+ * only bounds the work (#534 Phase 4), as RENDERED_LETTER_CHARACTER_CAP does
+ * for letters, well above what each back holds: sixteen full lines are about
+ * 700 characters on a 6x9 and 1,000 on an 11x6, eleven about 370 on a 4x6
+ * (#594).
+ */
+export const RENDERED_POSTCARD_CHARACTER_CAPS: Readonly<Record<PostcardSize, number>> = {
+  '6x9': 1_000,
+  '6x4': 1_000,
+  '6x11': 2_000
+};
+/** The 6x9's, as it was before the other sizes. */
+export const RENDERED_POSTCARD_CHARACTER_CAP = RENDERED_POSTCARD_CHARACTER_CAPS['6x9'];
+/** Each size as a person names it, where ours put the short side first (#594). */
+const SIZE_NAMES: Readonly<Record<PostcardSize, string>> = { '6x9': 'A 6x9', '6x4': 'A 4x6', '6x11': 'An 11x6' };
 const POSTCARD_CREDITS_COST = 2; // 2 internal credits = 1 letter/postcard
 
 // ============================================================================
@@ -114,6 +219,21 @@ async function handler(
   context: ToolContext
 ): Promise<QuoteAndPreviewPostcardOutput> {
   const size: PostcardSize = input.size ?? '6x9';
+  // The 4x6 and 11x6 only while offered (#594): a size served by an older
+  // schema is refused, never printed as a 6x9.
+  if (!offeredPostcardSizes().includes(size)) {
+    throw Object.assign(
+      new Error(
+        `${Object.hasOwn(SIZE_NAMES, size) ? `${SIZE_NAMES[size]} postcard` : 'This postcard size'} is not offered here. ` +
+        `Leave size out for a 6x9 postcard.`
+      ),
+      { diagnosticClass: "validation_error" }
+    );
+  }
+
+  // Arrive-by (#535): checked first, so a date that cannot be met is refused
+  // before the picture is fetched or an address validated.
+  const schedule = await previewScheduleWithRoom(input.arriveBy, context);
 
   // Track if we used the saved return address
   let usedSavedReturnAddress = false;
@@ -122,14 +242,6 @@ async function handler(
   // Determine image source - either fileParams or direct URL
   let imageInput: ImageInput | null = null;
   let imageSourceUrl: string | undefined;
-
-  // Type guard: Check if image is a valid ImageFileParam object (not empty string from mobile)
-  const isValidImageFileParam = (img: unknown): img is ImageFileParam =>
-    typeof img === 'object' && img !== null && 'download_url' in img;
-
-  // Check if we have file_id even without download_url (potential mobile workaround via sediment://)
-  const hasFileIdOnly = (img: unknown): img is { file_id: string } =>
-    typeof img === 'object' && img !== null && 'file_id' in img && !('download_url' in img);
 
   // Debug flag - enabled in dev environment
   const isDebug = process.env.NODE_ENV === 'development' ||
@@ -153,18 +265,28 @@ async function handler(
         hasFileName: imageObj && 'file_name' in imageObj,
         // Log actual values (truncated for URLs, full for file_id)
         mimeType: imageObj?.mime_type as string | undefined,
-        // Validation results
-        isValidFileParam: isValidImageFileParam(input.image),
-        hasFileIdOnly: hasFileIdOnly(input.image)
+        // Validation results (#414: the marker for an unreadable reference is
+        // an object with an empty download address)
+        isUsableFile: usableImageFile(input.image) !== null,
+        unresolvedReference: isUnresolvedImageReference(input.image)
       },
       "Debug: Full image parameter details for mobile investigation"
     );
   }
 
-  if (input.image && isValidImageFileParam(input.image)) {
+  // A collage's photos (#616): two to four, refused here, before any is fetched,
+  // when they cannot be made as asked. A collage has no one source to resolve.
+  const collage = collageSources(input, context);
+
+  // A file ChatGPT resolved, then imageUrl, then a recent upload through the
+  // upload card (see previewImageSource.ts).
+  const resolved: PreviewImageSource = collage
+    ? { kind: "none", unresolvedReference: false }
+    : await resolvePreviewImageSource(input, context.user.userId, "postcard");
+  if (resolved.kind === "file") {
     // OpenAI fileParams (preferred)
-    imageInput = input.image;
-    imageSourceUrl = input.image.download_url;
+    imageInput = resolved.file;
+    imageSourceUrl = resolved.url;
     context.logger.info(
       {
         correlationId: context.correlationId,
@@ -172,10 +294,10 @@ async function handler(
       },
       "Using image from OpenAI fileParams"
     );
-  } else if (input.imageUrl) {
+  } else if (resolved.kind === "url") {
     // Direct URL (fallback for code interpreter images)
-    imageInput = { url: input.imageUrl };
-    imageSourceUrl = input.imageUrl;
+    imageInput = { url: resolved.url };
+    imageSourceUrl = resolved.url;
     context.logger.info(
       {
         correlationId: context.correlationId,
@@ -184,30 +306,28 @@ async function handler(
       },
       "Using image from direct URL"
     );
-  } else {
-    // Fallback: if ChatGPT drops imageUrl on the follow-up tool call,
-    // reuse the most recently confirmed upload for this user.
-    const recent = await getRecentUploadedImage(context.user.userId, "postcard");
-    if (recent?.imageUrl) {
-      imageInput = { url: recent.imageUrl };
-      imageSourceUrl = recent.imageUrl;
-      context.logger.info(
-        {
-          correlationId: context.correlationId,
-          event: "quote.postcard.image_from_recent_upload",
-          imageAgeMs: recent.ageMs
-        },
-        "Using recent uploaded image fallback for postcard"
-      );
-    }
+  } else if (resolved.kind === "recent_upload") {
+    imageInput = { url: resolved.url };
+    imageSourceUrl = resolved.url;
+    context.logger.info(
+      {
+        correlationId: context.correlationId,
+        event: "quote.postcard.image_from_recent_upload",
+        imageAgeMs: resolved.ageMs,
+        unresolvedReference: resolved.unresolvedReference
+      },
+      "Using recent uploaded image fallback for postcard"
+    );
   }
 
-  if (!imageInput) {
+  if (!imageInput && !collage) {
     context.logger.warn(
       {
         correlationId: context.correlationId,
         event: "quote.postcard.no_image",
-        isMobile: context.isMobile
+        isMobile: context.isMobile,
+        unresolvedReference: resolved.kind === "none" && resolved.unresolvedReference,
+        skippedUploadAgeMs: resolved.kind === "none" ? resolved.skippedUploadAgeMs : undefined
       },
       "No image provided for postcard"
     );
@@ -221,20 +341,51 @@ async function handler(
     }
   }
 
+  // Whether this is a gift send decides the message limit, so it is resolved
+  // before the limit is checked (docs/gift-letters.md).
+  const requiredCredits = POSTCARD_CREDITS_COST;
+  const available = context.user.creditsRemaining;
+  // The mail option this is: its price (#578), and whether a pack or a gift
+  // letter pays for it (#579).
+  const option: MailOption = { mailType: "postcard", postcardSize: size };
+  const packPays = isPackPayable(option);
+  const gift = await resolveGiftSendChoice({
+    userId: context.user.userId,
+    requested: input.sendAsGift,
+    balanceCanPay: available >= requiredCredits,
+    giftCanPay: packPays
+  });
+  // Our renderer draws the postcard at its size, a 6x9 gift send's card
+  // included (#534); the 4x6 and 11x6 are offered only on it (#594), so the
+  // legacy print and its limits see 6x9s alone. Read once, so every check
+  // agrees.
+  const renderer = printRenderer();
+  const messageLimit = renderer === 'pdf'
+    ? RENDERED_POSTCARD_CHARACTER_CAPS[size]
+    : gift.isGift ? MAX_GIFT_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
+  // The front's layout (#594), checked before the picture is fetched: undefined for full bleed.
+  const front = previewPostcardFront(input, size, context, renderer);
+
   // Validate message length
-  if (input.message.length > MAX_MESSAGE_LENGTH) {
+  if (input.message.length > messageLimit) {
     context.logger.warn(
       {
         correlationId: context.correlationId,
-        event: "quote.postcard.message_too_long",
+        event: renderer === 'pdf' ? "quote.postcard.exceeds_character_cap" : "quote.postcard.message_too_long",
         messageLength: input.message.length,
-        maxLength: MAX_MESSAGE_LENGTH
+        maxLength: messageLimit
       },
       "Postcard message too long"
     );
-    throw new Error(
-      `Postcard message is too long (${input.message.length}/${MAX_MESSAGE_LENGTH} characters). ` +
-      `Please shorten your message to fit on the postcard back.`
+    // An expected refusal: logged as validation_error, not unknown_error.
+    throw Object.assign(
+      new Error(
+        `Postcard message is too long (${input.message.length}/${messageLimit} characters). ` +
+        (gift.isGift
+          ? `A gift postcard leaves room for the gift card, so please shorten your message.`
+          : `Please shorten your message to fit on the postcard back.`)
+      ),
+      { diagnosticClass: "validation_error" }
     );
   }
 
@@ -321,9 +472,57 @@ async function handler(
         senderCountry: sender.country,
         recipientCountry: input.recipient.country
       },
-      message
+      // Constant: a log message is never redacted, and a country is whatever
+      // the caller sent, which may be part of an address.
+      "Address outside the United States refused"
     );
     throw new Error(message);
+  }
+
+  // Refuse characters the print shows as boxes (#526), before the picture is fetched
+  // On our renderer the message prints in its font (#534), and so does the
+  // sender's name on a gift send's card, whichever card the send prints; the
+  // addresses are stamped in Open Sans either way.
+  const prints = renderer === 'pdf' ? drawsGrapheme : undefined;
+  validatePrintableCharacters(
+    "postcard",
+    [
+      { field: "message", where: "in the message", text: input.message, prints },
+      ...(prints && gift.card
+        ? [{ field: "giftCardName", where: "in the sender's name, which the gift card prints", text: sender.name, prints }]
+        : []),
+      // A front's line, in the face and case it prints in (#594).
+      ...frontPrintedText(front)
+    ],
+    { sender, recipient: input.recipient, senderIsSaved: usedSavedReturnAddress },
+    context
+  );
+
+  // On our renderer the back is measured as it prints, before the picture
+  // is fetched: 16 lines on a 6x9 or an 11x6 and 11 on a 4x6 (#594), or 11
+  // above a 6x9 gift send's card.
+  const strip = renderer === 'pdf' && gift.card ? giftStrip(gift.card, sender.name, context) : undefined;
+  if (renderer === 'pdf') {
+    const { page, overflowLines } = layoutPostcardBack(input.message, strip, size);
+    if (overflowLines > 0) {
+      context.logger.warn(
+        {
+          correlationId: context.correlationId,
+          event: "quote.postcard.exceeds_back",
+          linesUsed: page.linesUsed,
+          linesAvailable: page.linesAvailable
+        },
+        "Postcard message runs past its room on the back"
+      );
+      throw Object.assign(
+        new Error(
+          `Postcard message is ${overflowLines} line${overflowLines === 1 ? "" : "s"} too long for the back: ` +
+          `it takes ${page.linesUsed} lines and the back holds ${page.linesAvailable}${strip ? " above the gift card" : ""}. ` +
+          `Please shorten your message to fit on the postcard back.`
+        ),
+        { diagnosticClass: "validation_error" }
+      );
+    }
   }
 
   context.logger.info(
@@ -331,7 +530,8 @@ async function handler(
       correlationId: context.correlationId,
       event: "quote.postcard.start",
       size,
-      messageLength: input.message.length
+      messageLength: input.message.length,
+      ...(collage ? { collagePhotos: collage.inputs.length, collageVia: collage.via } : {})
     },
     "Processing quote_and_preview_postcard"
   );
@@ -347,9 +547,11 @@ async function handler(
       "Downloading and processing postcard image"
     );
 
-    processedImage = await downloadAndProcessPostcardImageWithPreview(imageInput!, size, {
-      actorId: context.user.userId
-    });
+    processedImage = collage
+      ? await downloadAndProcessCollageWithPreview(collage.inputs, size, { actorId: context.user.userId })
+      : await downloadAndProcessPostcardImageWithPreview(imageInput!, size, {
+          actorId: context.user.userId
+        });
 
     context.logger.info(
       {
@@ -384,11 +586,8 @@ async function handler(
   const { senderValidation, recipientValidation, addressWarnings } =
     await validateAddressesWithProvider(sender, input.recipient, context, "quote.postcard");
 
-  // Check credits
-  const requiredCredits = POSTCARD_CREDITS_COST;
-  const available = context.user.creditsRemaining;
-  const canSendNow = available >= requiredCredits;
-  const sendEligibility = getSendEligibility(available, requiredCredits, "postcard");
+  // Check credits: only where a pack pays (#579).
+  const canSendNow = gift.isGift || (packPays && available >= requiredCredits);
   const lettersRequired = 1; // User-facing: 1 letter = 1 postcard
 
   context.logger.info(
@@ -398,7 +597,8 @@ async function handler(
       availableCredits: available,
       requiredCredits,
       lettersRequired,
-      canSendNow
+      canSendNow,
+      giftSend: gift.isGift
     },
     "Computed preview requirements"
   );
@@ -406,7 +606,23 @@ async function handler(
   // Generate preview HTML using smaller preview image (~10-20KB vs ~200-400KB)
   // Full-quality image is stored in draft for PostGrid printing
   const previewFrontHtml = generatePreviewFrontHtml(processedImage.previewDataUri, size);
-  const previewBackHtml = generatePreviewBackHtml(input.message, sender);
+  const previewBackHtml = generatePreviewBackHtml(input.message, sender, gift.card);
+  // On our renderer the draft keeps the postcard as it prints (#534 Phase 4):
+  // front and back, laid out with the full image's box and drawn with the
+  // small copy, the back with the addresses where PostGrid stamps them. The
+  // website's confirm page and the card show it.
+  const renderedHtml = renderer === 'pdf'
+    ? renderPostcardPreviewDocument(renderPreviewSvg(
+        withDisplayImage(
+          layoutPostcard({ message: input.message, image: readImageDataUri(processedImage.base64DataUri), strip, size, ...front }),
+          processedImage.previewDataUri
+        ),
+        {
+          addresses: { from: stampedPostcardReturnLines(sender), to: stampedAddressLines(input.recipient) },
+          stamp: { page: 1, geometry: POSTCARD_GEOMETRY[size].stamp }
+        }
+      ))
+    : undefined;
 
   // Create draft for idempotent send
   const draftResult = await createPostcardDraft({
@@ -415,13 +631,29 @@ async function handler(
     recipient: input.recipient as unknown as Record<string, unknown>,
     message: input.message,
     frontImageData: processedImage.base64DataUri,
-    frontImageUrl: imageSourceUrl!,
+    frontImageUrl: imageSourceUrl ?? null,
     postcardSize: size,
     requiredCredits,
-    previewHtml: previewFrontHtml,
+    previewHtml: renderedHtml ?? previewFrontHtml,
     senderValidation: senderValidation ? { status: senderValidation.status } : undefined,
     recipientValidation: recipientValidation ? { status: recipientValidation.status } : undefined,
+    isGiftSend: gift.isGift,
+    // A front other than full bleed is drawn as pdf-3 (#594, migration 048).
+    rendererVersion: renderedHtml ? (front ? POSTCARD_FRONT_RENDERER_VERSION : RENDERER_VERSION) : undefined,
+    postcardFront: front ?? null,
+    // Held until its mail date (#535).
+    schedule: schedule?.draft,
   });
+
+  // After the draft, whose page an app with no checkout pays on (#579).
+  const sendEligibility = previewSendEligibility(
+    available,
+    requiredCredits,
+    option,
+    gift.isGift,
+    callingApp(context),
+    draftResult.draftId
+  );
 
   context.logger.info(
     {
@@ -436,14 +668,17 @@ async function handler(
   const output: QuoteAndPreviewPostcardOutput = {
     previewFrontHtml,
     previewBackHtml,
+    ...(renderedHtml ? { previewHtml: renderedHtml } : {}),
     lettersRequired,
     canSendNow,
-    reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
+    reasonCannotSend: canSendNow ? undefined : reasonCannotSend(option),
     sendEligibility,
     deliveryClass: DELIVERY_CLASS,
-    deliveryEstimate: DELIVERY_ESTIMATE,
+    // A held postcard's card says when it goes to the printer (#535).
+    deliveryEstimate: schedule ? scheduleSentence(schedule.output, context.now()) : DELIVERY_ESTIMATE,
     deliveryDisclaimer: DELIVERY_DISCLAIMER,
     draftId: draftResult.draftId,
+    ...(draftResult.contentVersion ? { contentVersion: draftResult.contentVersion } : {}),
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     message: input.message,
     recipientName: input.recipient.name,
@@ -461,6 +696,15 @@ async function handler(
     usedSavedReturnAddress: usedSavedReturnAddress || undefined,
     savedReturnAddressNote: savedReturnAddressNote,
     addressWarnings,
+    giftCard: gift.card ? giftCardSummary(gift.card.state, 'postcard') : undefined,
+    giftLettersAvailable: gift.giftLettersAvailable > 0 ? gift.giftLettersAvailable : undefined,
+    schedule: schedule?.output,
+    arrivalWindow: previewArrivalWindow(context),
+    // The postcard maker's choices now, each named while it is offered (#594).
+    ...(isPostcardSizesOffered() ? { size } : {}),
+    ...(renderer === 'pdf' && isPostcardLayoutsOffered() ? frontChoice(front) : {}),
+    // A collage names how many photos it draws (#616).
+    ...(collage ? { collagePhotos: collage.inputs.length } : {}),
   };
 
   // Add address validation results if available
@@ -516,13 +760,14 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
   QuoteAndPreviewPostcardOutput
 > = {
   name: "quote_and_preview_postcard",
-  description:
-    "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. This does not send mail. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first so ChatGPT can reuse that existing image. Otherwise prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through after a direct preview attempt. If sender is omitted, the saved return address is used automatically. Send later with send_postcard.",
+  title: "Preview a postcard",
+  // The last sentence follows the send rule and the app (#516).
+  description: (client) =>
+    "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. Requires a real U.S. recipient mailing address. Its answer says what sending it takes and when the mail usually arrives. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through after a direct preview attempt. If sender is omitted, the saved return address is used automatically. " +
+    previewSendStep("send_postcard", client),
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale
   readOnly: false,
-  inputSchema: quoteAndPreviewPostcardInputSchema,
-  outputSchema: quoteAndPreviewPostcardOutputSchema,
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
     "openai/widgetAccessible": true,
@@ -545,6 +790,39 @@ const REQUIRED_ADDRESS_PROPS = [
   "state",
   "country"
 ];
+
+/**
+ * A gift send's card on our renderer (#534): a strip of fixed height at the
+ * foot of the message, so its words must fit it. They are ours but for the
+ * sender's name, which must fit this card and the longest card the send could
+ * print instead (longestSendCard). A card that does not fit even without the
+ * name is a seed campaign's long code, which only a letter has room for.
+ */
+function giftStrip(card: GiftCardContent, senderName: string, context: ToolContext): GiftStripCopy {
+  const overflows = (name: string) => [card, longestSendCard(card)].some(variant => {
+    try {
+      layoutPostcardBack("", giftPostcardStripCopy(variant, name));
+      return false;
+    } catch (error) {
+      if (error instanceof GiftStripOverflow) return true;
+      throw error;
+    }
+  });
+  if (overflows(senderName)) {
+    const cause = overflows("") ? "card" : "name";
+    context.logger.warn(
+      { correlationId: context.correlationId, event: "quote.postcard.gift_card_overflow", cause },
+      "The gift card runs past its strip"
+    );
+    throw Object.assign(
+      new Error(cause === "name"
+        ? "The sender's name is too long to print on the gift card. Shorten it, then preview again."
+        : "This gift letter's card does not fit on a postcard. Send it as a letter, or set sendAsGift to false to pay from the balance."),
+      { diagnosticClass: "validation_error" }
+    );
+  }
+  return giftPostcardStripCopy(card, senderName);
+}
 
 function collectMissingAddressFields(input: { sender: Address; recipient: Address }): string[] {
   const missing: string[] = [];
@@ -574,11 +852,19 @@ function normalizeCountryToUS(country?: string): string {
   return normalized;
 }
 
+const PREVIEW_FRONT_PIXELS: Record<PostcardSize, { width: number; height: number }> = {
+  '6x4': { width: 540, height: 360 },
+  '6x9': { width: 810, height: 540 },
+  '6x11': { width: 990, height: 540 }
+};
+
 /**
  * Generate HTML preview for postcard front (image)
  */
 function generatePreviewFrontHtml(imageBase64: string, size: PostcardSize): string {
-  const dimensions = size === '6x9' ? { width: 540, height: 810 } : { width: 540, height: 360 };
+  // Landscape, at 90 CSS pixels an inch, as PostGrid prints each size: our
+  // '6x9' is PostGrid's 9x6.
+  const dimensions = PREVIEW_FRONT_PIXELS[size];
 
   return `<!DOCTYPE html>
 <html>
@@ -610,7 +896,9 @@ function generatePreviewFrontHtml(imageBase64: string, size: PostcardSize): stri
 /**
  * Generate HTML preview for postcard back (message + return address)
  */
-function generatePreviewBackHtml(message: string, sender: Address): string {
+export function generatePreviewBackHtml(message: string, sender: Address, giftCard?: GiftCardContent): string {
+  // The gift strip comes from the renderer the print uses (giftCardRenderer).
+  const giftBlock = giftCard ? giftPostcardBlockSvg(giftCard, sender.name) : { css: '', html: '' };
   const escapedMessage = escapeHtml(message).replace(/\n/g, '<br>');
 
   return `<!DOCTYPE html>
@@ -650,7 +938,7 @@ function generatePreviewBackHtml(message: string, sender: Address): string {
       bottom: 0;
       width: 1px;
       background: #ddd;
-    }
+    }${giftBlock.css}
   </style>
 </head>
 <body>
@@ -661,7 +949,7 @@ function generatePreviewBackHtml(message: string, sender: Address): string {
       ${sender.addressLine2 ? escapeHtml(sender.addressLine2) + '<br>' : ''}
       ${escapeHtml(sender.city)}, ${escapeHtml(sender.state)} ${escapeHtml(sender.postalCode)}
     </div>
-    <div class="message">${escapedMessage}</div>
+    <div class="message">${escapedMessage}</div>${giftBlock.html}
   </div>
 </body>
 </html>`;

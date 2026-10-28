@@ -1,3 +1,6 @@
+import type { ClientProfile } from "../auth/clientProfiles.js";
+import type { CertifiedFacts } from "../config/certifiedMail.js";
+
 export type LetterStatus =
   | "pending"      // draft, queued
   | "accepted"     // PostGrid accepted order
@@ -6,7 +9,8 @@ export type LetterStatus =
   | "delivered"    // Delivered
   | "returned"     // Returned to sender
   | "failed"       // Failed
-  | "cancelled";   // Cancelled
+  | "cancelled"    // Cancelled
+  | "scheduled";   // Sent with an arrival date, waiting for its mail date (#535)
 
 export type LetterLayoutType = "text_only" | "header_image" | "inline_image";
 
@@ -48,6 +52,14 @@ export interface OrderRecord {
     state: string;
   };
   previewFirstPageHtml?: string;
+  /** Sent with an arrival date (#535): the date it aims to arrive by and the day it goes to the printer. */
+  schedule?: { arriveBy: string; mailOn: string };
+  /** With a schedule: whether it can still be cancelled free (cancel_scheduled_mail decides). */
+  cancellable?: boolean;
+  /** Sent as USPS Certified Mail (#625): which service, the carrier's number once the status sync has it, and where USPS shows it. Absent for an ordinary letter. */
+  certified?: CertifiedFacts;
+  /** Certified mail with no carrier number, sent more than CARRIER_NUMBER_SYNC_DAYS ago: the sync has stopped looking (#625). */
+  carrierNumberLookupEnded?: boolean;
 }
 
 export interface UserAccount {
@@ -82,6 +94,11 @@ export interface ToolContext {
    * @see US-POSTCARD-04: Mobile Image Graceful Degradation
    */
   isMobile?: boolean;
+  /**
+   * The app the call came from (#473), for text that differs per app (#484).
+   * Read it with callingApp(), which answers for a context without one.
+   */
+  client?: ClientProfile;
 }
 
 export interface ToolMeta {
@@ -92,14 +109,25 @@ export interface JsonSchema {
   [key: string]: unknown;
 }
 
+/**
+ * What the model reads about a tool, every turn. A function gives each app its
+ * own words where the same sentence would be false in some app (#484); read it
+ * with describeTool() in src/server.ts.
+ */
+export type ToolDescription = string | ((client: ClientProfile) => string);
+
 export interface McpToolDefinition<Input, Output> {
   name: string;
-  /** Short human-readable label for tool lists and consent surfaces. Falls back to description when absent. */
-  title?: string;
-  description: string;
+  /**
+   * A short label: the name an app shows in its tool list and when it asks the
+   * person to allow a call. Claude showed the whole description there while
+   * tools had none (#484).
+   */
+  title: string;
+  description: ToolDescription;
   readOnly: boolean;
-  inputSchema: JsonSchema;
-  outputSchema: JsonSchema;
+  // Its input and output schemas are Zod's alone (src/zodSchemas.ts, #688): tools/list and /manifest.json both
+  // serve them, so a tool definition carries none of its own.
   meta: ToolMeta;
   handler: (input: Input, context: ToolContext) => Promise<Output>;
 }

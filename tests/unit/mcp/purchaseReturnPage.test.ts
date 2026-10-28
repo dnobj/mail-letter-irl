@@ -15,7 +15,7 @@
  * start page keeps it in a same-site cookie and forwards to Stripe.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   CHATGPT_WEB_URL,
   IOS_RETURN_LINK_VERIFIED,
@@ -23,7 +23,9 @@ import {
   androidIntentLink,
   chatgptReturnAction,
   chatgptReturnLink,
+  checkoutSessionIdOf,
   decidePurchaseStart,
+  resolvePurchaseStart,
   isApplePhoneOrTablet,
   parseChatgptReturnUrl,
   parseCheckoutTarget,
@@ -75,11 +77,91 @@ describe('parseCheckoutTarget', () => {
     expect(parseCheckoutTarget('http://checkout.stripe.com/c/pay/x')).toBeNull();
     expect(parseCheckoutTarget(null)).toBeNull();
   });
+
+  it('forwards to the custom checkout domain once it is configured, and to Stripe\'s own host still (#373)', () => {
+    const custom = 'https://pay.letterirl.com/c/pay/cs_live_abc#fid';
+    try {
+      // Unset first, whatever the developer's shell or .env.test holds.
+      vi.stubEnv('STRIPE_CHECKOUT_DOMAIN', '');
+      expect(parseCheckoutTarget(custom)).toBeNull();
+      vi.stubEnv('STRIPE_CHECKOUT_DOMAIN', 'pay.letterirl.com');
+      expect(parseCheckoutTarget(custom)).toBe(custom);
+      expect(parseCheckoutTarget(CHECKOUT)).toBe(CHECKOUT);
+      expect(parseCheckoutTarget('https://evil.example/pay')).toBeNull();
+      expect(parseCheckoutTarget('http://pay.letterirl.com/c/pay/x')).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe('checkoutSessionIdOf (#730)', () => {
+  it("reads the Checkout Session from a Stripe checkout link's path", () => {
+    expect(checkoutSessionIdOf(CHECKOUT)).toBe('cs_test_abc');
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_live_a1B2c3#frag')).toBe('cs_live_a1B2c3');
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_live_a1B2c3/')).toBe('cs_live_a1B2c3');
+  });
+
+  it('reads it on our own checkout domain too (#373)', () => {
+    vi.stubEnv('STRIPE_CHECKOUT_DOMAIN', 'pay.example.test');
+    try {
+      expect(checkoutSessionIdOf('https://pay.example.test/c/pay/cs_live_a1B2c3#frag')).toBe('cs_live_a1B2c3');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('reads none from a link that is not Stripe checkout, or whose whole path is not a session', () => {
+    expect(checkoutSessionIdOf('https://evil.example/c/pay/cs_test_abc')).toBeNull();
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/?s=cs_test_abc')).toBeNull();
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/xcs_test_abc')).toBeNull();
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_other_abc')).toBeNull();
+    // Only the session's own path: no other segment, and no query, may name one.
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/x/cs_test_abc')).toBeNull();
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_test_abc/more')).toBeNull();
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_test_abc?next=1')).toBeNull();
+    expect(checkoutSessionIdOf(null)).toBeNull();
+  });
+});
+
+describe('resolvePurchaseStart (#730)', () => {
+  it('looks up the session the link names, and forwards to what our order recorded', async () => {
+    const lookup = vi.fn(async () => CHECKOUT);
+    await expect(resolvePurchaseStart({ to: CHECKOUT, redirectUrl: null }, lookup)).resolves.toMatchObject({
+      status: 302,
+      location: CHECKOUT
+    });
+    expect(lookup).toHaveBeenCalledWith('cs_test_abc');
+  });
+
+  it('refuses a session none of our orders opened', async () => {
+    await expect(resolvePurchaseStart({ to: CHECKOUT, redirectUrl: null }, async () => null)).resolves.toMatchObject({
+      status: 400,
+      refusal: 'not_ours'
+    });
+  });
+
+  it('asks nothing of the database for a link with no session', async () => {
+    const lookup = vi.fn(async () => CHECKOUT);
+    await expect(resolvePurchaseStart({ to: 'https://evil.example/', redirectUrl: null }, lookup)).resolves.toMatchObject({
+      status: 400,
+      refusal: 'host'
+    });
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("leaves a lookup that fails to the route", async () => {
+    await expect(
+      resolvePurchaseStart({ to: CHECKOUT, redirectUrl: null }, async () => {
+        throw new Error('connection terminated');
+      })
+    ).rejects.toThrow('connection terminated');
+  });
 });
 
 describe('decidePurchaseStart', () => {
   it('forwards to the checkout and keeps a valid return link in a same-site cookie', () => {
-    const decision = decidePurchaseStart({ to: CHECKOUT, redirectUrl: CONVERSATION });
+    const decision = decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: CHECKOUT, redirectUrl: CONVERSATION });
 
     expect(decision.status).toBe(302);
     if (decision.status !== 302) throw new Error('unreachable');
@@ -94,15 +176,44 @@ describe('decidePurchaseStart', () => {
   });
 
   it('forwards without a cookie when no acceptable return link was appended', () => {
-    const decision = decidePurchaseStart({ to: CHECKOUT, redirectUrl: 'https://evil.example/' });
+    const decision = decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: CHECKOUT, redirectUrl: 'https://evil.example/' });
 
     expect(decision.status).toBe(302);
     if (decision.status !== 302) throw new Error('unreachable');
     expect(decision.cookie).toBeNull();
   });
 
+  it('refuses a Stripe checkout none of our orders opened (#730)', () => {
+    const decision = decidePurchaseStart({ ourCheckoutUrl: null, to: CHECKOUT, redirectUrl: CONVERSATION });
+
+    expect(decision.status).toBe(400);
+    if (decision.status !== 400) throw new Error('unreachable');
+    expect(decision.body).toMatch(/not valid/i);
+    expect(decision.refusal).toBe('not_ours');
+  });
+
+  it('forwards to the address our order recorded, never the one it was given (#730)', () => {
+    const recorded = 'https://checkout.stripe.com/c/pay/cs_test_abc#recorded';
+    const decision = decidePurchaseStart({ ourCheckoutUrl: recorded, to: CHECKOUT, redirectUrl: null });
+    expect(decision).toMatchObject({ status: 302, location: recorded });
+  });
+
+  it('refuses a recorded address that is not Stripe checkout, and says why each link was refused', () => {
+    expect(decidePurchaseStart({ ourCheckoutUrl: 'https://evil.example/', to: CHECKOUT, redirectUrl: null })).toMatchObject({
+      status: 400,
+      refusal: 'recorded_host'
+    });
+    expect(decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: 'https://evil.example/', redirectUrl: null })).toMatchObject({
+      status: 400,
+      refusal: 'host'
+    });
+    expect(
+      decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: 'https://checkout.stripe.com/c/pay/', redirectUrl: null })
+    ).toMatchObject({ status: 400, refusal: 'no_session' });
+  });
+
   it('refuses a destination that is not Stripe checkout', () => {
-    const decision = decidePurchaseStart({ to: 'https://evil.example/', redirectUrl: CONVERSATION });
+    const decision = decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: 'https://evil.example/', redirectUrl: CONVERSATION });
 
     expect(decision.status).toBe(400);
     if (decision.status !== 400) throw new Error('unreachable');
@@ -169,7 +280,9 @@ describe('renderPurchaseReturnPage', () => {
   it('offers Back to your conversation on Android in intent form, in the same tab', () => {
     const html = renderPurchaseReturnPage({ cancelled: false, userAgent: ANDROID_UA, conversationUrl: CONVERSATION });
 
-    expect(html).toContain('<h1>Payment received</h1>');
+    // The redirect alone proves nothing was paid, so the heading claims neither way (#711).
+    expect(html).toContain('<h1>Checking your payment</h1>');
+    expect(html).not.toContain('Payment received');
     expect(html).toContain('>Back to your conversation</a>');
     expect(html).toContain('href="intent://chatgpt.com/c/');
     expect(html).not.toContain('target=');
@@ -216,7 +329,7 @@ describe('purchase page diagnostics', () => {
   // without writing a conversation id, a checkout session or a cookie.
 
   it('records that a return link arrived, from which host, and that it was kept, without the values', () => {
-    const decision = decidePurchaseStart({ to: CHECKOUT, redirectUrl: CONVERSATION });
+    const decision = decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: CHECKOUT, redirectUrl: CONVERSATION });
     const fields = purchaseStartDiagnostics({
       query: new URLSearchParams({ to: CHECKOUT, redirectUrl: CONVERSATION }),
       referer: CONVERSATION,
@@ -229,6 +342,7 @@ describe('purchase page diagnostics', () => {
       hasRedirectUrl: true,
       redirectHost: 'chatgpt.com',
       targetOk: true,
+      refusal: 'none',
       returnKept: true,
       refererHost: 'chatgpt.com',
       client: 'other'
@@ -243,7 +357,7 @@ describe('purchase page diagnostics', () => {
       query: new URLSearchParams({ to: CHECKOUT }),
       referer: undefined,
       userAgent: ANDROID_UA,
-      decision: decidePurchaseStart({ to: CHECKOUT, redirectUrl: null })
+      decision: decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: CHECKOUT, redirectUrl: null })
     });
     expect(none).toMatchObject({
       queryKeys: 'to',
@@ -260,7 +374,7 @@ describe('purchase page diagnostics', () => {
       query: new URLSearchParams({ to: CHECKOUT, redirectUrl: planted }),
       referer: undefined,
       userAgent: IPHONE_UA,
-      decision: decidePurchaseStart({ to: CHECKOUT, redirectUrl: planted })
+      decision: decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: CHECKOUT, redirectUrl: planted })
     });
     expect(rejected).toMatchObject({
       hasRedirectUrl: true,
@@ -277,7 +391,7 @@ describe('purchase page diagnostics', () => {
       query,
       referer: 'not a url either',
       userAgent: undefined,
-      decision: decidePurchaseStart({ to: 'https://evil.example/', redirectUrl: 'not a url' })
+      decision: decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: 'https://evil.example/', redirectUrl: 'not a url' })
     });
 
     expect(fields).toMatchObject({

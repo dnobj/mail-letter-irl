@@ -48,6 +48,24 @@ export function enabledUnlessDisabled(
 }
 
 /**
+ * A flag that is OFF when unset, and ON only for an explicit affirmative - so
+ * a typo leaves it OFF. Use for a feature that gives something away, where
+ * the safe state of an unread variable is the one that costs nothing: gift
+ * letters grant free mail, and LETTER_IRL_GIFT_LETTERS_ENABLED=ture must not
+ * start granting it.
+ *
+ * The third direction beside the two below, not a variant of either:
+ * enabledUnlessDisabled treats UNSET as on.
+ */
+export function offUnlessExplicitlyEnabled(
+  name: string,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  const raw = (env[name] ?? '').trim().toLowerCase();
+  return AFFIRMATIVE.has(raw);
+}
+
+/**
  * Values that explicitly turn a flag OFF. The mirror of AFFIRMATIVE, and
  * deliberately a separate list: 'enabled'/'disabled' pair up, but the two sets
  * are consulted by functions with opposite failure directions and must be free

@@ -21,7 +21,21 @@ describe("tool scope enforcement", () => {
     ["get_purchase_status", "mail:read"],
     ["generate_image_for_mail", "mail:draft"],
     ["create_mail_checkout", "mail:send"],
-    ["send_letter", "mail:send"]
+    ["send_letter", "mail:send"],
+    // The preview card's read of its own draft (#474).
+    ["get_draft_status", "mail:read"],
+    // A preview's arrival date, changed (#535): drafting, and it sends nothing.
+    ["set_arrival_date", "mail:draft"],
+    // A preview's style and words, changed in place (#563, #586): drafting, and they send nothing.
+    ["set_stationery", "mail:draft"],
+    ["set_letter_words", "mail:draft"],
+    // Held mail cancelled (#535): it only ever returns value.
+    ["cancel_scheduled_mail", "mail:draft"],
+    // Address requests (#604): drafting, reading one too, as its answer is a
+    // third party's address, never mail:read alone.
+    ["request_address", "mail:draft"],
+    ["get_address_request", "mail:draft"],
+    ["cancel_address_request", "mail:draft"]
   ])("maps %s to %s in metadata and runtime", (toolName, scope) => {
     expect(getRequiredToolScopes(toolName)).toEqual([scope]);
     expect(() => authorizeTool(toolName, jwt([scope]), true)).not.toThrow();
@@ -36,14 +50,22 @@ describe("tool scope enforcement", () => {
     );
   });
 
-  it("keeps PAT authorization on its separate server-side path", () => {
+  it("checks a personal access token's own scopes like any other token's (#470)", () => {
+    // Read and draft, what migration 037 gives every token. It used to pass
+    // every check here, send included.
     const pat: AuthenticatedUser = {
       userId: "pat-user",
       claims: { authType: "pat" },
       token: "redacted",
       authType: "pat",
-      scopes: []
+      scopes: ["mail:read", "mail:draft"]
     };
-    expect(() => authorizeTool("send_letter", pat, true)).not.toThrow();
+    expect(() => authorizeTool("get_account_balance", pat, true)).not.toThrow();
+    expect(() => authorizeTool("quote_and_preview_letter", pat, true)).not.toThrow();
+    expect(() => authorizeTool("send_letter", pat, true)).toThrow("insufficient_scope");
+    expect(() => authorizeTool("create_mail_checkout", pat, true)).toThrow("insufficient_scope");
+    expect(() => authorizeTool("get_account_balance", { ...pat, scopes: [] }, true)).toThrow(
+      "insufficient_scope"
+    );
   });
 });

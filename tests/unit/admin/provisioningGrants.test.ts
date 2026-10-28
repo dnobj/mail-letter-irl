@@ -25,6 +25,16 @@ describe("admin grant statements", () => {
   const statements = buildAdminGrantStatements(config);
   const sql = statements.join("\n");
 
+  it("lets the operator delete an address request and read only what the delete names, and the reader nothing of them (#701)", () => {
+    const onRequests = statements.filter((statement) => statement.includes("address_requests"));
+    expect(onRequests).toEqual([
+      'GRANT SELECT (request_id, token_hash, status, created_at) ON TABLE "public".address_requests TO "letter_irl_admin_operator_development"',
+      'GRANT DELETE ON TABLE "public".address_requests TO "letter_irl_admin_operator_development"',
+    ]);
+    expect(ADMIN_READER_TABLES).not.toContain("address_requests");
+    expect(ADMIN_READER_COLUMN_GRANTS).not.toHaveProperty("address_requests");
+  });
+
   it("never grants the reader whole-row access to a table with content or addresses", () => {
     for (const restricted of [
       "users",
@@ -60,6 +70,10 @@ describe("admin grant statements", () => {
     );
     expect(ADMIN_READER_COLUMN_GRANTS.personal_access_tokens).not.toContain(
       "token_hash",
+    );
+    // The SHA-256 a token is found by (059, #730).
+    expect(ADMIN_READER_COLUMN_GRANTS.personal_access_tokens).not.toContain(
+      "token_lookup",
     );
     expect(ADMIN_READER_COLUMN_GRANTS.feature_requests).not.toContain(
       "contact_email",
@@ -102,6 +116,14 @@ describe("admin grant statements", () => {
     expect(sql).toContain(
       'GRANT INSERT ON TABLE "public".commerce_operator_audit_events TO "letter_irl_admin_operator_development"',
     );
+    // Write elevation's TOTP counter (#730): the operator keeps it, the reader never sees it.
+    expect(sql).toContain(
+      'GRANT SELECT, INSERT ON TABLE "public".admin_totp_counters TO "letter_irl_admin_operator_development"',
+    );
+    expect(sql).toContain(
+      'GRANT UPDATE (last_counter, updated_at) ON TABLE "public".admin_totp_counters TO "letter_irl_admin_operator_development"',
+    );
+    expect(sql).not.toMatch(/admin_totp_counters TO "letter_irl_admin_reader_development/);
     // The reader writes nothing but its own audit rows.
     for (const line of statements) {
       if (

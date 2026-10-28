@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   deductCredits: vi.fn(),
   createOutboxJob: vi.fn(),
-  transaction: vi.fn()
+  transaction: vi.fn(),
+  recordHeldPrint: vi.fn(),
+  storeHeldPrint: vi.fn(),
+  diagnostics: [] as Array<{ level: string; event: string; fields: Record<string, unknown> }>
 }));
 const deductCredits = mocks.deductCredits;
 const createOutboxJob = mocks.createOutboxJob;
@@ -18,9 +21,47 @@ let activeCheckout = false;
 let lettersTodayForUser = 0;
 let lettersTodayGlobal = 0;
 let transactionChain: Promise<unknown>;
+// The duplicate check (#412): mail the account sent recently, as the letters
+// query returns it, and every tagged query in the order it ran.
+let recentLetters: Record<string, any>[] = [];
+let duplicateQueries: Array<{ sql: string; params: any[] }> = [];
+// The letters INSERT as it ran, for the arrive-by dates (#535).
+let letterInsert: { sql: string; params: any[] } | undefined;
+// Room on a mail date (#700): letters held for the send's date, those held
+// across the window on offer, and the capacity queries in the order they ran.
+let heldOnDate = 0;
+let heldWindow: Array<{ mail_on: string; held: number }> = [];
+let capacityQueries: Array<{ sql: string; params: any[] }> = [];
+// The daily caps' lock keys (#730), in the order they were taken.
+let capLocks: string[] = [];
+
+const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e';
+
+/** The current draft as the duplicate check reads it. */
+function comparableRow(source: DraftState, extra: Record<string, any> = {}) {
+  return {
+    mail_type: source.mail_type,
+    layout_type: source.layout_type ?? null,
+    postcard_size: source.postcard_size ?? null,
+    sender: source.sender,
+    recipient: source.recipient,
+    body_text: source.body_text,
+    sign_off: source.sign_off,
+    header_image_md5: EMPTY_MD5,
+    inline_image_md5: EMPTY_MD5,
+    front_image_md5: EMPTY_MD5,
+    ...extra
+  };
+}
 
 const client = {
   query: vi.fn(async (sql: string, params?: any[]) => {
+    if (sql.includes('duplicate mail check')) {
+      duplicateQueries.push({ sql, params: params ?? [] });
+      if (sql.includes('duplicate mail check: draft')) return { rows: [comparableRow(draft)] };
+      if (sql.includes('duplicate mail check: letters')) return { rows: recentLetters };
+      return { rows: [] };
+    }
     if (sql.startsWith('SELECT * FROM letter_drafts')) {
       return { rows: [{ ...draft }] };
     }
@@ -37,6 +78,7 @@ const client = {
       return { rows: commerceOrder ? [{ ...commerceOrder }] : [] };
     }
     if (sql.includes('INSERT INTO letters')) {
+      letterInsert = { sql, params: params ?? [] };
       savedLetter = {
         letter_id: params?.[0],
         user_id: params?.[1],
@@ -44,7 +86,8 @@ const client = {
         recipient: JSON.parse(params?.[3]),
         credits_cost: params?.[4],
         status: 'draft',
-        mail_type: params?.[6]
+        mail_type: params?.[6],
+        mail_service: params?.[11]
       };
       return { rows: [{ ...savedLetter }] };
     }
@@ -65,6 +108,17 @@ const client = {
           }
         : null;
       return { rows: commerceOrder ? [{ ...commerceOrder }] : [] };
+    }
+    // The daily caps' own lock (#730), apart from the mail date's below.
+    if (sql.includes('pg_advisory_xact_lock(hashtext($1), hashtext($2))')) {
+      capLocks.push(params?.[1] as string);
+      return { rows: [] };
+    }
+    if (sql.includes('pg_advisory_xact_lock') || sql.includes('AS held FROM letters')) {
+      capacityQueries.push({ sql, params: params ?? [] });
+      if (sql.includes('GROUP BY mail_on')) return { rows: heldWindow };
+      if (sql.includes('AS held')) return { rows: [{ held: heldOnDate }] };
+      return { rows: [] };
     }
     if (sql.includes('COUNT(*) AS count') && sql.includes('FROM letters')) {
       // The caps FAIL CLOSED, so an unanswered COUNT is a refusal rather than
@@ -99,8 +153,20 @@ vi.mock('../../../src/services/creditLedgerService.js', () => ({
 vi.mock('../../../src/services/letterJobService.js', () => ({
   createLetterJobWithClient: mocks.createOutboxJob
 }));
+// Held mail's print (#697): spied here, run for real in heldPrintService.test.ts.
+vi.mock('../../../src/services/heldPrintService.js', () => ({
+  recordHeldPrintWithClient: mocks.recordHeldPrint,
+  storeHeldPrint: mocks.storeHeldPrint
+}));
+vi.mock('../../../src/utils/diagnosticLog.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/utils/diagnosticLog.js')>()),
+  writeDiagnostic: (level: string, event: string, fields: Record<string, unknown> = {}) => {
+    mocks.diagnostics.push({ level, event, fields });
+  }
+}));
 
 import { createMailOrderFromDraft } from '../../../src/services/mailSendService.js';
+import { contentVersionOf } from '../../../src/services/contentVersion.js';
 
 describe('createMailOrderFromDraft', () => {
   beforeEach(() => {
@@ -112,6 +178,14 @@ describe('createMailOrderFromDraft', () => {
     activeCheckout = false;
     lettersTodayForUser = 0;
     lettersTodayGlobal = 0;
+    recentLetters = [];
+    duplicateQueries = [];
+    letterInsert = undefined;
+    heldOnDate = 0;
+    heldWindow = [];
+    capacityQueries = [];
+    capLocks = [];
+    mocks.diagnostics.length = 0;
     draft = {
       draft_id: 'draft-1',
       user_id: 'user-1',
@@ -153,9 +227,255 @@ describe('createMailOrderFromDraft', () => {
       client,
       expect.objectContaining({
         letter_id: result.letter.letter_id
-      })
+      }),
+      // Not held (#535): the draft names no arrival date.
+      { notBefore: undefined }
     );
     expect(result.job?.idempotency_key).toBe(result.letter.letter_id);
+  });
+
+  it('takes the account before inserting the letter, so two sends from one account cannot deadlock (#730 review)', async () => {
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    const statements = client.query.mock.calls.map(([sql]) => String(sql));
+    const accountLock = statements.indexOf('SELECT user_id FROM users WHERE user_id = $1 FOR UPDATE');
+    const letterInsert = statements.findIndex((sql) => sql.includes('INSERT INTO letters'));
+    expect(accountLock).toBeGreaterThanOrEqual(0);
+    expect(letterInsert).toBeGreaterThan(accountLock);
+    expect(client.query.mock.calls[accountLock][1]).toEqual(['user-1']);
+  });
+
+  it('copies the renderer the preview was drawn with into the letter (#534)', async () => {
+    draft.renderer_version = 'pdf-1';
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content.rendererVersion).toBe('pdf-1');
+  });
+
+  it('copies the stationery the preview was drawn in into the letter (#563)', async () => {
+    const botanical = { theme: 'botanical', dateLine: 'October 1, 2026' };
+    (draft as Record<string, unknown>).renderer_version = 'pdf-2';
+    (draft as Record<string, unknown>).stationery = botanical;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-2', stationery: botanical });
+  });
+
+  it('copies the signature the preview was drawn with into the letter (#608)', async () => {
+    const signature = 'data:image/png;base64,iVBORw0KGgo=';
+    (draft as Record<string, unknown>).renderer_version = 'pdf-4';
+    (draft as Record<string, unknown>).signature_image = signature;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-4', signatureImage: signature });
+  });
+
+  // Never drawn, or emptied by retention: nothing to print.
+  it.each([null, ''])('leaves the content without a signature for a draft holding %j (#608)', async none => {
+    (draft as Record<string, unknown>).renderer_version = 'pdf-1';
+    (draft as Record<string, unknown>).signature_image = none;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).not.toHaveProperty('signatureImage');
+  });
+
+  it("leaves a Classic letter's content without stationery (#563)", async () => {
+    (draft as Record<string, unknown>).renderer_version = 'pdf-1';
+    (draft as Record<string, unknown>).stationery = null;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-1' });
+    expect(savedLetter?.content).not.toHaveProperty('stationery');
+  });
+
+  it('copies the pages a longer letter was laid out on into the letter, and none for one page (#586)', async () => {
+    const funding = { type: 'jit_order' as const, orderId: 'order-jit' };
+    commerceOrder = {
+      order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter-3-pages',
+      user_id: 'user-1', draft_id: 'draft-1', status: 'paid'
+    };
+    draft = { ...draft, pages: 3, renderer_version: 'pdf-1' };
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter', funding });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-1', pages: 3 });
+  });
+
+  it("leaves a one-page letter's content without pages (#586)", async () => {
+    draft = { ...draft, pages: 1, renderer_version: 'pdf-1' };
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-1' });
+    expect(savedLetter?.content).not.toHaveProperty('pages');
+  });
+
+  describe('the content version the person was shown (#695)', () => {
+    it('sends a draft whose version is the one shown', async () => {
+      const shown = contentVersionOf(draft);
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter', contentVersion: shown });
+      expect(savedLetter).not.toBeNull();
+      expect(mocks.diagnostics.map(entry => entry.event)).not.toContain('send.content_version_missing');
+    });
+
+    it('refuses a draft changed after it was shown, before any letter is spent', async () => {
+      const shown = contentVersionOf(draft);
+      draft.body_text = 'Hello, changed';
+      await expect(createMailOrderFromDraft({
+        draftId: 'draft-1', userId: 'user-1', mailType: 'letter', contentVersion: shown
+      })).rejects.toMatchObject({ code: 'DRAFT_CHANGED_SINCE_SHOWN' });
+      expect(deductCredits).not.toHaveBeenCalled();
+      expect(createOutboxJob).not.toHaveBeenCalled();
+      expect(savedLetter).toBeNull();
+      expect(draft.status).toBe('pending');
+    });
+
+    it.each([
+      ['a version of another shape', 'not-a-version'],
+      ['a number', 42]
+    ])('refuses %s', async (_label, shown) => {
+      await expect(createMailOrderFromDraft({
+        draftId: 'draft-1', userId: 'user-1', mailType: 'letter', contentVersion: shown as never
+      })).rejects.toMatchObject({ code: 'DRAFT_CHANGED_SINCE_SHOWN' });
+      expect(deductCredits).not.toHaveBeenCalled();
+    });
+
+    it('sends a draft named without a version for one release, and logs it', async () => {
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+      expect(savedLetter).not.toBeNull();
+      expect(mocks.diagnostics).toContainEqual(expect.objectContaining({
+        event: 'send.content_version_missing', fields: { mailType: 'letter' }
+      }));
+    });
+
+    it('leaves the fulfilment of a paid order alone: its checkout compared the version', async () => {
+      commerceOrder = {
+        order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter',
+        user_id: 'user-1', draft_id: 'draft-1', status: 'paid'
+      };
+      await createMailOrderFromDraft({
+        draftId: 'draft-1', userId: 'user-1', mailType: 'letter',
+        funding: { type: 'jit_order', orderId: 'order-jit' }, contentVersion: 'stale-version'
+      });
+      expect(savedLetter).not.toBeNull();
+      expect(mocks.diagnostics.map(entry => entry.event)).not.toContain('send.content_version_missing');
+    });
+  });
+
+  describe('certified mail (#625)', () => {
+    const paidBy = (product_code: string) => {
+      commerceOrder = {
+        order_id: 'order-jit', order_type: 'jit_mail', product_code,
+        user_id: 'user-1', draft_id: 'draft-1', status: 'paid'
+      };
+      return { type: 'jit_order' as const, orderId: 'order-jit' };
+    };
+
+    it.each([
+      ['certified', 'jit-letter-certified'],
+      ['certified_return_receipt', 'jit-letter-certified-receipt']
+    ] as const)('records %s on the letter the Pay & Send order paid for', async (mail_service, product) => {
+      draft = { ...draft, mail_service, renderer_version: 'pdf-1' };
+
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter', funding: paidBy(product) });
+
+      expect(savedLetter?.mail_service).toBe(mail_service);
+      expect(letterInsert!.sql).toContain('mail_service');
+      expect(letterInsert!.sql).toContain('$12::text');
+      expect(letterInsert!.params[11]).toBe(mail_service);
+      expect(mocks.createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['a draft that says standard', { mail_service: 'standard' }],
+      ['a draft that says nothing', {}]
+    ])('records standard mail for %s', async (_name, over) => {
+      draft = { ...draft, ...over, renderer_version: 'pdf-1' };
+
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+
+      expect(savedLetter?.mail_service).toBe('standard');
+    });
+
+    it('records a postcard as standard, whatever its draft says', async () => {
+      draft = { ...draft, mail_type: 'postcard', mail_service: 'certified', renderer_version: 'pdf-1' };
+
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'postcard' });
+
+      expect(letterInsert!.params[11]).toBe('standard');
+    });
+
+    it('is not paid for by a pack or a gift letter, and moves nothing', async () => {
+      draft = { ...draft, mail_service: 'certified', renderer_version: 'pdf-1' };
+
+      await expect(
+        createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' })
+      ).rejects.toMatchObject({ code: 'PACK_CANNOT_PAY', certified: true });
+
+      expect(savedLetter).toBeNull();
+      expect(mocks.deductCredits).not.toHaveBeenCalled();
+      expect(mocks.createOutboxJob).not.toHaveBeenCalled();
+    });
+
+    it('says a pack refusal is certified only for certified mail, not for a longer standard letter', async () => {
+      draft = { ...draft, pages: 2, mail_service: 'standard', renderer_version: 'pdf-1' };
+
+      const refusal = await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' }).catch(e => e);
+
+      expect(refusal).toMatchObject({ code: 'PACK_CANNOT_PAY', certified: false });
+    });
+
+    it('is not paid for by an order for another product', async () => {
+      draft = { ...draft, mail_service: 'certified_return_receipt', renderer_version: 'pdf-1' };
+
+      await expect(
+        createMailOrderFromDraft({
+          draftId: 'draft-1', userId: 'user-1', mailType: 'letter', funding: paidBy('jit-letter-certified')
+        })
+      ).rejects.toMatchObject({ code: 'JIT_PRODUCT_MISMATCH' });
+
+      expect(savedLetter).toBeNull();
+    });
+
+    it('is not paid for by the plain letter order', async () => {
+      draft = { ...draft, mail_service: 'certified', renderer_version: 'pdf-1' };
+
+      await expect(
+        createMailOrderFromDraft({
+          draftId: 'draft-1', userId: 'user-1', mailType: 'letter', funding: paidBy('jit-letter')
+        })
+      ).rejects.toMatchObject({ code: 'JIT_PRODUCT_MISMATCH' });
+    });
+  });
+
+  it('copies the renderer into a postcard too (#534 Phase 4)', async () => {
+    draft.mail_type = 'postcard';
+    draft.renderer_version = 'pdf-1';
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'postcard' });
+    expect(savedLetter?.content).toMatchObject({ message: draft.body_text, rendererVersion: 'pdf-1' });
+  });
+
+  it('copies the front a postcard was drawn with into the letter (#594)', async () => {
+    const front = { layout: 'greetings', place: 'Asheville' };
+    draft.mail_type = 'postcard';
+    draft.renderer_version = 'pdf-3';
+    (draft as Record<string, unknown>).postcard_front = front;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'postcard' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-3', postcardFront: front });
+  });
+
+  it("leaves a full-bleed postcard's content without a front (#594)", async () => {
+    draft.mail_type = 'postcard';
+    draft.renderer_version = 'pdf-1';
+    (draft as Record<string, unknown>).postcard_front = null;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'postcard' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-1' });
+    expect(savedLetter?.content).not.toHaveProperty('postcardFront');
+  });
+
+  it("leaves a legacy postcard's content without a renderer version (#534 Phase 4)", async () => {
+    draft.mail_type = 'postcard';
+    draft.renderer_version = null;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'postcard' });
+    expect(savedLetter?.content).toHaveProperty('message');
+    expect(savedLetter?.content).not.toHaveProperty('rendererVersion');
+  });
+
+  it("leaves a legacy letter's content without a renderer version (#534)", async () => {
+    draft.renderer_version = null;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).toBeDefined();
+    expect(savedLetter?.content).not.toHaveProperty('rendererVersion');
   });
 
   it('serializes concurrent retries into one credit deduction and one letter', async () => {
@@ -197,7 +517,7 @@ describe('createMailOrderFromDraft', () => {
   it('uses paid JIT funding without mutating prepaid balance', async () => {
     commerceOrder = {
       order_id: 'order-jit',
-      order_type: 'jit_mail',
+      order_type: 'jit_mail', product_code: 'jit-letter',
       user_id: 'user-1',
       draft_id: 'draft-1',
       status: 'paid'
@@ -216,6 +536,62 @@ describe('createMailOrderFromDraft', () => {
     expect(commerceOrder).toMatchObject({
       status: 'fulfillment_pending',
       letter_id: result.letter.letter_id
+    });
+  });
+
+  describe('the mail a Pay & Send order paid for (#586)', () => {
+    const paidOrder = (productCode: string) => ({
+      order_id: 'order-jit',
+      order_type: 'jit_mail',
+      product_code: productCode,
+      user_id: 'user-1',
+      draft_id: 'draft-1',
+      status: 'paid'
+    });
+    const sendPaid = () =>
+      createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'user-1',
+        mailType: 'letter',
+        funding: { type: 'jit_order', orderId: 'order-jit' }
+      });
+
+    it('sends a two-page letter its two-page order paid for', async () => {
+      draft = { ...draft, pages: 2, renderer_version: 'pdf-1' };
+      commerceOrder = paidOrder('jit-letter-2-pages');
+      await expect(sendPaid()).resolves.toMatchObject({ alreadyConsumed: false });
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a letter whose pages changed after its order was paid, so the order is refunded rather than sent', async () => {
+      draft = { ...draft, pages: 2, renderer_version: 'pdf-1' };
+      commerceOrder = paidOrder('jit-letter');
+      await expect(sendPaid()).rejects.toMatchObject({
+        code: 'JIT_PRODUCT_MISMATCH',
+        diagnosticClass: 'JIT_PRODUCT_MISMATCH'
+      });
+      expect(createOutboxJob).not.toHaveBeenCalled();
+      expect(savedLetter).toBeNull();
+      expect(draft.status).toBe('pending');
+    });
+
+    it('refuses the reverse too: a one-page letter on a two-page order', async () => {
+      commerceOrder = paidOrder('jit-letter-2-pages');
+      await expect(sendPaid()).rejects.toMatchObject({ code: 'JIT_PRODUCT_MISMATCH' });
+      expect(createOutboxJob).not.toHaveBeenCalled();
+    });
+
+    it('refuses an order with a product code no mail is', async () => {
+      commerceOrder = paidOrder('credit-pack-10');
+      await expect(sendPaid()).rejects.toMatchObject({ code: 'JIT_PRODUCT_MISMATCH' });
+    });
+
+    it('refuses a draft no Pay & Send product matches by name, never by a TypeError', async () => {
+      // Migration 047 allows at most three pages; a row past that matches no product.
+      draft = { ...draft, pages: 4, renderer_version: 'pdf-1' };
+      commerceOrder = paidOrder('jit-letter-3-pages');
+      await expect(sendPaid()).rejects.toMatchObject({ code: 'JIT_PRODUCT_MISMATCH', diagnosticClass: 'JIT_PRODUCT_MISMATCH' });
+      expect(createOutboxJob).not.toHaveBeenCalled();
     });
   });
 
@@ -288,6 +664,14 @@ describe('createMailOrderFromDraft', () => {
     expect(createOutboxJob).not.toHaveBeenCalled();
   });
 
+  it('counts every live Pay & Send order as blocking, a disputed or held one too (#679)', async () => {
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    const call = client.query.mock.calls.find(([sql]) => String(sql).includes('SELECT order_id FROM orders'));
+    expect(call, 'the send asks for a live order').toBeDefined();
+    expect(String(call![0])).toContain('AND status = ANY($2::varchar[])');
+    expect(call![1]).toEqual(['draft-1', ['checkout_pending', 'paid', 'fulfillment_pending', 'refund_pending', 'disputed', 'held']]);
+  });
+
   /**
    * The beta cohort gate (#179), and the one place it must NOT apply.
    *
@@ -325,7 +709,7 @@ describe('createMailOrderFromDraft', () => {
       gateUp();
       commerceOrder = {
         order_id: 'order-jit',
-        order_type: 'jit_mail',
+        order_type: 'jit_mail', product_code: 'jit-letter',
         user_id: 'user-1',
         draft_id: 'draft-1',
         status: 'paid'
@@ -378,6 +762,11 @@ describe('createMailOrderFromDraft', () => {
    */
   describe('the daily mail caps', () => {
     afterEach(() => vi.unstubAllEnvs());
+
+    it('counts each cap under its lock inside the send, the account first (#730)', async () => {
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+      expect(capLocks).toEqual(['account_daily_mail:user-1', 'global_daily_mail']);
+    });
 
     it('refuses over the per-account cap and rolls the deduction back', async () => {
       vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP', '3');
@@ -436,7 +825,7 @@ describe('createMailOrderFromDraft', () => {
       lettersTodayGlobal = 99;
       commerceOrder = {
         order_id: 'order-jit',
-        order_type: 'jit_mail',
+        order_type: 'jit_mail', product_code: 'jit-letter',
         user_id: 'user-1',
         draft_id: 'draft-1',
         status: 'paid'
@@ -459,6 +848,326 @@ describe('createMailOrderFromDraft', () => {
         mailType: 'letter'
       });
       expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+  });
+  /**
+   * The same mail twice (#412). Checked after the deduction, like the caps,
+   * so the account row is locked and two sends cannot both pass; a refusal
+   * rolls the deduction back.
+   */
+  describe('the duplicate check', () => {
+    const send = (extra: Record<string, unknown> = {}) =>
+      createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter', ...extra });
+
+    it('refuses mail that went out in the last day, and rolls the send back', async () => {
+      recentLetters = [comparableRow(draft, { age_seconds: 180 })];
+
+      await expect(send()).rejects.toMatchObject({
+        code: 'DUPLICATE_RECENT_MAIL',
+        duplicate: { kind: 'sent', mailType: 'letter', recipientName: 'Recipient', ageSeconds: 180 }
+      });
+
+      expect(deductCredits).toHaveBeenCalledTimes(1);
+      expect(createOutboxJob).not.toHaveBeenCalled();
+      expect(draft.status).toBe('pending');
+      expect(savedLetter).toBeNull();
+    });
+
+    it('checks after the deduction, and leaves this send out', async () => {
+      await send();
+
+      const letters = duplicateQueries.find(query => query.sql.includes('duplicate mail check: letters'))!;
+      expect(letters.params).toEqual(['user-1', 'letter', savedLetter!.letter_id]);
+      const draftRead = duplicateQueries.find(query => query.sql.includes('duplicate mail check: draft'))!;
+      expect(draftRead.params).toEqual(['draft-1', 'user-1']);
+
+      const checkCall = client.query.mock.calls.findIndex(([sql]) => String(sql).includes('duplicate mail check'));
+      const checkOrder = client.query.mock.invocationCallOrder[checkCall];
+      expect(deductCredits.mock.invocationCallOrder[0]).toBeLessThan(checkOrder);
+      const outboxOrder = createOutboxJob.mock.invocationCallOrder[0];
+      expect(checkOrder).toBeLessThan(outboxOrder);
+    });
+
+    it('sends another copy when the person asked for one', async () => {
+      recentLetters = [comparableRow(draft)];
+
+      await expect(send({ allowDuplicate: true })).resolves.toMatchObject({ alreadyConsumed: false });
+
+      expect(duplicateQueries).toEqual([]);
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets different mail through', async () => {
+      recentLetters = [comparableRow(draft, { body_text: 'Something else' })];
+
+      await expect(send()).resolves.toMatchObject({ alreadyConsumed: false });
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('never checks Pay & Send fulfilment, which runs after the customer paid', async () => {
+      recentLetters = [comparableRow(draft)];
+      commerceOrder = {
+        order_id: 'order-jit',
+        order_type: 'jit_mail', product_code: 'jit-letter',
+        user_id: 'user-1',
+        draft_id: 'draft-1',
+        status: 'paid'
+      };
+
+      await send({ funding: { type: 'jit_order', orderId: 'order-jit' } });
+
+      expect(duplicateQueries).toEqual([]);
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns the existing order for a draft already sent, without checking', async () => {
+      recentLetters = [comparableRow(draft)];
+      draft = { ...draft, status: 'consumed', consumed_letter_id: 'letter-prepaid' };
+      savedLetter = { letter_id: 'letter-prepaid', user_id: 'user-1', funding_type: 'prepaid_balance' };
+
+      await expect(send()).resolves.toMatchObject({ alreadyConsumed: true });
+      expect(duplicateQueries).toEqual([]);
+    });
+  });
+
+  describe('arrive-by: mail held to its date (#535)', () => {
+    // A Thursday, 10:00 in New York: today is still a mail date.
+    const THURSDAY_MORNING = new Date('2026-10-01T14:00:00Z');
+    const send = (funding?: Parameters<typeof createMailOrderFromDraft>[0]['funding']) =>
+      createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter', ...(funding ? { funding } : {}) });
+    const dates = () => [letterInsert!.params[9], letterInsert!.params[10]];
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(THURSDAY_MORNING);
+      draft.expires_at = new Date(THURSDAY_MORNING.getTime() + 60_000);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    });
+
+    it('copies the dates to the letter and holds its job until 09:00 New York time on the mail date', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+
+      const result = await send();
+
+      expect(letterInsert!.sql).toContain('arrive_by, mail_on');
+      expect(letterInsert!.sql).toContain('$10::date, $11::date');
+      expect(dates()).toEqual(['2026-10-16', '2026-10-06']);
+      expect(createOutboxJob).toHaveBeenCalledWith(client, expect.objectContaining({ letter_id: result.letter.letter_id }), {
+        notBefore: new Date('2026-10-06T13:00:00Z')
+      });
+      // The value moved as for any send: the hold is only when it prints.
+      expect(deductCredits).toHaveBeenCalledTimes(1);
+    });
+
+    it("records held mail's print in the send's transaction, and stores its PDF once it has committed (#697)", async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      const order: string[] = [];
+      mocks.recordHeldPrint.mockImplementation(async () => { order.push('record'); });
+      mocks.storeHeldPrint.mockImplementation(async () => { order.push('store'); return 'stored'; });
+      createOutboxJob.mockImplementation(async (_client, letter, options) => ({
+        job_id: 'job-1',
+        letter_id: letter.letter_id,
+        status: 'pending',
+        idempotency_key: letter.letter_id,
+        mail_hold_until: options.notBefore
+      }));
+      const committed = vi.fn(() => order.push('commit'));
+      mocks.transaction.mockImplementation(async (callback: (dbClient: typeof client) => Promise<unknown>) => {
+        const result = await runTransaction(callback);
+        committed();
+        return result;
+      });
+
+      const result = await send();
+
+      expect(mocks.recordHeldPrint).toHaveBeenCalledWith(client, expect.objectContaining({ letter_id: result.letter.letter_id }), new Date('2026-10-06T13:00:00Z'));
+      expect(mocks.storeHeldPrint).toHaveBeenCalledWith(result.letter.letter_id);
+      expect(order).toEqual(['record', 'commit', 'store']);
+    });
+
+    it('stores no PDF for mail not held, and records it with no date to hold for (#697)', async () => {
+      await send();
+      expect(mocks.recordHeldPrint).toHaveBeenCalledWith(client, expect.anything(), undefined);
+      expect(mocks.storeHeldPrint).not.toHaveBeenCalled();
+    });
+
+    it('mails today when today is its mail date, released at once since 09:00 has passed', async () => {
+      draft.arrive_by = '2026-10-13';
+      draft.mail_on = '2026-10-01';
+
+      await send();
+
+      expect(dates()).toEqual(['2026-10-13', '2026-10-01']);
+      const [, , options] = createOutboxJob.mock.calls[0];
+      expect(options.notBefore).toEqual(new Date('2026-10-01T13:00:00Z'));
+      expect(options.notBefore.getTime()).toBeLessThan(THURSDAY_MORNING.getTime());
+    });
+
+    it('sends as soon as it can, with no dates, when the draft names none', async () => {
+      await send();
+
+      expect(dates()).toEqual([null, null]);
+      expect(createOutboxJob.mock.calls[0][2]).toEqual({ notBefore: undefined });
+    });
+
+    it('refuses a prepaid send whose mail date has passed, before any value moves', async () => {
+      for (const [now, mailOn] of [
+        ['2026-10-01T16:00:00Z', '2026-10-01'], // noon in New York, on the mail date
+        [THURSDAY_MORNING.toISOString(), '2026-09-30'] // the day before
+      ] as const) {
+        vi.setSystemTime(new Date(now));
+        draft.expires_at = new Date(Date.parse(now) + 60_000);
+        draft.arrive_by = '2026-10-12';
+        draft.mail_on = mailOn;
+
+        await expect(send()).rejects.toMatchObject({ code: 'SCHEDULE_PASSED' });
+        expect(letterInsert).toBeUndefined();
+        expect(deductCredits).not.toHaveBeenCalled();
+        expect(createOutboxJob).not.toHaveBeenCalled();
+        expect(draft.status).toBe('pending');
+      }
+    });
+
+    it('mails a paid Pay & Send order as soon as it can when its date has passed, and logs the miss', async () => {
+      vi.setSystemTime(new Date('2026-10-01T17:00:00Z')); // 13:00 in New York
+      draft.expires_at = new Date(Date.parse('2026-10-01T17:00:00Z') + 60_000);
+      draft.arrive_by = '2026-10-12';
+      draft.mail_on = '2026-10-01';
+      commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
+
+      const result = await send({ type: 'jit_order', orderId: 'order-jit' });
+
+      expect(dates()).toEqual([null, null]);
+      expect(createOutboxJob.mock.calls[0][2]).toEqual({ notBefore: undefined });
+      // For the order's event and get_purchase_status (#700).
+      expect(result.scheduleMissed).toEqual({ arriveBy: '2026-10-12', mailOn: '2026-10-01' });
+      expect(capacityQueries).toEqual([]);
+      expect(mocks.diagnostics).toContainEqual({
+        level: 'warn',
+        event: 'send.schedule_missed',
+        fields: { funding: 'jit_order', mailOn: '2026-10-01' }
+      });
+    });
+
+    it('holds a paid Pay & Send order whose date is still ahead, like any other', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
+
+      const result = await send({ type: 'jit_order', orderId: 'order-jit' });
+
+      expect(dates()).toEqual(['2026-10-16', '2026-10-06']);
+      expect(createOutboxJob.mock.calls[0][2]).toEqual({ notBefore: new Date('2026-10-06T13:00:00Z') });
+      expect(result.scheduleMissed).toBeUndefined();
+    });
+
+    it('counts room on its mail date under a lock on the date, before any value moves (#700)', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '3');
+      heldOnDate = 2;
+
+      await send();
+
+      expect(capacityQueries.map(query => query.params)).toEqual([['2026-10-06'], ['2026-10-06']]);
+      expect(capacityQueries[0].sql).toContain("pg_advisory_xact_lock(hashtext('letter_irl.mail_on'), hashtext($1))");
+      expect(capacityQueries[1].sql).toContain("status = 'queued'");
+      const calls = client.query.mock.calls.map(([sql]) => String(sql));
+      const lockAt = client.query.mock.invocationCallOrder[calls.findIndex(sql => sql.includes('pg_advisory_xact_lock'))];
+      expect(lockAt).toBeGreaterThan(client.query.mock.invocationCallOrder[calls.findIndex(sql => sql.startsWith('SELECT * FROM letter_drafts'))]);
+      expect(lockAt).toBeLessThan(deductCredits.mock.invocationCallOrder[0]);
+      expect(dates()).toEqual(['2026-10-16', '2026-10-06']);
+    });
+
+    it('refuses a prepaid send whose mail date is full, naming the nearest dates with room, before any value moves (#700)', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '3');
+      heldOnDate = 3;
+      // Tue Oct 13, the earliest on offer, mails on Oct 1 and Mon Oct 19 on Oct 7, both full too;
+      // Tue Oct 20 mails on Oct 8.
+      heldWindow = [
+        { mail_on: '2026-10-01', held: 4 },
+        { mail_on: '2026-10-06', held: 3 },
+        { mail_on: '2026-10-07', held: 3 },
+        { mail_on: '2026-10-08', held: 2 }
+      ];
+
+      const refusal = await send().catch(error => error);
+
+      expect(refusal).toMatchObject({ code: 'SCHEDULE_FULL', diagnosticClass: 'SCHEDULE_FULL' });
+      // Fri Oct 16 mails on the full Oct 6 (Columbus Day, Oct 12, is no business day), so the nearest
+      // others: Wed Oct 14 and Thu Oct 15 before it, and Tue Oct 20 after it.
+      expect(refusal.openArrivals).toEqual(['2026-10-14', '2026-10-15', '2026-10-20']);
+      expect(letterInsert).toBeUndefined();
+      expect(deductCredits).not.toHaveBeenCalled();
+      expect(createOutboxJob).not.toHaveBeenCalled();
+      expect(draft.status).toBe('pending');
+    });
+
+    it('refuses a gift send whose mail date is full too (#700)', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      draft.is_gift_send = true;
+      vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '1');
+      heldOnDate = 1;
+
+      await expect(send()).rejects.toMatchObject({ code: 'SCHEDULE_FULL' });
+      expect(letterInsert).toBeUndefined();
+    });
+
+    it('refuses a draft with an open checkout for that first, taking no date lock (#700 review round 2)', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '1');
+      heldOnDate = 1;
+      activeCheckout = true;
+
+      await expect(send()).rejects.toMatchObject({ code: 'DRAFT_CHECKOUT_PENDING' });
+      expect(capacityQueries).toEqual([]);
+    });
+
+    it('never refuses a paid Pay & Send order for a full date, and takes no lock for it (#700)', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '1');
+      heldOnDate = 5;
+      commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
+
+      await send({ type: 'jit_order', orderId: 'order-jit' });
+
+      expect(dates()).toEqual(['2026-10-16', '2026-10-06']);
+      expect(capacityQueries).toEqual([]);
+    });
+
+    it('counts nothing for mail with no date (#700)', async () => {
+      heldOnDate = 5;
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '1');
+
+      await send();
+
+      expect(capacityQueries).toEqual([]);
+    });
+
+    it('refuses dates it cannot read as calendar days rather than guessing the day', async () => {
+      for (const [arriveBy, mailOn, column] of [
+        ['2026-10-16', new Date('2026-10-06T00:00:00'), 'mail_on'], // a Date: pg without the DATE parser
+        ['2026-10-16', null, 'mail_on'], // half a schedule
+        [null, '2026-10-06', 'arrive_by'],
+        ['2026-10-16', '2026-02-30', 'mail_on']
+      ] as const) {
+        draft.arrive_by = arriveBy;
+        draft.mail_on = mailOn;
+        await expect(send(), String(mailOn)).rejects.toThrow(`letter_drafts.${column} is not a 'YYYY-MM-DD' string`);
+        expect(letterInsert).toBeUndefined();
+      }
     });
   });
 });

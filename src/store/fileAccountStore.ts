@@ -2,6 +2,9 @@ import { UserAccount, OrderRecord, LetterStatus } from "../contracts/types.js";
 import { query } from "../db/index.js";
 import { getBalance } from "../services/creditService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
+import { isImageGenerationOff } from "../config/imageGeneration.js";
+import { carrierNumberLookupEnded, certifiedFactsOf } from "../config/certifiedMail.js";
+import { heldDatesOf, scheduleSentence } from "../services/deliverySchedule.js";
 import {
   classifyDiagnosticError,
   writeDiagnostic
@@ -27,6 +30,7 @@ export class FileAccountStore {
    *
    * Database statuses: draft, queued, processing, accepted, sent, in_transit, delivered, returned, failed, cancelled
    * MCP statuses: pending, accepted, printing, in_transit, delivered, returned, failed, cancelled
+   * (and scheduled, for a queued letter with an arrival date: see fetchOrders, #535)
    */
   private mapStatus(dbStatus: string): LetterStatus {
     switch (dbStatus) {
@@ -84,7 +88,12 @@ export class FileAccountStore {
           status,
           preview_html,
           created_at,
-          sent_at
+          sent_at,
+          arrive_by,
+          mail_on,
+          funding_type,
+          mail_service,
+          carrier_tracking_number
         FROM letters
         WHERE user_id = $1
         ORDER BY created_at DESC
@@ -102,6 +111,20 @@ export class FileAccountStore {
           timeline.push({
             timestampISO: row.created_at.toISOString(),
             statusText: 'Order placed'
+          });
+        }
+
+        // Sent with an arrival date (#535): until it goes to the printer it
+        // is scheduled, and free to cancel unless a Pay & Send payment bought
+        // it, whose refund a person decides. cancel_scheduled_mail decides in
+        // the end; this only says what to expect.
+        const schedule = heldDatesOf(row.arrive_by, row.mail_on);
+        const waiting = schedule !== null && row.status === 'queued';
+        const certified = certifiedFactsOf(row);
+        if (schedule && row.created_at) {
+          timeline.push({
+            timestampISO: row.created_at.toISOString(),
+            statusText: `Scheduled: ${scheduleSentence(schedule, new Date())}`
           });
         }
 
@@ -137,14 +160,20 @@ export class FileAccountStore {
             requiredCredits: row.credits_cost || 1
           },
           statusTimeline: timeline,
-          currentStatus: this.mapStatus(row.status),
+          currentStatus: waiting ? 'scheduled' : this.mapStatus(row.status),
           creditsDeducted: row.credits_cost || 1,
           recipientSummary: {
             name: recipient.name || '',
             city: recipient.city || '',
             state: recipient.state || ''
           },
-          previewFirstPageHtml: row.preview_html || undefined
+          previewFirstPageHtml: row.preview_html || undefined,
+          ...(schedule ? { schedule, cancellable: waiting && row.funding_type !== 'jit_order' } : {}),
+          // Certified mail (#625): the service, and the carrier's number once the status sync has it.
+          ...(certified ? { certified } : {}),
+          ...(certified && !certified.carrierTrackingNumber && carrierNumberLookupEnded(row.sent_at)
+            ? { carrierNumberLookupEnded: true }
+            : {})
         } as OrderRecord;
       });
     } catch (error) {
@@ -168,16 +197,19 @@ export class FileAccountStore {
       });
     }
 
-    // Fetch image generation quota
+    // Fetch image generation quota, unless image generation is switched off
+    // (src/config/imageGeneration.ts): then there is nothing to count.
     let imageGenerationsRemaining: number | undefined;
-    try {
-      const quota = await getGenerationQuota(userId);
-      imageGenerationsRemaining = quota.remaining;
-    } catch (error) {
-      // User not found or other error — leave undefined
-      writeDiagnostic("warn", "account.image_quota_lookup_failed", {
-        errorClass: classifyDiagnosticError(error, "database_error")
-      });
+    if (!isImageGenerationOff()) {
+      try {
+        const quota = await getGenerationQuota(userId);
+        imageGenerationsRemaining = quota.remaining;
+      } catch (error) {
+        // User not found or other error — leave undefined
+        writeDiagnostic("warn", "account.image_quota_lookup_failed", {
+          errorClass: classifyDiagnosticError(error, "database_error")
+        });
+      }
     }
 
     // Fetch orders from database
@@ -191,7 +223,7 @@ export class FileAccountStore {
     };
   }
 
-  async persist(account: UserAccount): Promise<void> {
+  async persist(_account: UserAccount): Promise<void> {
     // No-op for database-backed store
     // Orders are persisted by sendLetter tool directly to the database
     writeDiagnostic("info", "account.persist_noop");

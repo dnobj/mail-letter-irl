@@ -17,6 +17,7 @@ import {
 } from "../utils/diagnosticLog.js";
 import { InsufficientScopeError } from "./oauthChallenge.js";
 import { assertBetaAccess } from "./betaAccess.js";
+import { rememberVerifiedToken } from "./signInPool.js";
 
 export interface AuthenticatedUser {
   userId: string;
@@ -49,13 +50,16 @@ export function parseTokenScopes(claims: Record<string, unknown>): string[] {
   return [];
 }
 
+/**
+ * Every scope the route or tool needs, from a token of either kind. A personal
+ * access token used to pass every check here, mail:send included; since #470
+ * it carries its own scopes (migration 037), read and draft only, and is
+ * checked like any other token.
+ */
 export function requireScopes(
   user: AuthenticatedUser,
   requiredScopes: readonly string[]
 ): void {
-  if (user.authType === "pat") {
-    return;
-  }
   const missing = requiredScopes.filter((scope) => !user.scopes.includes(scope));
   if (missing.length > 0) {
     throw new InsufficientScopeError(missing);
@@ -99,13 +103,14 @@ async function validatePATToken(token: string): Promise<AuthenticatedUser> {
   // keeps working forever, so removing someone from the cohort would revoke
   // their OAuth access and leave their PAT alive.
   assertBetaAccess(result.userId!);
+  rememberVerifiedToken(token, result.userId!);
 
   return {
     userId: result.userId!,
     claims: { authType: "pat", tokenId: result.tokenId },
     token,
     authType: "pat",
-    scopes: []
+    scopes: result.scopes ?? []
   };
 }
 
@@ -124,7 +129,9 @@ export async function validateJWTToken(
   }
 
   const options: JWTVerifyOptions = {
-    issuer: config.issuer,
+    // The published issuer, and any the tenant still stamps on tokens for apps that connected before a move to a
+    // custom domain (LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS). One tenant either way: the same signing keys.
+    issuer: config.additionalIssuers.length > 0 ? [config.issuer, ...config.additionalIssuers] : config.issuer,
     audience: config.audience[0],
     algorithms: config.algorithms
   };
@@ -173,5 +180,6 @@ export async function validateJWTToken(
     });
     throw error;
   }
+  rememberVerifiedToken(token, user.userId, typeof user.claims.exp === "number" ? user.claims.exp * 1000 : undefined);
   return user;
 }

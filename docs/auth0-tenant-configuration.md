@@ -1,6 +1,6 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** September 14, 2026
+**Last Updated:** October 23, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
 
@@ -46,13 +46,18 @@ unachievable rather than merely unmet:
 
 The DCR/static-client sections below document the temporary rollback baseline,
 not the desired configuration. Do not enable them in a normal CIMD rollout.
+While rollback mode is on, the server treats a token from the static client
+(`CHATGPT_STATIC_CLIENT_ID`) as ChatGPT's (`src/auth/clientProfiles.ts`, #473),
+so that application's callbacks must stay OpenAI's alone.
 
 ## Tenants Overview
 
-| Environment | Tenant Domain | Account |
-|-------------|---------------|---------|
-| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works |
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com |
+| Environment | Tenant Domain | Custom domain | Account |
+|-------------|---------------|---------------|---------|
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | `auth-dev.letterirl.com`, in use since 2026-10-20 | the organization account |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | `auth.letterirl.com`, verified 2026-10-20; the API and website move to it after the promotion | the production account |
+
+How the custom domains were set up, and their state, is in "Moving a tenant to a custom domain" below.
 
 ---
 
@@ -65,6 +70,7 @@ not the desired configuration. Do not enable them in a normal CIMD rollout.
 - [Applications](#applications)
 - [APIs / Resource Servers](#apis--resource-servers)
 - [Key Settings for ChatGPT MCP](#key-settings-for-chatgpt-mcp)
+- [Checking a tenant](#checking-a-tenant)
 - [Management via CLI](#management-via-cli)
 - [Common Operations](#common-operations)
 - [Environment Configuration](#environment-configuration)
@@ -77,7 +83,6 @@ Use this table to verify each application has the correct settings:
 
 | Application | Type | Callbacks Required | Web Origins Required | Domain Connection |
 |-------------|------|-------------------|---------------------|-------------------|
-| **Mail Letter IRL** | SPA | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect`<br>`https://platform.openai.com/apps-manage/oauth` | `https://chat.openai.com`<br>`https://chatgpt.com`<br>`https://platform.openai.com` | N/A |
 | **Letter IRL API** | M2M | None | None | N/A |
 | **ChatGPT CIMD** | Strict third-party, `private_key_jwt` (Auth0 maps `app_type: regular_web`; strict is forced, not chosen) | Exact current `https://chatgpt.com/connector/oauth/{callback_id}` from CIMD | N/A | Domain-level connections |
 
@@ -90,10 +95,48 @@ Use this table to verify each application has the correct settings:
 | DCR Enabled | Settings → Advanced | Rollback inventory only |
 | Friendly Name | Settings → General | `Letter IRL` |
 | Google Connection | Connections | `is_domain_connection: true` |
-| Microsoft Connection | Connections | `is_domain_connection: true` |
-| Apple Connection | Connections | `is_domain_connection: true` |
+| Microsoft Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered; off on development since 2026-10-20 |
+| Apple Connection | Connections | `is_domain_connection: true` only while offered: off on production while not offered; off on development since 2026-10-20 |
 | GitHub Connection | Connections | `is_domain_connection: true` |
 | Username-Password | Connections | `is_domain_connection: true` |
+| Consent screen shows the scope descriptions | No dashboard page. Tenant flag `use_scope_descriptions_for_consent`, set through the Management API | `true`. Development set on 2026-09-28; production at the launch promotion (#267) |
+| Error page | Settings → General → Error Pages | **Custom**, URL `<website>/sign-in-error` of the same environment (#837). Production once the website with website #86 is promoted |
+
+**The error page, #837.** When the linking Action refuses a sign-in that started in an app (an
+unconfirmed email, for example), Auth0 does not return the refusal to the app: it shows its own
+error page, "Oops!, something went wrong… contact the systems administrator", with our sentence
+only under Technical details, and the app waits until its sign-in times out (seen with Claude Code
+on development, 2026-10-26). With the custom setting, Auth0 sends the person to the website's
+`/sign-in-error` with `error`, `error_description` and `tracking` in the address. The page shows the
+description only when it is one of the Action's sentences, word for word, tells the person to go
+back to their app, and quotes the tracking id. A sentence changed in the Action must change in the
+website's `lib/sign-in-error.ts` too, or that refusal shows the page's general fallback.
+
+Development was switched on 2026-10-26 and checked the same day: a Claude Code sign-in as an
+unconfirmed password account landed on the website's page with the confirmation-link sentence,
+the line sending the person back to their app, and Auth0's reference. Auth0 sent the sentence as
+written, apostrophes unescaped, with `client_id`, `connection` and `lang` beside it. The app itself
+is still never told, so Claude Code waited until its sign-in timed out. An unrelated Auth0 error
+(`invalid_request` from `/v2/logout`) landed on the same page with its general fallback.
+
+**The consent flag, #267.** Without it, Auth0's consent screen builds labels from the scope names,
+so `mail:read` reads "mail your read". With it, the screen shows each scope's description from the
+API's Permissions tab. The flag changes that wording only, on the consent screen of every app on
+the tenant that shows one; the website is first-party and shows none. To set it:
+1. Install the Auth0 CLI (`scoop install auth0`).
+2. Sign in with `auth0 login --scopes "read:tenant_settings,update:tenant_settings"`. This is a
+   device login: the person confirms the code in the browser and picks the tenant. It creates no
+   application, which matters at the 10-app cap.
+3. Save `auth0 api get "tenants/settings"`.
+4. Run `auth0 api patch "tenants/settings" --data @file`, with
+   `{"flags":{"use_scope_descriptions_for_consent":true}}` in the file. A file avoids PowerShell's
+   quoting.
+5. Read the settings again and compare: on 2026-09-28 only this flag changed.
+
+A consent screen for OpenClaw's client then listed "Read Letter IRL account, balance, order, and
+mail status data" and the other two descriptions. **Decline** on that screen shows Auth0's own error
+page (`access_denied: User did not authorize the request`), because OpenClaw's callback was not
+listening. Whether a real app's decline returns to the app has not been checked.
 
 ### Branding Checklist
 
@@ -119,7 +162,8 @@ either way - a checklist that guesses is worse than one that admits a gap.
 This Auth0 tenant is configured to support:
 - **ChatGPT MCP Server** with OAuth 2.1 + PKCE authentication
 - **Manual CIMD registration** for ChatGPT apps
-- **5 Authentication Methods**: Google, Microsoft, Apple, GitHub, Email/Password
+- **Authentication Methods**: Google, GitHub, Email/Password. Microsoft and Apple are configured but turned off
+  on development since 2026-10-20: both ran on Auth0's developer keys, which do not work through a custom domain
 - **Audited eligible connections** for strict third-party CIMD clients
 
 ---
@@ -156,7 +200,7 @@ https://dev-ky21dxn3qmi71hjl.us.auth0.com/oidc/register
 
 ## Connections (Identity Providers)
 
-All connections are configured as **domain-level connections** (`is_domain_connection: true`) to support ChatGPT's dynamically registered OAuth clients.
+Every connection offered is a **domain-level connection** (`is_domain_connection: true`), so the connected apps (third-party clients) can use it. Microsoft and Apple are not offered, and their promotion is off (below).
 
 ### 1. Google (google-oauth2)
 
@@ -177,6 +221,11 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 **Provider Type:** Social (OAuth 2.0)
 **Scopes:** `email`, `profile`
 
+**Credentials (development, since 2026-10-20):** the "Auth0 Development" OAuth client in the `mail-letter-irl`
+Google Cloud project, beside production's "Auth0 Production" client. It replaced a client in another project, which
+had no consent screen in Google's Auth Platform and so could not be edited. Google's subject identifier belongs to
+the Google account, the same whichever client or project asks, so the move keeps every account.
+
 ### 2. Microsoft (windowslive)
 
 ```json
@@ -184,7 +233,7 @@ All connections are configured as **domain-level connections** (`is_domain_conne
   "id": "con_yXECqXNAc3kuLPYs",
   "name": "Microsoft",
   "strategy": "windowslive",
-  "is_domain_connection": true,
+  "is_domain_connection": false,
   "options": {
     "signin": true,
     "scope": ["wl.signin"]
@@ -197,6 +246,11 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 
 > **Note:** This connection supports Microsoft **personal accounts** only. For work/organizational accounts, use an Enterprise connection with Azure AD.
 
+**Turned off on development, 2026-10-20,** for every application listed on its Applications tab: it ran on Auth0's
+developer keys. That does not reach third-party clients (the connected apps); only its domain-level promotion
+does, and that promotion was turned off too. Offering it again needs our own Azure app, with the custom domain's
+callback.
+
 ### 3. Apple
 
 ```json
@@ -204,12 +258,17 @@ All connections are configured as **domain-level connections** (`is_domain_conne
   "id": "con_FxgZyyw39YHjWKiM",
   "name": "Apple",
   "strategy": "apple",
-  "is_domain_connection": true,
+  "is_domain_connection": false,
   "options": {}
 }
 ```
 
 **Provider Type:** Social (Sign in with Apple)
+
+**Turned off on development, 2026-10-20,** for every application listed on its Applications tab: it ran on Auth0's
+developer keys. That does not reach third-party clients (the connected apps); only its domain-level promotion
+does, and that promotion was turned off too. Offering it again needs our own Services ID, with the custom domain's
+return URL.
 
 ### 4. GitHub
 
@@ -226,6 +285,13 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 ```
 
 **Provider Type:** Social (OAuth 2.0)
+
+**Credentials (since 2026-10-20):** a GitHub **App** on each tenant ("Letter IRL (dev)" on development, "Letter IRL"
+on production), with Email addresses read-only and both callbacks. Development ran on Auth0's developer keys
+before; production ran on a GitHub OAuth App, which allows only one callback URL and so could not serve the tenant
+address and the custom domain at once. The old OAuth App stays in GitHub, unused, as the rollback until after
+launch. GitHub user ids do not change between apps, so existing users kept their accounts (checked in production's
+log: a login, no signup).
 
 ### 5. Username-Password-Authentication
 
@@ -270,7 +336,16 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 
 ## Applications
 
-### 1. Default App
+This section describes the development tenant.
+
+**The free plan allows 10 applications and SSO integrations per tenant.** The
+development tenant reached the limit on 2026-09-26, when the other MCP apps'
+documents were imported (section 6 below). **Create application** is disabled
+at the limit. Each app we import needs a slot in each tenant, and production has
+the same cap. On 2026-09-28 deleting Mail Letter IRL (section 2) made room for
+OpenClaw (section 6), so the tenant is at the limit again.
+
+### 1. Default App - deleted
 
 | Property | Value |
 |----------|-------|
@@ -278,9 +353,10 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 | **Type** | Generic |
 | **Grant Types** | `authorization_code`, `implicit`, `refresh_token`, `client_credentials` |
 
-Default application created by Auth0.
+Default application created by Auth0. Deleted on 2026-09-26 to make room for the
+MCP apps, after the usage review below found nothing that referenced it.
 
-### 2. Mail Letter IRL
+### 2. Mail Letter IRL - deleted
 
 | Property | Value |
 |----------|-------|
@@ -291,9 +367,24 @@ Default application created by Auth0.
 | **Logout URLs** | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect` |
 | **Web Origins** | `https://chat.openai.com`<br>`https://chatgpt.com`<br>`https://platform.openai.com` |
 
-Main application for the Letter IRL project.
+ChatGPT's static client from the first Auth0 integration (326b32e, 2025-11-14),
+from before ChatGPT registered itself. ChatGPT now signs in with its own client
+document (section 5, and the CIMD configuration below), so nothing used this
+application. It was deleted on 2026-09-28 to make room for OpenClaw, after
+these checks:
+- its client id appeared in no branch of either repository except in this
+  document;
+- no development Railway variable held it
+  (`C:\letter-irl-scripts\railway-var-value-match.mjs`).
 
-> **Important:** The `https://platform.openai.com/apps-manage/oauth` callback is required for the OpenAI app review process. See [OpenAI Apps SDK Auth Documentation](https://developers.openai.com/apps-sdk/build/auth/).
+Production may hold a copy of it. Check during the production imports, which
+need the slots.
+
+Its callbacks included `https://platform.openai.com/apps-manage/oauth`, which
+this document used to call required for OpenAI's app review. That dates from the
+static client. OpenAI's current [auth guide](https://developers.openai.com/apps-sdk/build/auth/),
+read on 2026-09-28, names only `chatgpt.com` redirects, which under CIMD come
+from ChatGPT's own client document. It says nothing about that address.
 
 ### 3. Letter IRL API (Test Application) - deleted
 
@@ -306,7 +397,7 @@ Main application for the Letter IRL project.
 Auth0 created it alongside the retired `Letter IRL API`. It held no grant on
 any API, and it was deleted on 2026-09-14, after that API.
 
-### 4. API Explorer Application
+### 4. API Explorer Application - deleted
 
 | Property | Value |
 |----------|-------|
@@ -314,12 +405,29 @@ any API, and it was deleted on 2026-09-14, after that API.
 | **Type** | Machine to Machine |
 | **Grant Types** | `client_credentials` |
 
-Auth0's API Explorer for Management API access. Nothing in this repository uses
-it, and it is most likely the development credential the removed prod-to-dev
-sync authenticated as (`AUTH0_DEV_CLIENT_ID`). Its Management API client access
-was revoked on 2026-09-14. Delete it once the tenant logs show no failed token
-exchange from its client id; authorizing its client access again undoes the
-revoke.
+Auth0's API Explorer for Management API access. It was the development
+credential of the prod-to-dev sync, which was removed in #383. Its only copy was
+`AUTH0_DEV_CLIENT_ID` in a local `.env.dev`, which nothing reads any more. Its
+Management API client access was revoked on 2026-09-14, and it was deleted on
+2026-09-26.
+
+**Usage review before the 2026-09-26 deletions.** Four applications were
+deleted: this one, the Default App, a leftover ChatGPT import
+(`tpc_uYsHMmxqs8W7uKdqPt7hyF`, whose document belonged to a temporary
+development host removed on 2026-09-22), and "PKCE probe (temporary)", a
+first-party app from the same investigation (#424). Before deleting, each was
+checked for use in:
+- every branch of both repositories;
+- the local scripts and every checkout;
+- Railway variables in both environments, shared variables included;
+- GitHub secrets and variables;
+- the browser-test agent's repositories;
+- the Auth0 logs (about one day kept on this plan);
+- refresh tokens by user;
+- application grants.
+
+Only the local `.env.dev` line above turned up. Deleting the old ChatGPT import
+also revoked five refresh tokens that one test account still held for it.
 
 ### 5. ChatGPT (Dynamically Registered)
 
@@ -331,6 +439,88 @@ revoke.
 | **Callbacks** | `https://chatgpt.com/connector_platform_oauth_redirect` |
 
 Dynamically registered via RFC 7591 when ChatGPT connects to the MCP server. Multiple instances may exist as users connect/reconnect.
+
+### 6. Other MCP apps, imported from their documents (development, 2026-09-26; OpenClaw 2026-09-28)
+
+The M2 imports in [mcp-multi-client-plan.md](mcp-multi-client-plan.md) (#465).
+Each was imported with **Import from URL**, like ChatGPT (below). Each was then
+authorized for `Letter IRL DEV MCP` with `mail:read`, `mail:draft` and
+`mail:send` as user-delegated access, and nothing else. There is no client
+access, and **Always grant all permissions** is off, so people see a consent
+screen. The server names each app from its document URL
+(`src/auth/clientProfiles.ts`).
+
+OpenClaw publishes no document, so its document is ours: the website serves it,
+with a `client_id` built from the website's `APP_BASE_URL` (website #44,
+[CLIENT-06](manual-tests.md#client-06--openclaw-launch-gate-471)). Production's
+is `https://letterirl.com/oauth/openclaw-client-metadata.json`, served once the
+website is promoted.
+
+| App | Auth0 client | Document | Callbacks |
+|---|---|---|---|
+| Claude | `tpc_nzv1WDzBigLDqccQkDsVx3` | `https://claude.ai/oauth/mcp-oauth-client-metadata` | `https://claude.ai/api/mcp/auth_callback` |
+| Claude Code | `tpc_vaiqGx16ntpvuNWLnCYqSt` | `https://claude.ai/oauth/claude-code-client-metadata` | `http://localhost/callback`, `http://127.0.0.1/callback` |
+| Codex | `tpc_1pVfZCrG4TFNTwhJsrSU1f` | `https://chatgpt.com/oauth/codex/pGLYK3svyYGg/client.json` | `http://127.0.0.1/callback/pGLYK3svyYGg`, `http://localhost/callback/pGLYK3svyYGg` |
+| Visual Studio Code | `tpc_eG8tnoxeEJJknqqBXxPY3Y` | `https://vscode.dev/oauth/client-metadata.json` | `http://127.0.0.1:33418/`, `https://vscode.dev/redirect` |
+| Hermes Agent | `tpc_rgU3u4iFg4SSpyFzikWN2n` | `https://nousresearch.github.io/hermes-agent/docs/oauth/client-metadata.json` | ports 27890-27894 on `127.0.0.1` and `localhost`, path `/callback` |
+| OpenClaw | `tpc_uW9yLTZS9R7MBQSUAg1q96` | `https://mail-letter-irl-website-development.up.railway.app/oauth/openclaw-client-metadata.json` | `http://127.0.0.1:8989/oauth/callback`, `http://localhost:8989/oauth/callback` |
+
+What the imports showed:
+- **Unsupported grants are ignored with a warning.** That covers Claude's
+  `jwt-bearer` and VS Code's `device_code`: only `authorization_code` and
+  `refresh_token` work for these clients.
+- **A loopback callback registered without a port accepts any port.** Checked
+  on 2026-09-26 with `/authorize` probes that sign no one in
+  (`C:\letter-irl-scripts\cimd-authorize-probe.mjs`):
+  - Claude Code and Codex were accepted on a random port.
+  - Hermes, which lists fixed ports, got `403 Callback URL mismatch` on any
+    other port. That is the probe's control.
+  - OpenClaw, on its fixed port 8989, was accepted on both of its callbacks
+    and got the same 403 on port 8990 (2026-09-28).
+- **Our own document's `scope` and `client_uri` are ignored.** OpenClaw's import
+  took neither, so its token carries the scopes OpenClaw asks for. That is why
+  CLIENT-06 passes `--oauth-scope`.
+- **OIDC scopes are dropped, not refused.** Claude asks for `openid profile
+  email`. Auth0 accepts the request, and the consent screen lists only the mail
+  scopes and offline access. So Claude signs in with our advertised scopes as
+  they are (#469).
+- **The consent wording reads "mail your read".** Auth0 builds it from the scope
+  names (#267).
+
+**Codex needs three things to know** (found during the Codex connect):
+- **Its document is derived from our URL.** The id is the first 12 characters
+  of the base64url SHA-256 of the MCP URL, so every Codex user of a URL presents
+  the same document, and one import per tenant covers them all:
+  - development `pGLYK3svyYGg`;
+  - production `IJMOsCBL6i7U`, from `https://api.letterirl.com/mcp`.
+
+  A copy of production's document was imported into development by mistake and
+  deleted the same day. OpenAI would use a single stable document only if the
+  authorization server returned `iss` in its authorization responses (RFC 9207),
+  and Auth0 doesn't.
+- **It asks for the wrong scopes.** Codex requests the authorization server's
+  `scopes_supported` rather than the protected resource's
+  ([openai/codex#15643](https://github.com/openai/codex/issues/15643)). Auth0
+  lists only OpenID scopes there, so the token carries no mail scope, and every
+  tool is refused with "Additional authorization is required for this action".
+  The fix is on the person's side: put
+  `scopes = ["mail:read", "mail:draft", "mail:send", "offline_access"]` on the
+  server's entry in `~/.codex/config.toml` (or pass `--scopes` to
+  `codex mcp login`), then sign in again.
+- **It can also reach us as ChatGPT.** Codex offers the person's installed
+  ChatGPT plugins as `codex_apps`. Those calls use the ChatGPT plugin's
+  connection, so the server sees ChatGPT, not Codex.
+
+All five connected on development on 2026-09-26, recognised by name in the log:
+- Claude: CLIENT-01, with tool calls;
+- Claude Code: `claude_code`, with a tool call;
+- VS Code: `vscode`;
+- Codex: `codex`, with a tool call;
+- Hermes Agent: `hermes`, from a Docker container on a remote host, using the callback relay
+  described in CLIENT-05.
+
+OpenClaw has not connected yet. OpenClaw 2026.9.6 needs Node 24.16 or later, or 26.1 or later
+(CLIENT-06).
 
 ---
 
@@ -377,15 +567,57 @@ provisions the `users` row from a verified email, and Auth0 does not put
 `email` on an access token minted for a custom API. Every write then fails on
 `REFERENCES users(user_id)` in whichever table the customer reaches first.
 
-Add a Post Login Action containing:
+Add a Post Login Action (or, on a tenant that already has one, replace its code) whose code is [`docs/auth0/actions/email-claim.js`](auth0/actions/email-claim.js),
+pasted whole. For a confirmed address it sets the two claims (an excerpt, not something to paste on
+its own: the file adds the guard and the export around it):
 
 ```javascript
-exports.onExecutePostLogin = async (event, api) => {
-  if (event.user.email) {
-    api.accessToken.setCustomClaim("https://letterirl.com/email", event.user.email);
-  }
-};
+api.accessToken.setCustomClaim("https://letterirl.com/email", event.user.email);
+api.accessToken.setCustomClaim("https://letterirl.com/email_verified", true);
 ```
+
+**Only a confirmed address, and always both claims.** The address is what a
+Letter IRL account is, and what the linking Action below joins identities on,
+so an unconfirmed one must not reach either.
+
+The server opens an account only when the verdict claim is exactly `true` (the
+boolean, or the string). Anything else refuses: `false` because the customer
+has not confirmed the address, and a **missing** verdict claim because the
+tenant is not saying. The refusal diagnostic distinguishes them (`email_unconfirmed` against
+`email_verdict_unavailable`, and `verified_email_unavailable` for a token
+carrying no address at all). See `src/auth/verifiedEmail.ts`.
+
+Worth knowing when reading those: **on a tenant configured as documented here,
+every one of them is the tenant's fault, not a customer's.** The claim Action
+above sets nothing at all for an unconfirmed address rather than setting the
+verdict to false, and the linking Action denies an unconfirmed login before a
+token exists - so a customer who has not confirmed their address never reaches
+this code. `email_unconfirmed` means some Action is setting the verdict to
+false; the other two mean the claim Action is not setting the verdict, or is
+not running.
+
+**Update this Action BEFORE deploying the API against the tenant.** There is
+no fallback. An earlier revision of the server asked Auth0's `/userinfo` when
+a token carried an address with no verdict; that is gone. `/userinfo` needs
+`openid` on the access token, and a ChatGPT token never carries it - Auth0
+grants no OIDC scope to the strict CIMD client, whatever ChatGPT requests
+(#424) - so the fallback served the website alone, and quietly let the website
+tolerate a missing or broken Action, which is the one surface LINK-01 uses to
+check a tenant. The first reason still holds; the second is the one that
+decided it anyway.
+
+In the window between the API deploying and this Action being updated:
+
+| Who | What happens |
+| --- | --- |
+| Anyone with an account already | Unaffected. An existing account is never refused, whatever the token says. |
+| A new customer, either surface | Refused with the sentence until their token is re-minted - signing in again on the website, reconnecting in ChatGPT - or it expires. Access tokens live 24 hours. |
+
+(The `web 7200` figure recorded further down is the implicit/hybrid-flow
+lifetime. Neither client uses that flow, so both carry the 86400-second one.)
+
+So: set both claims, or set neither. Setting the address alone leaves every new
+customer refused until the verdict claim appears.
 
 **The namespace is load-bearing.** Auth0 silently drops a non-namespaced custom
 claim that collides with a reserved OIDC name, and `email` is reserved - the
@@ -399,21 +631,177 @@ Deploying the Action is not enough on its own - it must also be dragged into
 the **Post Login trigger flow** and applied, or it never runs.
 
 The server reads `LETTER_IRL_OAUTH_EMAIL_CLAIM` (default
-`https://letterirl.com/email`), so the two environments can namespace against
-their own domains. It prefers a standard `email` claim when one is present, and
-still falls back to `/userinfo`.
+`https://letterirl.com/email`) and
+`LETTER_IRL_OAUTH_EMAIL_VERIFIED_CLAIM` (default
+`https://letterirl.com/email_verified`), so the two environments can namespace
+against their own domains. It prefers a standard `email` claim when one is
+present, and with neither claim it opens no account at all - there is nothing
+else to ask.
+
+### Required Post Login Action: linking one person's sign-in methods
+
+**Auth0 mints a subject per sign-in method.** Without this Action, one person
+signing in with Google and with a password is two subjects presenting one
+address - and `users.email` is `NOT NULL` and unique whatever its case (migration 058), so the second one collides,
+is refused, and that person has no account. This Action makes the address the
+identity by joining the identities behind it.
+
+Put it **above** the email-claim Action in the Post Login trigger flow. Not
+because the claim's value depends on it - both identities carry the same
+address by construction, since the Action looks up by `event.user.email` - but
+because a login this Action denies should be denied before anything else runs.
+
+The ordering that IS load-bearing is inside the Action: the Management API
+link must happen **before** `setPrimaryUser`, which requires the identity that
+authenticated this login to already be a secondary of the primary user. The
+code below does them in that order.
+
+**It re-sends the confirmation link, at most once every ten minutes (#428).**
+Auth0 sends a confirmation link only at sign-up, so a refusal with nothing
+behind it is a dead end for anyone who lost that email. A refused password
+sign-in is sent a fresh link, but the sign-up counts as a send, and each
+re-send is recorded in the user's `app_metadata.confirmation_resent_at`, so
+nothing goes out within ten minutes of either. Auth0 keeps that value even
+though the login is refused; the editor cannot show this, and the live run in
+LINK-01 step 5 did (2026-09-25). Until 2026-09-24 the Action re-sent on every
+refused attempt, including the automatic sign-in straight after sign-up, so
+every new account got at least two emails. A social sign-in gets no link,
+because only its provider can confirm the address, and its refusal says so.
+The Management API token is cached in `api.cache`: minting one per login
+spends the tenant's machine-to-machine token quota, and when that runs out
+this Action denies every login.
+
+Its source is [`docs/auth0/actions/link-verified-email.js`](auth0/actions/link-verified-email.js): paste
+that file whole as the Action's code. `scripts/check-auth0-tenant.ts` compares what a tenant has
+deployed with it (see "Checking a tenant" below).
+
+**Test it in the Action editor before putting it in the flow.** Set the test
+event's user to a confirmed address that no tenant user holds and Run: the
+result should be an empty `Commands: []`. That one run exercises everything
+that can go wrong at deploy time - the dependency installing, `require`, the
+client constructing, the client-credentials token request, and the response
+shape - and none of it can be checked by reading. Then set
+`email_verified: false`, `connection.strategy: "auth0"` and a `created_at` of a
+minute ago, and Run again: the result should be the "We've sent a confirmation
+link" denial, with no re-send inside the ten minutes. Keep that `created_at`
+recent, because an old one makes the run ask the Management API to email the
+test event's `user_id`. Last, set `connection.strategy` to a social one such as
+`google-oauth2`: the result should be the "The service you signed in with"
+denial. On development, 2026-09-19, the first run is what caught a mistyped
+secret; the Action would otherwise have denied every login on the tenant the
+moment it entered the flow.
+
+**Its credentials are a machine-to-machine application**, named
+`Account Linking (<environment>)`, authorized for the Management API with
+exactly `read:users` and `update:users` - nothing else, because nothing else is
+needed and this secret lives in an Action. Put the domain, client id and secret
+in the Action's own **Secrets**, never in a repository or an env file.
+
+It also needs the `auth0` npm module under the Action's **Dependencies**,
+pinned - not `latest`. Development runs **7.2.0**, deployed 2026-09-19 and
+verified by the test run above. Pin it, because a new major changes these call
+shapes (v4 used `usersByEmail.getByEmail` returning `{ data }` and
+`users.link({ id }, body)`, none of which exist in v7), and an Action that
+throws denies every login on the tenant.
+
+**Confirm the connection sends the email.** Branding -> Email Templates ->
+**Verification Email (Link)** must show *Template enabled*; that is the email
+whose link sets `email_verified`, and without it a new sign-up can never get
+past the deny above. Development has it enabled and sends through **Resend**
+(Branding -> Email Provider, since 2026-09-21), from
+`Letter IRL <support@letterirl.com>` with the subject "Confirm your email
+address for Letter IRL". Auth0's built-in provider is labelled
+development/trial only, so **production needs the same custom provider before
+this Action goes into its flow**, or new password sign-ups will be unable to
+confirm and will be denied. On development these emails have landed in spam
+(#459). Also check
+Authentication -> Database ->
+`Username-Password-Authentication` -> **Requires Username** / email settings,
+and Branding -> Email Templates -> **Verification Email** enabled. Without it
+the deny above locks every new password account out permanently.
+
+**What linking does not join.** An Apple sign-in that hides the address behind
+a private relay address carries a different address, so it stays a different
+account, as documented in `docs/account-switching-guide.md`.
+
+**Before enabling this on a tenant, check who holds the row.** The Action makes
+the OLDEST Auth0 user primary, and that is independent of which subject holds
+the Letter IRL `users` row - the REST layer opened no account row at all until
+2026-09-19, so a person whose first visit was the website has an old Auth0 user
+with no row, and their later ChatGPT identity holds the row with the credits in
+it. Link those two and the surviving primary subject arrives with no row,
+presents an address the other subject still holds, and is answered 409 - with
+no way back, because the secondary identity can no longer sign in on its own.
+
+So, per tenant, before the Action goes into the flow:
+
+1. Page `GET /api/v2/users` and group the confirmed addresses yourself, ignoring
+   case as the database does (migration 058) - the Management API has no
+   group-by, and its users-by-email search matches case. For every address held by more than one
+   Auth0 user, note the oldest by `created_at`.
+2. For each of those, ask the database which subject holds the row:
+   `SELECT user_id FROM users WHERE lower(email) = lower($1)`. The oldest Auth0
+   user must be that subject, or the address must have no row at all.
+3. Where it is not, the two accounts have to be joined **before** the Action is
+   enabled. There is no tool for this yet - the operator `account.merge`
+   command is planned, not built - so today it is SQL, by hand, in one
+   transaction, and it is not simply `UPDATE users SET user_id`:
+
+   - 13 child tables reference `users(user_id)` `ON DELETE CASCADE` and must be
+     re-pointed (`letters`, `orders`, `letter_drafts`, `credit_ledger`,
+     `credit_transactions`, `promo_redemptions`, `personal_access_tokens`,
+     `feature_requests`, `recent_uploads`, `image_entitlements`,
+     `image_generation_reservations`, `gift_letters`,
+     `gift_codes.issued_to_user_id`);
+   - `commerce_pack_refunds` is `ON DELETE RESTRICT`, so the old row cannot be
+     deleted until that one moves;
+   - `stripe_disputes` and `gift_codes.redeemed_by_user_id` are
+     `ON DELETE SET NULL`, so deleting the old row without moving them first
+     silently detaches dispute and redemption history rather than failing;
+   - `promo_redemptions` is unique per campaign and user, and `recent_uploads`
+     is keyed on the user, so a collision there is a decision, not a move.
+
+4. The check is a snapshot. A row opened under the younger subject between the
+   check and the Action going live recreates the hazard, so re-run step 2
+   immediately before enabling it - or keep new accounts out in between, which
+   on production is what `LETTER_IRL_BETA_ALLOWED_SUBJECTS` already does.
+
+5. Since `get_profile` (#424), this hazard is expected to fail the
+   **connect itself**: ChatGPT calls the profile tool with the new
+   connection's token, the wrapper answers with an error result carrying
+   the "already belongs to an account opened with a different sign-in
+   method" sentence (the REST layer's 409, on the MCP path), and ChatGPT
+   would show "We couldn't connect this account" - where before it was a
+   per-tool refusal after a successful connect. The pre-check is
+   load-bearing for connecting at all.
+
+**After anyone is linked, check the subject lists.**
+`LETTER_IRL_BETA_ALLOWED_SUBJECTS` and `LETTER_IRL_ADMIN_USER_IDS` name
+subjects, and only the surviving primary subject counts afterwards.
 
 ### Required Auth0 CIMD Configuration
 
 1. **Client ID Metadata Document registration**
    - Import the current OpenAI-hosted HTTPS CIMD URL manually
      (Applications -> Create Application -> **Import from URL**).
+   - Before importing any other app's document, add its URL to
+     `CLIENT_DOCUMENTS` in `src/auth/clientProfiles.ts` under its own
+     profile (#473). The server names the calling app from the token's client
+     id, which is the document URL, and it gives ChatGPT's trust to any
+     one-segment document on chatgpt.com (`https://chatgpt.com/oauth/<id>/client.json`).
+     A new OpenAI document of that shape imported first would inherit it.
    - Verify authorization code, PKCE S256, and that the callback matches the
      document exactly. The client authentication method is whatever the
      document declares - currently `private_key_jwt` - and is not a choice.
    - `third_party_security_mode: strict` is forced on every CIMD client
      regardless of the tenant's permissive-by-default setting, and cannot be
      changed afterwards. Strict is satisfied by importing, not by configuring.
+   - Strict also means **no OIDC scopes and no ID token** for this client in
+     Auth0's current release ("Third-party applications with enhanced security
+     controls do not support OIDC scopes"). ChatGPT pre-ticks **OIDC enabled**
+     in a new connector's Advanced OAuth settings and then refuses the first
+     link without an ID token, so every connector must be created with it
+     unticked ([chatgpt-connector-oidc-setting.md](learnings/chatgpt-connector-oidc-setting.md), #424).
    - **The import survives connector recreation.** An earlier revision said that
      deleting and recreating the ChatGPT connector mints a new `client.json`
      URL and orphans the import. Observed three times (development twice on
@@ -643,15 +1031,28 @@ still falls back to `/userinfo`.
    authorize request, both with `resource` and with neither `resource` nor
    `audience`, reach the Auth0 login page with no error.
 
-3. **Domain-Level Connections**
-   - **All 5 connections** must have `is_domain_connection: true`
-   - **Why:** Third-party clients (like dynamically registered ChatGPT apps) can only use domain-level connections
+   **The send rule depends on the website application's grants** (#470). Only a
+   token issued to `Letter IRL Website` may confirm a send on the confirmation
+   page, or make or revoke a personal access token (#730). The API's `LETTER_IRL_WEBSITE_CLIENT_ID` names that application's Client
+   ID: `ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX` on development and
+   `wX17u1wOn3XJRVba1ejIappBNpDno3ER` on production. The check holds because the
+   application stays a confidential client with the `authorization_code` and
+   `refresh_token` grants alone, so only a person signing in can obtain its
+   tokens. Re-enabling Implicit or Client Credentials on it is a change to the
+   send rule and to who may make standing credentials, not a routine setting
+   (docs/letter-send-flow.md).
 
-4. **OpenAI Review Redirect URI** ⚠️
-   - **Location:** Applications → Mail Letter IRL → Settings → Allowed Callback URLs
-   - **Required URI:** `https://platform.openai.com/apps-manage/oauth`
-   - **Why:** OpenAI's app review process uses this redirect URI to test OAuth flows
-   - **Reference:** [OpenAI Apps SDK Auth Docs](https://developers.openai.com/apps-sdk/build/auth/)
+3. **Domain-Level Connections**
+   - **Every connection offered** must have `is_domain_connection: true` (on development: Google, GitHub and email and password since 2026-10-20)
+   - **Why:** Third-party clients (like dynamically registered ChatGPT apps) can only use domain-level connections
+   - **And so the reverse:** a connection not offered in production (Apple, and Microsoft until LINK-02 passes with it; [launch-promotion.md](launch-promotion.md), stage 0 step 6) has its domain-level promotion turned off and is unticked on the website's application. Unticking it on an app does not reach third-party clients. Never delete one: Auth0 deletes its users with it
+
+4. **OpenAI review redirect: no longer ours to set**
+   - This item used to put `https://platform.openai.com/apps-manage/oauth` on the static client,
+     Mail Letter IRL, which was deleted from development on 2026-09-28 (section 2 of Applications).
+   - Under CIMD, ChatGPT's redirects come from its own client document. OpenAI's
+     [auth guide](https://developers.openai.com/apps-sdk/build/auth/), read on 2026-09-28, names
+     only `chatgpt.com` redirects and says nothing about this address.
 
 ### Environment Variables (.env)
 
@@ -671,6 +1072,66 @@ LETTER_IRL_OAUTH_SCOPES=openid,profile,email,offline_access,mail:read,mail:draft
 `LETTER_IRL_OAUTH_AUDIENCE` must name exactly one audience, the MCP resource.
 
 ---
+
+## Checking a tenant
+
+`scripts/check-auth0-tenant.ts` reads a tenant and says whether it is set up as this document
+says (#702). It only reads, and prints names, counts and verdicts: never a token, a secret or any
+Action code. Run it on each tenant before a promotion, and after any change to an Action.
+
+It checks that:
+
+- the Post Login flow binds both Actions, recognised by their code rather than their names: each
+  deployed version must match its file in [`docs/auth0/actions/`](auth0/actions/) once line
+  endings and trailing whitespace are set aside, with nothing saved but undeployed, and the linking
+  Action must run before the email-claim one;
+- the linking Action's `auth0` dependency is pinned to 7.2.0, and its three secrets
+  (`AUTH0_DOMAIN`, `LINKING_CLIENT_ID`, `LINKING_CLIENT_SECRET`) exist, by name;
+- exactly one `Account Linking (<environment>)` application exists, its Management API grant is
+  exactly `read:users` and `update:users`, and no other application holds a Management API scope
+  that writes (a user-delegated grant, such as the legacy clients' `current_user` scopes, is
+  listed but passes: it acts only for the signed-in user);
+- a custom email provider is configured and enabled, and the verification email template is
+  enabled;
+
+and it counts the tenant's applications by type, leaving out Auth0's built-in "All Applications"
+entry.
+
+It needs a short-lived Management API token with `read:actions`, `read:clients`,
+`read:client_grants`, `read:email_provider` and `read:email_templates`, and nothing more:
+
+1. Create a machine-to-machine application named `Tenant check (temporary)`, authorised for the
+   Auth0 Management API with exactly those five scopes.
+2. Get a token from Applications -> APIs -> Auth0 Management API -> **Test**, with that application
+   selected (it expires on its own, after 24 hours by default).
+3. Run the check (below), then delete the application, which frees its slot in the application
+   limit. A token already issued may stay valid until it expires, so clear it from the clipboard
+   too.
+
+**Do not use the Management API's API Explorer tab.** On a tenant without the API Explorer
+Application, opening it creates one, a lasting application holding every Management API scope; the
+project deleted it on 2026-09-26 (above).
+
+Use the tenant's own `*.auth0.com` domain, not a custom domain: the Management API's audience is
+named after it, and the script refuses any other host so the token cannot go elsewhere. The prompt hides what is typed:
+
+```powershell
+$env:AUTH0_CHECK_DOMAIN = "<tenant>.us.auth0.com"
+$token = Read-Host "Management API token" -AsSecureString
+$env:AUTH0_CHECK_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
+  [Runtime.InteropServices.Marshal]::SecureStringToBSTR($token))
+npx tsx scripts/check-auth0-tenant.ts
+Remove-Item Env:AUTH0_CHECK_TOKEN; Remove-Variable token
+```
+
+A changed Action is changed in its file first, reviewed, then pasted into each tenant and checked
+again. Record each run here: the date, the tenant, the first twelve characters of each file's hash
+the script prints, and its verdict.
+
+| Date | Tenant | link-verified-email.js | email-claim.js | Verdict |
+| --- | --- | --- | --- | --- |
+| | development | | | not yet run |
+| 2026-10-20 | production | `6e05eb8f1668` | `6b920b7e89b7` | all checks passed |
 
 ## Management via CLI
 
@@ -796,7 +1257,7 @@ auth0 api get connections/CONNECTION_ID | jq '{name, is_domain_connection}'
 **Check:**
 1. Auth0 logs: Auth0 Dashboard → Monitoring → Logs
 2. MCP server logs: Check terminal output or `/debug/logs` endpoint
-3. Verify all 5 connections are domain-level
+3. Verify every connection offered is domain-level (on development: Google, GitHub and email and password since 2026-10-20; production's are decided in [launch-promotion.md](launch-promotion.md), stage 0 step 6)
 
 ### Issue: Social login not appearing in Auth0 Universal Login
 
@@ -838,14 +1299,14 @@ Letter IRL uses separate Auth0 tenants for complete environment isolation:
 
 | Environment | Auth0 Tenant | Account | Purpose |
 |-------------|--------------|---------|---------|
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com | Live users, real payments |
-| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works | Testing, sync from production |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | the production account | Live users, real payments |
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | the organization account | Testing, sync from production |
 
 ### Configuration Parity Checklist
 
 When updating development, ensure production is also updated:
 
-1. **Connections** - All 5 identity providers with `is_domain_connection: true`
+1. **Connections** - Every identity provider offered with `is_domain_connection: true` (on development: Google, GitHub and email and password since 2026-10-20; production offers the ones decided in [launch-promotion.md](launch-promotion.md), stage 0 step 6, and has the others' promotion off)
 2. **DCR** - Off; rollback inventory only (CIMD registration on)
 3. **Default Audience** - The MCP API identifier (both tenants repointed 2026-09-14)
 4. **Applications** - Create equivalent apps with appropriate callbacks; authorize the website application for the MCP API
@@ -865,6 +1326,87 @@ LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 ```
+
+### Moving a tenant to a custom domain
+
+Auth0's custom domain is free (Auth0-managed certificate; the dashboard asks for a card to verify the account and
+does not charge it). It changes the address people see on the sign-in page, and the `iss` on tokens issued through
+it. One tenant either way: the same users, applications and signing keys.
+
+Rehearse on development first, then production. In order:
+
+1. **Auth0** - Branding → Custom Domains: add the domain with Auth0-managed certificates, add the CNAME record it
+   shows at the DNS provider (letterirl.com's DNS is at DreamHost), and verify; Auth0 also verifies on its own
+   once the record resolves. Then, on the domain's page, turn on "Enable custom domains for email and phone
+   notifications" and press **Switch To Custom** beside "Default domain", so emails sent through the Management
+   API, such as the linking Action's re-sent verification, carry the custom domain too (expected; not yet seen in
+   a real email). Both are safe before step 3:
+   they change links in emails, which open Auth0's own pages, and nothing about sign-in.
+2. **Social connections** - for every social connection enabled on the tenant, add
+   `https://<custom domain>/login/callback` beside the tenant's own callback at the provider: the Google OAuth
+   client, the GitHub app, the Azure app for Microsoft, the Services ID return URLs for Apple. Keep the old one:
+   anything that starts at the tenant address still returns there. Auth0's developer keys do not work through a
+   custom domain, so a connection still on them must get its own credentials, or be turned off on that tenant,
+   before step 3. A GitHub **OAuth App** allows one callback URL; use a GitHub App, which allows ten, and swap
+   its Client ID and secret into the connection while testing a GitHub sign-in straight after. A Google client
+   in a project without a consent screen in Google's Auth Platform cannot be edited; make a new client in a
+   project that has one.
+3. **API** - in one change, so one redeploy:
+   - `LETTER_IRL_OAUTH_ISSUER`, `LETTER_IRL_OAUTH_AUTH_ENDPOINT`, `LETTER_IRL_OAUTH_TOKEN_ENDPOINT` and
+     `LETTER_IRL_OAUTH_JWKS_URI` move to the custom domain. This is what the API publishes.
+   - `LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS` names the tenant's own address. Apps that connected before the move
+     keep the authorization server they found then and refresh there, so their tokens still carry the old `iss`.
+     The API accepts both and publishes only the first. VS Code and Codex do not: they compare the issuer they
+     stored with the one the API now publishes, and ask the person to sign in again ("issuer changed"). Seen on
+     development on 2026-10-23 and 24; one fresh sign-in each, and they work at the custom domain afterwards.
+   - `LETTER_IRL_OAUTH_PROD_ISSUER` (or `_DEV_ISSUER`) lists both addresses, comma or space separated. The API
+     refuses to start if the issuer or any additional issuer is missing from it, so the other environment's
+     tenant can never be accepted.
+4. **Website** - `AUTH0_DOMAIN` moves to the custom domain (`@auth0/nextjs-auth0` derives the issuer from it). Its
+   callback and logout URLs are on the website's own domain and do not change. The API accepts tokens with either
+   `iss`, so a session from before the change keeps reaching it; the rehearsal checks that it also keeps refreshing.
+   Run step 3 before step 4, never the other way: a website moved first gets tokens with the custom domain's
+   `iss`, which an API not yet moved refuses.
+5. **Manifest (production only)** - the served `/manifest.json` follows `LETTER_IRL_OAUTH_ISSUER` on its own. The
+   checked-in `manifest.json` snapshot and the fallback in `src/mcp/manifest.ts` (repeated in
+   `tests/unit/mcp/manifest.test.ts`) name production's issuer: change all three to the custom domain in a PR
+   after the production switch. Development has nothing to change here.
+
+Steps 3 and 4 are scripted, with `--dry-run`, `--rollback` and `--only api|website`, in the owner's scripts folder
+(`railway-auth-custom-domain-dev.mjs` and `railway-auth-custom-domain-prod.mjs`). The production script refuses the
+API step unless the running production build contains `LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS` (#826), and the website
+step until the production API publishes the custom domain. A rollback puts the tenant address back as the issuer
+and keeps the custom domain accepted, so tokens minted through it meanwhile still work.
+
+These stay on the tenant's own `*.auth0.com` address: the linking Action's `AUTH0_DOMAIN` secret and the tenant
+check above ("Checking a tenant"), because the Management API's audience is the tenant address.
+
+Check afterwards:
+
+- sign in on the website once through each connection the tenant offers, and sign out after one of them;
+- sign out of a website session that began before step 4, which sends that session's ID token, issued by the
+  tenant address, to the custom domain's logout;
+- connect a new ChatGPT connector: its sign-in page should show the custom domain;
+- use a connector made before the move, at once and again after its access token has expired, which proves the
+  refresh at the old address still works.
+
+**State on 2026-10-23:**
+
+| | Development | Production |
+| --- | --- | --- |
+| Custom domain | `auth-dev.letterirl.com`, verified | `auth.letterirl.com`, verified |
+| Discovery checked | issuer, endpoints and JWKS on the custom domain, the same key ids as the tenant address | the same |
+| Emails on the custom domain, default domain switched | yes | yes |
+| Google callback | both, on the new "Auth0 Development" client | both, on "Auth0 Production" |
+| GitHub | new GitHub App, both callbacks | new GitHub App, both callbacks, swapped in and tested |
+| Apple, Microsoft | turned off on every listed application and domain-level promotion off (developer keys) | not offered |
+| Steps 3 and 4 | done (#826 at `e2b230d`) | after the API promotion ([launch-promotion.md](launch-promotion.md), stage B) |
+| Checks passed | website sign-in with Google, GitHub and email and password; sign-out; one call on a connection made before the move; a new ChatGPT connector (2026-10-21: authorize, token and issuer on the custom domain); Claude's connector from before the move, still working on 2026-10-22 and 10-23, days after its access token expired | after stage B |
+| Checks outstanding | sign-out of a session from before step 4 | all |
+
+A client that keys its sign-in by the authorization server signs in again instead of refreshing. VS Code's
+connection from 2026-09-26 asked once, on 2026-10-23, to "authenticate to auth-dev.letterirl.com", and worked after
+the sign-in. Expect the same single prompt for such clients after the production switch.
 
 ### Applying Branding to Production
 

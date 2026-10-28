@@ -47,6 +47,9 @@ interface MountOptions {
   packCheckoutFails?: boolean;
   packCheckoutOmitsUrl?: boolean;
   packListEmpty?: boolean;
+  /** What create_pack_checkout and list_letter_packs reject with, if anything. */
+  packCheckoutError?: Error;
+  packListError?: Error;
 }
 
 interface Harness {
@@ -134,6 +137,7 @@ function mount(options: MountOptions = {}): Harness {
     bridge.callTool = async (name: string, args: Record<string, unknown>) => {
       calls.push({ name, args });
       if (name === 'list_letter_packs') {
+        if (options.packListError) throw options.packListError;
         return {
           structuredContent: options.packListEmpty
             ? { packs: [], message: 'Letter packs are temporarily unavailable.' }
@@ -148,6 +152,7 @@ function mount(options: MountOptions = {}): Harness {
         };
       }
       if (name === 'create_pack_checkout') {
+        if (options.packCheckoutError) throw options.packCheckoutError;
         if (options.packCheckoutFails) throw new Error('Purchasing is disabled on this account. Please contact support.');
         const letters = args.pack === 'regular' ? 5 : args.pack === 'power' ? 50 : 2;
         return {
@@ -293,16 +298,16 @@ describe('PackCheckoutCard with a tool result', () => {
 describe('PackCheckoutCard and the way back into the conversation (#372)', () => {
   const START_URL = 'https://api.example.test/purchase/start?to=' + encodeURIComponent('https://checkout.stripe.com/c/pay/cs_host');
 
-  it('points the button and the convenience open at the start page when the result carries one', async () => {
+  it('points the button at the start page when the result carries one, and opens nothing by itself', async () => {
     // The start page forwards to the same Stripe checkout after keeping the
     // return link ChatGPT appends; an older result without it still links
     // straight to Stripe.
     const card = mount({ toolOutput: pendingCheckout({ checkoutStartUrl: START_URL }) });
-    // The convenience open is a microtask after render.
     await flush();
 
     expect(card.href('checkout-link')).toBe(START_URL);
-    expect(card.opened).toEqual([START_URL]);
+    // A payment page opens only when the customer presses the link (#730).
+    expect(card.opened).toEqual([]);
     expect(card.visible('fallback')).toBe(false);
   });
 
@@ -315,7 +320,7 @@ describe('PackCheckoutCard and the way back into the conversation (#372)', () =>
 
     await card.click('checkout-link');
 
-    expect(card.opened).toEqual([START_URL, START_URL]);
+    expect(card.opened).toEqual([START_URL]);
     const fallbackTimer = card.pendingTimers().find(timer => timer.delay === 1500);
     expect(fallbackTimer).toBeDefined();
     expect(card.pendingTimers().length).toBe(timersBefore + 1);
@@ -359,6 +364,22 @@ describe('PackCheckoutCard rendered without a tool result', () => {
     expect(card.calls).toEqual([]);
   });
 
+  it('suggests a higher thinking effort with the empty state only', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    expect(card.visible('empty-hint')).toBe(false);
+
+    await card.runNextTimer();
+
+    expect(card.visible('empty-hint')).toBe(true);
+    expect(card.text('empty-hint')).toBe(
+      "Tip: with Instant selected, ChatGPT sometimes doesn't run an action you approved. A higher thinking effort can help."
+    );
+
+    await card.click('retry-button');
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('empty-hint')).toBe(false);
+  });
+
   it('creates the requested pack itself and draws the link from the result', async () => {
     const card = mount({ toolInput: { pack: 'starter' } });
     await card.runNextTimer();
@@ -375,7 +396,10 @@ describe('PackCheckoutCard rendered without a tool result', () => {
     expect(card.text('price')).toBe('5.00');
     expect(card.text('message')).toBe('Pay USD 5.00 to add 2 letters to your account.');
     expect(card.text('order-line')).toBe('Order ord_retry_0001');
-    // The one convenience open, with the retry's own URL.
+    // Nothing opens until the customer presses the link, even after pressing
+    // the card's own button to make the checkout (#730).
+    expect(card.opened).toEqual([]);
+    await card.click('checkout-link');
     expect(card.opened).toEqual(['https://checkout.stripe.com/c/pay/cs_retry_starter']);
   });
 
@@ -400,6 +424,9 @@ describe('PackCheckoutCard rendered without a tool result', () => {
     expect(card.visible('state-ready')).toBe(true);
     expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_regular');
     expect(card.text('letters')).toBe('5');
+    // Choosing a pack makes the checkout; only the link opens it (#730).
+    await flush();
+    expect(card.opened).toEqual([]);
   });
 
   it('treats a pack it does not recognise as no pack at all', async () => {
@@ -438,6 +465,49 @@ describe('PackCheckoutCard rendered without a tool result', () => {
 
     await card.click('retry-button');
     expect(card.calls).toHaveLength(2);
+  });
+
+  describe("shows a refused call's sentence, not the host's wrapper (#434)", () => {
+    // ChatGPT rejects a card's own callTool when the result is an error, and
+    // the rejection's message wraps the result's text in a Python-style repr.
+    const SENTENCE = 'Purchasing is disabled on this account. Please contact support.';
+    const wrapped = () =>
+      new Error(
+        'Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: ' +
+          `[TextContent(type='text', text='${SENTENCE}', annotations=None, meta=None)]`
+      );
+
+    it('when the packs cannot be listed', async () => {
+      const card = mount({ packListError: wrapped() });
+      await card.runNextTimer();
+
+      await card.click('retry-button');
+
+      expect(card.calls.map(call => call.name)).toEqual(['list_letter_packs']);
+      expect(card.text('retry-error')).toBe(`Unable to load letter packs: ${SENTENCE}`);
+    });
+
+    it('when the checkout is refused', async () => {
+      const card = mount({ toolInput: { pack: 'starter' }, packCheckoutError: wrapped() });
+      await card.runNextTimer();
+
+      await card.click('retry-button');
+
+      expect(card.calls.map(call => call.name)).toEqual(['create_pack_checkout']);
+      expect(card.text('retry-error')).toBe(`Unable to create the checkout: ${SENTENCE}`);
+    });
+
+    it('when a new checkout for an expired one is refused', async () => {
+      const card = mount({ toolOutput: pendingCheckout(), toolInput: { pack: 'starter' }, packCheckoutError: wrapped() });
+      card.setStatus({ purchaseStatus: 'cancelled' });
+      await card.runNextTimer();
+
+      await card.click('new-checkout-button');
+
+      expect(card.calls.at(-1)?.name).toBe('create_pack_checkout');
+      expect(card.visible('err')).toBe(true);
+      expect(card.text('err')).toBe(`Unable to create the checkout: ${SENTENCE}`);
+    });
   });
 
   it('renders an already-paid result as done, without a link', async () => {
@@ -479,6 +549,20 @@ describe('PackCheckoutCard rendered without a tool result', () => {
 
     expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_starter');
   });
+
+  it.each(['javascript:alert(1)', 'http://checkout.example/pay'])(
+    'makes no link of a checkout address that is not https: %s (#684)',
+    async hostile => {
+      const card = mount();
+      card.deliver(pendingCheckout({ checkoutUrl: hostile }));
+      expect(card.href('checkout-link')).not.toBe(hostile);
+      expect(card.visible('checkout-link')).toBe(false);
+      // Beside an https one, the https one is the link.
+      const both = mount();
+      both.deliver(pendingCheckout({ checkoutStartUrl: hostile }));
+      expect(both.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_host');
+    }
+  );
 
   it('gives way to a host result that arrives after the empty state but before any click', async () => {
     const card = mount({ toolInput: { pack: 'starter' } });
@@ -632,6 +716,9 @@ describe('PackCheckoutCard purchase status', () => {
     expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_starter');
     expect(card.visible('new-checkout-button')).toBe(false);
     expect(card.text('order-line')).toBe('Order ord_retry_0001');
+    // A new checkout opens only from its link, like the first (#730).
+    await flush();
+    expect(card.opened).toEqual([]);
 
     await card.runNextTimer();
     expect(statusCalls(card).at(-1)).toEqual({ name: 'get_purchase_status', args: { orderId: 'ord_retry_0001' } });
@@ -905,7 +992,6 @@ describe('PackCheckoutCard in a reopened conversation', () => {
     expect(card.visible('checkout-link')).toBe(false);
 
     await flush();
-    // Checked after the flush, because the convenience open is a microtask.
     expect(card.opened).toEqual([]);
     expect(statusCalls(card)).toHaveLength(1);
     expect(card.pendingTimers()).toEqual([]);
@@ -967,7 +1053,7 @@ describe('PackCheckoutCard in a reopened conversation', () => {
     // pins that choice so it cannot change silently.
     const card = mount({ toolOutput: pendingCheckout() });
     await flush();
-    expect(card.opened).toEqual(['https://checkout.stripe.com/c/pay/cs_host']);
+    expect(card.opened).toEqual([]);
 
     card.deliverWidgetState(kept({ order: { ...KEPT_ORDER, orderId: 'ord_retry_0001' } }));
     await flush();
@@ -982,7 +1068,7 @@ describe('PackCheckoutCard in a reopened conversation', () => {
     await flush();
 
     expect(card.visible('checkout-link')).toBe(true);
-    expect(card.opened).toEqual(['https://checkout.stripe.com/c/pay/cs_host']);
+    expect(card.opened).toEqual([]);
     expect(card.saves).toEqual([]);
   });
 

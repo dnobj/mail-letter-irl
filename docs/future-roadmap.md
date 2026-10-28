@@ -1,6 +1,6 @@
 # Out-of-Scope and Future Enhancements
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 30, 2026
 **Purpose:** Features deliberately left out, and the plans for them
 
 ## Shipped Since v1
@@ -10,6 +10,11 @@
 - **Just-in-Time Pay & Send:** `create_mail_checkout` buys and sends one exact letter or postcard.
   Design and acceptance criteria: [just-in-time-purchase-plan.md](just-in-time-purchase-plan.md);
   tracking: [GitHub issue #69](https://github.com/dnobj/mail-letter-irl/issues/69).
+
+## Letter Creator: the Mail Studio
+- Stationery, multi-page letters, postcard sizes and layouts, arrive-by scheduling, address requests,
+  delivery moments and more, with interactive demos and the build order:
+  [letter-creator-vision.md](letter-creator-vision.md).
 
 ## In-ChatGPT Checkout (Agentic Commerce Protocol)
 - Complete purchases inside ChatGPT through ACP once OpenAI makes it available to apps like Letter

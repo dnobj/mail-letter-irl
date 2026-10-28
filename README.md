@@ -1,7 +1,7 @@
 # Letter IRL API
 
 Letter IRL prints and mails real US letters and postcards that people compose in ChatGPT. This
-repository is the production API: an MCP server for the OpenAI Apps SDK (22 tools, 6 widgets), the
+repository is the production API: an MCP server for the OpenAI Apps SDK (43 tools defined: 24 served at production's defaults, and up to 42 to one app with every switch on; 6 widgets, 7 with the home on), the
 REST API behind the letterirl.com dashboard, Stripe webhooks, and the hourly maintenance job.
 PostGrid prints and mails; Neon PostgreSQL stores everything; Auth0 authenticates; Railway hosts.
 
@@ -51,7 +51,7 @@ Other commands:
 npm run build               # tsc to dist/
 npm start                   # node dist/mcp/httpServer.js (build first)
 npm run maintenance         # one hourly maintenance pass, then exit (build first)
-npm run verify              # lint, build, unit and submission tests - mirrors CI
+npm run verify              # lint, build, the test type-check ratchet, unit and submission tests - mirrors CI
 npm run test:integration:local   # PostgreSQL suites against a local database
 npm run mcp:stdio           # stdio transport for local MCP clients
 ```
@@ -72,7 +72,8 @@ HTTP and OAuth variables most often needed locally:
 - `LETTER_IRL_OAUTH_SCOPES` - identity scopes plus `mail:read`, `mail:draft`, `mail:send`.
 - `LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS` - must be `RS256`.
 - `LETTER_IRL_OAUTH_CIMD_ENFORCEMENT` - validates the OAuth configuration at boot; production refuses to start unless it is `true`.
-- `LETTER_IRL_DEPLOYMENT_ENVIRONMENT` with `LETTER_IRL_OAUTH_PROD_ISSUER` / `LETTER_IRL_OAUTH_DEV_ISSUER` - prevent development/production tenant crossover at startup.
+- `LETTER_IRL_DEPLOYMENT_ENVIRONMENT` with `LETTER_IRL_OAUTH_PROD_ISSUER` / `LETTER_IRL_OAUTH_DEV_ISSUER` - prevent development/production tenant crossover at startup. Each may list more than one issuer: a tenant's own address and its custom domain.
+- `LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS` - issuers accepted on tokens beside `LETTER_IRL_OAUTH_ISSUER` and never published, for a tenant that has moved to a custom domain (see `docs/auth0-tenant-configuration.md`). Empty otherwise.
 - `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY` / `CHATGPT_STATIC_CLIENT_ID` - environment-specific rollback only; off in normal CIMD mode.
 - `LETTER_IRL_DEFAULT_USER_ID` - fallback user ID when authentication is disabled locally.
 

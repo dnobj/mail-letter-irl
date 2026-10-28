@@ -5,7 +5,8 @@ vi.mock("../../../src/db/index.js", () => ({
 }));
 
 import { query } from "../../../src/db/index.js";
-import { getOrCreateUser } from "../../../src/services/userService.js";
+import { createUser, EmailAlreadyLinkedError, getOrCreateUser, updateUserEmail } from "../../../src/services/userService.js";
+import { AccountErasedError } from "../../../src/auth/accountErased.js";
 
 const rawSubject = "auth0|real-persistence-subject";
 const oldEmail = "old-private@example.com";
@@ -60,5 +61,106 @@ describe("real user persistence diagnostics", () => {
     expect(output).not.toContain(rawSubject);
     expect(output).not.toContain(oldEmail);
     expect(output).not.toContain(newEmail);
+  });
+
+  it("refuses an erased account before writing its address back (#289)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.mocked(query).mockResolvedValueOnce(
+      queryResult([
+        { user_id: rawSubject, email: "erased-1b9d6bcd@erased.invalid", erased_at: new Date() }
+      ]) as never
+    );
+
+    await expect(getOrCreateUser(rawSubject, newEmail)).rejects.toBeInstanceOf(AccountErasedError);
+
+    // One read and no UPDATE: the tombstone keeps its placeholder.
+    expect(query).toHaveBeenCalledTimes(1);
+    const output = warn.mock.calls.flat().map(String).join("\n");
+    expect(output).toContain('"event":"identity.account_erased_refused"');
+    expect(output).not.toContain(rawSubject);
+    expect(output).not.toContain(newEmail);
+  });
+});
+
+describe("a first insert that finds a conflict (#457)", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  it("skips the insert on any unique index, so no conflict raises", async () => {
+    vi.mocked(query)
+      .mockResolvedValueOnce(queryResult([]) as never)
+      .mockResolvedValueOnce(queryResult([{ user_id: rawSubject, email: newEmail }]) as never);
+
+    await createUser({ userId: rawSubject, email: newEmail });
+
+    const insert = String(vi.mocked(query).mock.calls[0][0]).replace(/\s+/g, " ");
+    // No conflict target: a target arbitrates only its own index, and the
+    // email index outside it raised for the same subject's second request.
+    expect(insert).toContain("ON CONFLICT DO NOTHING");
+    expect(insert).not.toContain("ON CONFLICT (");
+  });
+
+  it("answers a race it lost with the winner's row, and names no collision", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const winner = { user_id: rawSubject, email: newEmail };
+    vi.mocked(query)
+      .mockResolvedValueOnce(queryResult([]) as never)
+      .mockResolvedValueOnce(queryResult([winner]) as never);
+
+    await expect(createUser({ userId: rawSubject, email: newEmail })).resolves.toBe(winner);
+
+    // The subject's own row settled it: the address was never looked up.
+    expect(query).toHaveBeenCalledTimes(2);
+    const output = [...warn.mock.calls, ...log.mock.calls].flat().map(String).join("\n");
+    expect(output).not.toContain("identity.email_already_linked");
+    expect(output).not.toContain("identity.user_created");
+  });
+
+  it("names the collision when another subject holds the address", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.mocked(query)
+      .mockResolvedValueOnce(queryResult([]) as never)
+      .mockResolvedValueOnce(queryResult([]) as never)
+      .mockResolvedValueOnce(queryResult([{ user_id: "auth0|another-method", email: newEmail }]) as never);
+
+    await expect(createUser({ userId: rawSubject, email: newEmail })).rejects.toBeInstanceOf(
+      EmailAlreadyLinkedError
+    );
+
+    const lookup = vi.mocked(query).mock.calls[2];
+    // Any case: the comparison the unique index makes (#730).
+    expect(String(lookup[0])).toContain("WHERE lower(email) = lower($1)");
+    expect(lookup[1]).toEqual([newEmail]);
+    const output = warn.mock.calls.flat().map(String).join("\n");
+    expect(output).toContain('"event":"identity.email_already_linked"');
+    expect(output).not.toContain(rawSubject);
+    expect(output).not.toContain(newEmail);
+  });
+
+  it("fails plainly when the insert was skipped but neither row is there", async () => {
+    vi.mocked(query)
+      .mockResolvedValueOnce(queryResult([]) as never)
+      .mockResolvedValueOnce(queryResult([]) as never)
+      .mockResolvedValueOnce(queryResult([]) as never);
+
+    const failure = createUser({ userId: rawSubject, email: newEmail });
+    await expect(failure).rejects.toThrow("User not found");
+    await expect(failure).rejects.not.toBeInstanceOf(EmailAlreadyLinkedError);
+  });
+
+  it("names the collision on the case-insensitive email index, and passes any other failure along (#730)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.mocked(query).mockRejectedValueOnce(
+      Object.assign(new Error("duplicate key"), { code: "23505", constraint: "users_email_lower_key" }) as never
+    );
+    await expect(updateUserEmail(rawSubject, newEmail)).rejects.toBeInstanceOf(EmailAlreadyLinkedError);
+
+    // 001's inline UNIQUE is gone since 058; a 23505 on any other index is not this collision.
+    const other = Object.assign(new Error("duplicate key"), { code: "23505", constraint: "users_email_key" });
+    vi.mocked(query).mockRejectedValueOnce(other as never);
+    await expect(updateUserEmail(rawSubject, newEmail)).rejects.toBe(other);
   });
 });

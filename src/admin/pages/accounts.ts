@@ -20,9 +20,11 @@ export function renderLookup(input: {
   matches: LookupMatch[] | null;
   invalid: boolean;
   recent: AccountListItem[];
+  csrfToken: string;
 }): SafeHtml {
   return html`<h1>Lookup</h1>
-<form method="get" action="/lookup" class="stack" role="search">
+<form method="post" action="/lookup" class="stack" role="search">
+  ${csrfField(input.csrfToken)}
   <label for="q">Exact identifier: Auth0 subject, email, order, letter, job, Stripe payment intent / session / refund / charge / dispute / event id, alert id, pack refund id, command id</label>
   <input type="search" id="q" name="q" value="${input.term ?? ""}" maxlength="255" autocomplete="off" required>
   <div><button type="submit">Look up</button></div>
@@ -155,6 +157,7 @@ ${table(
     when(letter.sentAt),
   ]),
 )}
+<p class="muted">Content the retention sweep removed from this account's letters and drafts: <a href="/retention?q=${encodeURIComponent(account.userId)}">its quarantined copies</a>.</p>
 
 <h2>Promo redemptions</h2>
 ${table(
@@ -164,7 +167,9 @@ ${table(
     html`<code>${redemption.campaignCode}</code>`,
     html`${redemption.campaignName}`,
     when(redemption.redeemedAt),
-    html`<span class="mono">${redemption.ledgerId.slice(0, 8)}…</span>`,
+    redemption.ledgerId
+      ? html`<span class="mono">${redemption.ledgerId.slice(0, 8)}…</span>`
+      : html`<span class="muted">gift only</span>`,
   ]),
 )}
 
@@ -197,6 +202,22 @@ ${table(
 )}`;
 }
 
+/**
+ * A redacted letter's quarantined copy, and its restore while the window is
+ * open, so a customer's letter is restorable from its own page however old the
+ * copy is (#450 review).
+ */
+function savedCopyCell(savedCopy: LetterDetail["savedCopy"] | undefined): SafeHtml {
+  if (!savedCopy) {
+    return html`<span class="muted">none left: the recovery window closed, or the account was erased</span>`;
+  }
+  return html`in quarantine, purged ${when(savedCopy.purgeAfter)}
+<form method="get" action="/commands/retention.restore/preview" class="inline">
+  <input type="hidden" name="target" value="${savedCopy.quarantineId}">
+  <button type="submit">Preview restore…</button>
+</form>`;
+}
+
 export function renderLetter(input: { detail: LetterDetail }): SafeHtml {
   const { letter, job } = input.detail;
   return html`<h1>Letter <span class="mono">${letter.letterId}</span> ${copyButton(letter.letterId)}</h1>
@@ -213,6 +234,7 @@ ${definitionList([
   ["sent", when(letter.sentAt)],
   ["status updated", when(letter.statusUpdatedAt)],
   ["content redacted", when(letter.redactedAt)],
+  ...(letter.redactedAt ? [["saved copy", savedCopyCell(input.detail.savedCopy)] as [string, SafeHtml]] : []),
 ])}
 
 <h2>Outbox job</h2>
@@ -224,6 +246,7 @@ ${
         ["provider outcome", statusBadge(job.providerOutcome)],
         ["attempts", html`${job.attempts} of ${job.maxAttempts}`],
         ["next attempt", when(job.nextAttemptAt)],
+        ["held for its mail date until", when(job.heldUntil)],
         ["locked", when(job.lockedAt)],
         ["provider order id", yesNo(job.hasProviderOrderId)],
         ["dispatch started", when(job.providerDispatchStartedAt)],

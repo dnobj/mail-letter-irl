@@ -5,18 +5,29 @@
  * Prevents duplicate sends and double-charging when AI clients retry requests.
  */
 
+import { CONTENT_VERSION_COLUMNS, contentVersionColumns, contentVersionOf, type ContentVersionRow } from './contentVersion.js';
+import { createHash } from 'node:crypto';
 import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
+import { CUSTOM_THEME, stationeryOf, type Stationery } from '../render/stationery.js';
+import { postcardFrontOf, type PostcardFront } from '../render/postcard.js';
+import { POSTCARD_FRONT_RENDERER_VERSION, RENDERER_VERSION, rendererVersionFor } from '../render/pdf.js';
+import { DRAFT_OPTION_COLUMNS, storedMailService, storedPages } from './mailOptions.js';
 import type {
+  Letter,
   LetterDraft,
+  LetterStatus,
   CreateDraftParams,
   CreateDraftResult,
   ConsumeDraftParams,
   ConsumeDraftResult,
+  DraftSchedule,
   PostcardDraft,
   CreatePostcardDraftParams,
   CreatePostcardDraftResult,
+  MailService,
+  PostcardSize,
 } from './types.js';
 
 // Default draft expiration: 24 hours
@@ -27,6 +38,48 @@ const DEFAULT_EXPIRATION_HOURS = 24;
 // ============================================================================
 
 /**
+ * A postcard's front as a draft stores it (#594): none for full bleed, and
+ * otherwise as the print reads it back (postcardFrontOf). One the print would
+ * not read is refused before anything is written, so a stored front always
+ * prints.
+ */
+function storedPostcardFront(front: PostcardFront | null | undefined): PostcardFront | null {
+  if (front == null) return null;
+  const stored = postcardFrontOf(front);
+  if (!stored) {
+    // The preview checks a front before it gets here, so this is a defect, classed as a refusal.
+    throw Object.assign(new Error("The postcard's front cannot be stored: the print would not read it back."), {
+      code: 'POSTCARD_FRONT_UNREADABLE',
+      diagnosticClass: 'validation_error'
+    });
+  }
+  return stored;
+}
+
+/**
+ * A theme as a draft stores it (#563): none for Classic, and otherwise as the
+ * print reads it back (stationeryOf). One the print would not read is refused
+ * before anything is written, so a stored theme always prints.
+ */
+function storedStationery(stationery: Stationery | null | undefined): Stationery | null {
+  const themed = stationery != null && stationery.theme !== 'classic';
+  const stored = themed ? stationeryOf(stationery) : null;
+  if (themed && !stored) {
+    // The previews check a theme before it gets here, so this is a defect, classed as a refusal.
+    throw Object.assign(new Error('The stationery cannot be stored: the print would not read it back.'), {
+      code: 'STATIONERY_UNREADABLE',
+      diagnosticClass: 'validation_error'
+    });
+  }
+  // A design's name the print does not read back is dropped, never a reason to refuse the letter (stationeryOf);
+  // the previews keep names as it reads them, so a drop here is a defect worth seeing (#649).
+  if (stored && stationery?.name !== undefined && stored.name !== stationery.name) {
+    writeDiagnostic('warn', 'draft.stationery_name_dropped', { theme: stored.theme });
+  }
+  return stored;
+}
+
+/**
  * Create a new draft for a letter that has been previewed and validated.
  * Called by quote_and_preview_letter after successful address validation.
  */
@@ -34,15 +87,20 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
   const expiresInHours = params.expiresInHours ?? DEFAULT_EXPIRATION_HOURS;
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
   const layoutType = params.layoutType ?? 'text_only';
+  const stationery = storedStationery(params.stationery);
+  const pages = storedPages(params);
+  const mailService = storedMailService(params);
 
   const result = await query<LetterDraft>(
     `INSERT INTO letter_drafts (
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       layout_type, header_image_data, header_image_url, inline_image_data, inline_image_url,
-      status, expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', $15)
-    RETURNING draft_id, expires_at`,
+      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on, stationery, pages, signature_image,
+      mail_service
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'pending', $17,
+              $18::date, $19::date, $20::jsonb, $21::smallint, $22, $23::text)
+    RETURNING draft_id, expires_at, ${CONTENT_VERSION_COLUMNS}`,
     [
       params.userId,
       JSON.stringify(params.sender),
@@ -58,17 +116,35 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       params.headerImageUrl ?? null,
       params.inlineImageData ?? null,
       params.inlineImageUrl ?? null,
+      params.isGiftSend === true,
+      params.rendererVersion ?? null,
       expiresAt,
+      params.schedule?.arriveBy ?? null,
+      params.schedule?.mailOn ?? null,
+      stationery ? JSON.stringify(stationery) : null,
+      pages,
+      params.signatureImage ?? null,
+      mailService,
     ]
   );
 
   const draft = result.rows[0];
 
-  writeDiagnostic('info', 'draft.created', { layoutType, expiresInHours });
+  writeDiagnostic('info', 'draft.created', {
+    layoutType,
+    expiresInHours,
+    renderer: params.rendererVersion ?? 'html',
+    scheduled: params.schedule !== undefined,
+    pages,
+    mailService,
+    signed: params.signatureImage !== undefined
+  });
 
   return {
     draftId: draft.draft_id,
     expiresAt: new Date(draft.expires_at),
+    // As stored (#695): what every later reader of the draft computes.
+    contentVersion: contentVersionOf(draft),
   };
 }
 
@@ -80,15 +156,17 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
   const expiresInHours = params.expiresInHours ?? DEFAULT_EXPIRATION_HOURS;
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
   const postcardSize = params.postcardSize ?? '6x9';
+  const front = storedPostcardFront(params.postcardFront);
 
   const result = await query<PostcardDraft>(
     `INSERT INTO letter_drafts (
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       mail_type, front_image_data, front_image_url, postcard_size,
-      status, expires_at
-    ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, 'postcard', $9, $10, $11, 'pending', $12)
-    RETURNING draft_id, expires_at`,
+      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on, postcard_front
+    ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, 'postcard', $9, $10, $11, $12, $13, 'pending', $14,
+              $15::date, $16::date, $17::jsonb)
+    RETURNING draft_id, expires_at, ${CONTENT_VERSION_COLUMNS}`,
     [
       params.userId,
       JSON.stringify(params.sender),
@@ -101,30 +179,31 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
       params.frontImageData,
       params.frontImageUrl,
       postcardSize,
+      params.isGiftSend === true,
+      params.rendererVersion ?? null,
       expiresAt,
+      params.schedule?.arriveBy ?? null,
+      params.schedule?.mailOn ?? null,
+      front ? JSON.stringify(front) : null,
     ]
   );
 
   const draft = result.rows[0];
 
-  writeDiagnostic('info', 'draft.postcard_created', { postcardSize, expiresInHours });
+  writeDiagnostic('info', 'draft.postcard_created', {
+    postcardSize,
+    expiresInHours,
+    renderer: params.rendererVersion ?? 'html',
+    scheduled: params.schedule !== undefined,
+    layout: front?.layout ?? 'full_bleed'
+  });
 
   return {
     draftId: draft.draft_id,
     expiresAt: new Date(draft.expires_at),
+    // As stored (#695): what every later reader of the draft computes.
+    contentVersion: contentVersionOf(draft),
   };
-}
-
-/**
- * Get a postcard draft by ID (without consuming it).
- * Returns null if not found or if not a postcard.
- */
-export async function getPostcardDraft(draftId: string): Promise<PostcardDraft | null> {
-  const result = await query<PostcardDraft>(
-    `SELECT * FROM letter_drafts WHERE draft_id = $1 AND mail_type = 'postcard'`,
-    [draftId]
-  );
-  return result.rows[0] || null;
 }
 
 // ============================================================================
@@ -135,7 +214,7 @@ export async function getPostcardDraft(draftId: string): Promise<PostcardDraft |
  * Consume a draft when sending a letter.
  * This is the core idempotency mechanism.
  *
- * - Uses SELECT FOR UPDATE to prevent race conditions
+ * - Locks the draft (FOR NO KEY UPDATE, as every draft holder) to prevent race conditions
  * - If draft is pending: marks as consumed (letter ID set later via linkDraftToLetter)
  * - If draft is already consumed: returns existing letter_id (idempotent retry)
  * - If draft is expired/not found: throws descriptive error
@@ -149,7 +228,7 @@ export async function consumeDraft(params: ConsumeDraftParams): Promise<ConsumeD
     const selectResult = await client.query<LetterDraft>(
       `SELECT * FROM letter_drafts
        WHERE draft_id = $1
-       FOR UPDATE`,
+       FOR NO KEY UPDATE`,
       [params.draftId]
     );
 
@@ -251,16 +330,57 @@ export async function getDraft(draftId: string): Promise<LetterDraft | null> {
 }
 
 /**
- * Get all pending drafts for a user.
+ * What became of a draft, without its content (#474): who owns it, its status,
+ * when it expires, its arrival dates, and the mail it became once sent, with
+ * that letter's own status, funding and dates (#535), so an answer about a
+ * sent draft says where the order stands now. For get_draft_status, which the
+ * preview card asks where its host keeps no state for it.
  */
-export async function getPendingDrafts(userId: string): Promise<LetterDraft[]> {
-  const result = await query<LetterDraft>(
-    `SELECT * FROM letter_drafts
-     WHERE user_id = $1 AND status = 'pending' AND expires_at > NOW()
-     ORDER BY created_at DESC`,
-    [userId]
+export interface DraftState
+  extends Pick<
+    LetterDraft,
+    | 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'
+    | 'mail_type' | 'renderer_version' | 'stationery' | 'preview_html' | 'pages' | 'mail_service' | 'is_gift_send' | 'required_credits'
+    | 'body_text' | 'sign_off' | 'postcard_size' | 'postcard_front'
+  > {
+  /** The letter the draft became; null for a draft not sent, or a letter that is not the draft owner's. */
+  letter_status: LetterStatus | null;
+  letter_funding_type: Letter['funding_type'] | null;
+  letter_arrive_by: string | null;
+  letter_mail_on: string | null;
+  /** Whether the draft holds a signature (#608): its copy is never read here. */
+  signed: boolean;
+  /** What its content version is read from (#695): its addresses and layout, and the pictures by their hash. */
+  sender?: unknown;
+  recipient?: unknown;
+  layout_type?: string | null;
+  signature_image_hash?: string | null;
+  header_image_data_hash?: string | null;
+  inline_image_data_hash?: string | null;
+  front_image_data_hash?: string | null;
+}
+
+export async function getDraftState(draftId: string): Promise<DraftState | null> {
+  const result = await query<DraftState>(
+    `SELECT d.draft_id, d.user_id, d.status, d.expires_at, d.consumed_letter_id, d.arrive_by, d.mail_on,
+            d.mail_type, d.renderer_version, d.stationery, d.pages, d.mail_service, d.is_gift_send, d.required_credits,
+            d.body_text, d.sign_off, d.postcard_size, d.postcard_front,
+            -- Whether it is signed (#608), not the picture.
+            (d.signature_image IS NOT NULL AND d.signature_image <> '') AS signed,
+            -- The page only where get_draft_status can give it: a letter or
+            -- postcard (#594) our renderer drew, still pending.
+            CASE WHEN d.status = 'pending' AND d.renderer_version IS NOT NULL
+                 THEN d.preview_html END AS preview_html,
+            l.status AS letter_status, l.funding_type AS letter_funding_type,
+            l.arrive_by AS letter_arrive_by, l.mail_on AS letter_mail_on,
+            -- What its content version is read from (#695), the pictures by their hash.
+            ${contentVersionColumns('d.')}
+       FROM letter_drafts d
+       LEFT JOIN letters l ON l.letter_id = d.consumed_letter_id AND l.user_id = d.user_id
+      WHERE d.draft_id = $1`,
+    [draftId]
   );
-  return result.rows;
+  return result.rows[0] || null;
 }
 
 // ============================================================================
@@ -288,26 +408,77 @@ export async function markExpiredDrafts(): Promise<number> {
 }
 
 /**
- * Delete old consumed/expired drafts.
- * Should be called periodically (e.g., weekly) by a background worker.
+ * Delete drafts that are done with, and never paid for by an order: sent
+ * (consumed) or cancelled, last changed more than `olderThanDays` ago; or
+ * expired unsent, by their own expiry, as below.
+ * The hourly maintenance calls it once a day.
+ *
+ * A sent draft whose letter waits for its mail date (#535) stays until
+ * `olderThanDays` after that date: its confirmation link and a reopened card
+ * read the letter through it (#564), and a wait can be 60 days. Once that
+ * letter is cancelled (#701), the cancel is its clock instead of the send:
+ * it goes CANCELLED_HELD_DRAFT_DAYS after the cancel ($4), however long ago or
+ * recently it was sent. The mail is not going. After a customer's cancel with
+ * no money hold, the letter's own content goes on the unpaid schedule
+ * (retentionService), which quarantines it at 4 days and empties it at 7; an
+ * operator's cancel or a refunded pack keeps it on the letter schedule, and
+ * the draft goes at 4 days all the same. Four days, not 7, because this sweep runs
+ * once a day and drifts to about 25 hours, more when a run fails before it:
+ * at 7 the draft could outlast the letter's copy (#730). Nor the send's 7
+ * days when the cancel came soon after the send: that kept the draft days
+ * past the letter's copy too (#764 review). The date cutoff is its own
+ * integer parameter; each timestamp parameter is used once, uncast, with a
+ * timestamp column.
+ *
+ * An unsent draft is measured from its own expiry, not from when a run marked
+ * it expired (#730): the privacy policy says an unsent draft's content is
+ * deleted within 7 days, and the run that marks it can come a day after the
+ * expiry. Its cutoff ($3) is UNSENT_DRAFT_DAYS_AFTER_EXPIRY, fixed rather than
+ * taken from `olderThanDays`. Four days meets the 7 however they are counted:
+ * from the expiry, or from the draft's creation a day before it. This sweep
+ * runs once a day and that day drifts (the next run waits a full day from the
+ * end of the last, so it usually comes about 25 hours later), so a draft it
+ * just misses goes at the next run, still inside the 7. Earlier costs nothing:
+ * the draft expired unsent and nothing paid for it.
  */
+export const UNSENT_DRAFT_DAYS_AFTER_EXPIRY = 4;
+
+/** A cancelled held letter's sent draft goes this many days after the cancel (#701, #730). */
+export const CANCELLED_HELD_DRAFT_DAYS = 4;
+
 export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<number> {
   const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
+  const unsentCutoff = new Date(Date.now() - UNSENT_DRAFT_DAYS_AFTER_EXPIRY * 24 * 60 * 60 * 1000);
+  const cancelledCutoff = new Date(Date.now() - CANCELLED_HELD_DRAFT_DAYS * 24 * 60 * 60 * 1000);
 
   const result = await query(
     `DELETE FROM letter_drafts
      WHERE status IN ('consumed', 'expired', 'cancelled')
-       AND updated_at < $1
+       AND (CASE
+              WHEN status = 'expired' THEN expires_at < $3
+              ELSE COALESCE(
+                (SELECT letters.status_updated_at < $4 FROM letters
+                  WHERE letters.letter_id = letter_drafts.consumed_letter_id
+                    AND letters.status = 'cancelled'
+                    AND letters.mail_on IS NOT NULL),
+                letter_drafts.updated_at < $1)
+            END)
        AND NOT EXISTS (
          SELECT 1 FROM orders WHERE orders.draft_id = letter_drafts.draft_id
        )
+       AND NOT EXISTS (
+         SELECT 1 FROM letters
+          WHERE letters.letter_id = letter_drafts.consumed_letter_id
+            AND letters.mail_on >= CURRENT_DATE - $2::int
+            AND letters.status <> 'cancelled'
+       )
      RETURNING draft_id`,
-    [cutoffDate]
+    [cutoffDate, olderThanDays, unsentCutoff, cancelledCutoff]
   );
 
   const count = result.rowCount ?? 0;
   if (count > 0) {
-    console.log(`📝 Cleaned up ${count} old drafts (older than ${olderThanDays} days)`);
+    console.log(`📝 Cleaned up ${count} old drafts (sent or cancelled more than ${olderThanDays} days ago, a cancelled held letter's more than ${CANCELLED_HELD_DRAFT_DAYS} days after the cancel, or expired more than ${UNSENT_DRAFT_DAYS_AFTER_EXPIRY} days ago)`);
   }
 
   return count;
@@ -332,6 +503,574 @@ export async function cancelDraft(draftId: string, userId: string): Promise<bool
   }
 
   return cancelled;
+}
+
+// ============================================================================
+// Arrival Dates
+// ============================================================================
+
+/**
+ * The Pay & Send orders that fix a draft's dates: any live one, as migration
+ * 023's idx_orders_active_jit_draft_unique counts them (commerceService's
+ * ACTIVE_JIT_STATUSES, which a test holds this to). Payment sends the mail
+ * with the dates the draft has, so they do not move under it.
+ */
+export const LIVE_PAY_AND_SEND_STATUSES = [
+  'checkout_pending',
+  'paid',
+  'fulfillment_pending',
+  'refund_pending',
+  'disputed',
+  'held',
+] as const;
+
+/** Why a draft's arrival date was left as it was (setDraftSchedule). */
+export type DraftScheduleRefusal = 'not_found' | 'sent' | 'expired' | 'checkout_pending';
+
+/**
+ * Why a draft's page was not drawn again in place (setDraftStationery,
+ * setDraftWords): as for its dates, or 'changed', when what the page was
+ * drawn from changed under the caller (#586).
+ */
+export type DraftRedrawRefusal = DraftScheduleRefusal | 'changed';
+
+/**
+ * Sets, moves or clears a draft's arrival dates (#535, set_arrival_date):
+ * only a draft that is the caller's, still pending and unexpired, with no live
+ * Pay & Send order but a checkout whose window has passed, which can no
+ * longer be paid. The dates were checked by the caller.
+ *
+ * The draft row is locked first, as the send (mailSendService) and the Pay &
+ * Send checkout (commerceService) lock it before they read its dates, so this
+ * and either of them run one after the other. A send or checkout that goes
+ * first leaves this refused ('sent', 'checkout_pending'); one that goes second
+ * reads the new dates.
+ *
+ * Returns the refusal, or null once the dates are written. Someone else's
+ * draft is refused as a missing one, and is not locked.
+ */
+export async function setDraftSchedule(
+  draftId: string,
+  userId: string,
+  schedule: DraftSchedule | null,
+  now: Date = new Date(),
+  /** Told the content version once written (#695). */
+  onWritten?: OnWritten
+): Promise<DraftScheduleRefusal | null> {
+  return withChangeableDraft(draftId, userId, now, async client => {
+
+    await client.query(
+      `UPDATE letter_drafts
+       SET arrive_by = $2::date, mail_on = $3::date, updated_at = NOW()
+       WHERE draft_id = $1`,
+      [draftId, schedule?.arriveBy ?? null, schedule?.mailOn ?? null]
+    );
+    writeDiagnostic('info', 'draft.schedule_set', { scheduled: schedule !== null });
+    return null;
+  }, onWritten);
+}
+
+/** Why a draft's mail service cannot be changed (#625): a draft that may change, or one that cannot be certified. */
+export type MailServiceRefusal = DraftScheduleRefusal | 'not_a_letter' | 'gift_send';
+
+/**
+ * Sets how a letter draft travels (#625, set_mail_service). It changes only a
+ * draft setDraftSchedule would change, under the same lock, so a send or a Pay
+ * & Send checkout runs before or after it, never between: one that goes first
+ * leaves this refused ('sent', 'checkout_pending'), and one that goes second
+ * sees and prices the new service. The preview's page does not change with
+ * the service (the certified label is on the envelope), so nothing is drawn
+ * again.
+ *
+ * A service other than standard only for a letter that is not a gift send:
+ * read under the lock and refused by name, as migration 052's checks would
+ * refuse it. Returns the refusal, or null once the service is set.
+ */
+export async function setDraftMailService(
+  draftId: string,
+  userId: string,
+  mailService: MailService,
+  now: Date = new Date(),
+  /** Told the content version once written (#695). */
+  onWritten?: OnWritten
+): Promise<MailServiceRefusal | null> {
+  const service = storedMailService({ mailService });
+  return withChangeableDraft(draftId, userId, now, async client => {
+
+    const locked = await client.query<Pick<LetterDraft, 'mail_type' | 'is_gift_send'>>(
+      'SELECT mail_type, is_gift_send FROM letter_drafts WHERE draft_id = $1',
+      [draftId]
+    );
+    const draft = locked.rows[0];
+    if (!draft) return 'not_found';
+    if (service !== 'standard') {
+      if (draft.mail_type !== 'letter') return 'not_a_letter';
+      if (draft.is_gift_send) return 'gift_send';
+    }
+
+    await client.query('UPDATE letter_drafts SET mail_service = $2::text, updated_at = NOW() WHERE draft_id = $1', [
+      draftId,
+      service
+    ]);
+    writeDiagnostic('info', 'draft.mail_service_set', { mailService: service });
+    return null;
+  }, onWritten);
+}
+
+/**
+ * The one way a draft is changed in place (#690): in a transaction, the draft locked
+ * first (lockChangeableDraft), so a send or a Pay & Send checkout runs before or after
+ * the change, never between, and the change written only while the draft may still
+ * change. Returns the lock's refusal, or what the change returns: its own refusal, or
+ * null once it is written.
+ */
+async function withChangeableDraft<R extends string | null>(
+  draftId: string,
+  userId: string,
+  now: Date,
+  change: (client: pg.PoolClient) => Promise<R>,
+  /**
+   * Told the draft's content version once the change is written (#695), and the
+   * version it had before, both read in the same transaction under its lock: the
+   * version of exactly what was written, and of what the change was made to. A
+   * card takes the new one only when the one before is the one it shows, so a
+   * change it did not see (the chat's) is never sent on the strength of its own.
+   */
+  onWritten?: OnWritten
+): Promise<DraftScheduleRefusal | R> {
+  return transaction(async client => {
+    const refusal = await lockChangeableDraft(client, draftId, userId, now);
+    if (refusal) return refusal;
+    const readRow = async () => {
+      const read = await client.query<ContentVersionRow>(
+        `SELECT ${CONTENT_VERSION_COLUMNS} FROM letter_drafts WHERE draft_id = $1`,
+        [draftId]
+      );
+      return read.rows[0] ?? null;
+    };
+    const before = onWritten ? await readRow() : null;
+    const result = await change(client);
+    if (result === null && onWritten && before !== null) {
+      const written = await readRow();
+      if (written !== null) {
+        onWritten(contentVersionOf(written), contentVersionOf(before), { mailService: written.mail_service ?? null });
+      }
+    }
+    return result;
+  });
+}
+
+/**
+ * Locks a draft a tool may still change (its dates, its stationery, its words), or says
+ * why it may not: it is the caller's, pending, unexpired and not emptied by an
+ * erasure, with no live Pay & Send order: a checkout whose window has passed
+ * no longer holds it, unless its Stripe session opened, which holds it until
+ * Stripe closes it (#695). Someone else's draft is refused as a missing one, and is not locked.
+ *
+ * An erasure empties a draft an order points at rather than deleting it, and
+ * leaves it pending; no sweep visits it again (they skip redacted rows). A
+ * change that waited on the erasure's lock reads the emptied row here and is
+ * refused, so it cannot write the letter's page back into it.
+ */
+async function lockChangeableDraft(
+  client: pg.PoolClient,
+  draftId: string,
+  userId: string,
+  now: Date
+): Promise<DraftScheduleRefusal | null> {
+  const locked = await client.query<Pick<LetterDraft, 'status' | 'expires_at' | 'redacted_at'>>(
+    'SELECT status, expires_at, redacted_at FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR NO KEY UPDATE',
+    [draftId, userId]
+  );
+  const draft = locked.rows[0];
+  if (!draft) return 'not_found';
+  if (draft.status === 'consumed') return 'sent';
+  if (draft.status !== 'pending' || draft.redacted_at || !(new Date(draft.expires_at).getTime() > now.getTime())) {
+    return 'expired';
+  }
+
+  const live = await client.query(
+    `SELECT 1 FROM orders
+     WHERE draft_id = $1
+       AND order_type = 'jit_mail'
+       AND status = ANY($2::varchar[])
+       AND (status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW()
+            -- A Stripe session, once opened, can still be paid until Stripe closes it (its
+            -- webhook, or the sweep, cancels the order): the draft is held till then, so
+            -- what is paid for is what is mailed (#695).
+            OR stripe_checkout_session_id IS NOT NULL OR checkout_url IS NOT NULL)
+     LIMIT 1`,
+    [draftId, [...LIVE_PAY_AND_SEND_STATUSES]]
+  );
+  return live.rows[0] ? 'checkout_pending' : null;
+}
+
+// ============================================================================
+// Stationery
+// ============================================================================
+
+/** What set_stationery reads of a draft to draw its page again (#563). */
+export interface DraftForStationery {
+  mail_type: string;
+  status: string;
+  expires_at: Date;
+  redacted_at: Date | null;
+  renderer_version: string | null;
+  body_text: string;
+  sign_off: string | null;
+  layout_type: string | null;
+  header_image_data: string | null;
+  inline_image_data: string | null;
+  sender: Record<string, unknown>;
+  recipient: Record<string, unknown>;
+  preview_html: string | null;
+  /** The pages it was laid out on (migration 047, #586). */
+  pages: number;
+  /** How it travels (migration 052, #625): a restyle prices it again by this as well as its pages. */
+  mail_service: MailService;
+  /** A gift letter pays for one page only (#579): its restyle stays on one. */
+  is_gift_send: boolean;
+  /** The letters its preview priced it at, for what a restyle says it costs. */
+  required_credits: number;
+  /** The stationery as stored (null for Classic): new words are laid out in it (#586). */
+  stationery: unknown;
+  /** The signature as the letter was previewed with it (#608): laid out again with the letter. */
+  signature_image: string | null;
+}
+
+/** The caller's draft, as set_stationery draws it again, or null when it is not theirs or not there. */
+export async function getDraftForStationery(draftId: string, userId: string): Promise<DraftForStationery | null> {
+  const result = await query<DraftForStationery>(
+    `SELECT mail_type, status, expires_at, redacted_at, renderer_version, body_text, sign_off, layout_type,
+            header_image_data, inline_image_data, sender, recipient, preview_html, pages, mail_service, is_gift_send,
+            required_credits, stationery, signature_image
+     FROM letter_drafts
+     WHERE draft_id = $1 AND user_id = $2`,
+    [draftId, userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * What a mail service change answers from (#625): the draft's option, whole (draftMailOption reads the
+ * postcard's size as well as the letter's pages and service), who pays for it, and whether it is still
+ * pending, since the answer is read after the change's lock is released.
+ */
+export type DraftForMailService = Pick<
+  LetterDraft,
+  'mail_type' | 'postcard_size' | 'pages' | 'mail_service' | 'is_gift_send' | 'required_credits' | 'status'
+>;
+
+/**
+ * Told a change's content version once it is written (#695), the version it was made to, and what the written row
+ * says of how the letter travels (#625 follow-up), all read in its transaction under the draft's lock. The editors
+ * read the draft before taking the lock, so a change of service landing between would price their answer on the
+ * service before it: they price by this one, which the answer's version describes.
+ */
+export type OnWritten = (contentVersion: string, before: string, written: { mailService: string | null }) => void;
+
+/** The caller's draft as set_mail_service prices it now, or null when it is not theirs or not there. */
+export async function getDraftForMailService(draftId: string, userId: string): Promise<DraftForMailService | null> {
+  const result = await query<DraftForMailService>(
+    `SELECT ${DRAFT_OPTION_COLUMNS}, is_gift_send, required_credits, status
+     FROM letter_drafts
+     WHERE draft_id = $1 AND user_id = $2`,
+    [draftId, userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * What an in-place edit drew its page from, as it read the draft before the
+ * lock (#586): a restyle draws the letter's words, and new words are drawn in
+ * its stationery. Each writes what the other draws from, so whichever
+ * committed second would store a page drawn from what the first replaced.
+ * A page is drawn with the draft's signature too, which set_letter_signature
+ * changes in place (#608). Read again under the lock; any change refuses the
+ * edit, to be tried again.
+ */
+type DrawnFrom = { words?: { bodyText: string; signOff: string | null }; stationery?: unknown; signature?: string | null };
+
+async function drawnFromChanged(client: pg.PoolClient, draftId: string, drawnFrom: DrawnFrom): Promise<boolean> {
+  const locked = await client.query<{ body_text: string; sign_off: string | null; stationery: unknown; signature_image: string | null }>(
+    'SELECT body_text, sign_off, stationery, signature_image FROM letter_drafts WHERE draft_id = $1',
+    [draftId]
+  );
+  const row = locked.rows[0];
+  if (!row) return true;
+  const words = drawnFrom.words;
+  if (words && (row.body_text !== words.bodyText || (row.sign_off ?? null) !== (words.signOff ?? null))) return true;
+  // Both read from the same jsonb column, so an unchanged value serialises the same.
+  if ('stationery' in drawnFrom && JSON.stringify(row.stationery ?? null) !== JSON.stringify(drawnFrom.stationery ?? null)) return true;
+  return 'signature' in drawnFrom && (row.signature_image ?? null) !== (drawnFrom.signature ?? null);
+}
+
+/**
+ * Restyles a letter draft (#563, set_stationery): its stationery, the renderer
+ * version that goes with it (rendererVersionFor), and its preview drawn again
+ * in it, which the caller made from the draft's own content. It changes only a draft
+ * setDraftSchedule would change, under the same lock, so a send or a Pay &
+ * Send checkout runs before or after it, never between: one that goes first
+ * leaves this refused, and one that goes second sends the new style.
+ *
+ * In the same transaction the account remembers the theme (migration 045):
+ * restyling is an explicit choice, made by the model or on the card.
+ *
+ * Returns the refusal, or null once the draft is restyled: 'changed' when its
+ * words changed since the caller read them (#586), as the page was drawn
+ * from those.
+ */
+export async function setDraftStationery(
+  draftId: string,
+  userId: string,
+  /**
+   * `pages`: the pages the letter is laid out on now (#586); left as it was
+   * when absent. `drawnFrom`: the words the page was drawn from, as read.
+   */
+  change: {
+    /** With a saved design's id (#649), which the draft does not keep but the account remembers. */
+    stationery: Stationery & { designId?: string };
+    previewHtml: string;
+    pages?: number;
+    /** The words, and the signature (#608) when the caller drew one, as read. */
+    drawnFrom: { bodyText: string; signOff: string | null; signature?: string | null };
+  },
+  now: Date = new Date(),
+  /** Told the content version once written (#695). */
+  onWritten?: OnWritten
+): Promise<DraftRedrawRefusal | null> {
+  const stationery = storedStationery(change.stationery);
+  // The version goes with the stationery stored (rendererVersionFor), so
+  // 044's pair check holds whatever the caller drew. A signed draft keeps
+  // pdf-4 (#608, 051's pair): its signature is the draft's own, read in the
+  // UPDATE under the lock, which the restyle never changes.
+  const rendererVersion = rendererVersionFor(stationery);
+  return withChangeableDraft(draftId, userId, now, async client => {
+    const { signature, ...words } = change.drawnFrom;
+    if (await drawnFromChanged(client, draftId, { words, ...(signature !== undefined ? { signature } : {}) })) return 'changed';
+
+    await client.query(
+      `UPDATE letter_drafts
+       SET stationery = $2::jsonb,
+           renderer_version = CASE WHEN signature_image IS NOT NULL THEN 'pdf-4' ELSE $3::text END,
+           preview_html = $4,
+           pages = COALESCE($5::smallint, pages), updated_at = NOW()
+       WHERE draft_id = $1`,
+      [draftId, stationery ? JSON.stringify(stationery) : null, rendererVersion, change.previewHtml, change.pages ?? null]
+    );
+    // The account's choice for its next preview: a theme, which forgets any
+    // remembered design, or a saved design (#649), which comes before the
+    // theme; never on an erased account (rememberStationery, rememberDesign).
+    const chosen = change.stationery;
+    if (chosen.theme !== CUSTOM_THEME) {
+      await client.query(
+        'UPDATE users SET stationery_theme = $2, stationery_design_id = NULL WHERE user_id = $1 AND erased_at IS NULL',
+        [userId, chosen.theme]
+      );
+    } else if (chosen.designId) {
+      // The account's row first, in a statement of its own: a design deleted
+      // meanwhile (its delete takes the account's row first) is then simply
+      // not found by the next statement, never a broken key.
+      await client.query('SELECT 1 FROM users WHERE user_id = $1 FOR UPDATE', [userId]);
+      await client.query(
+        `UPDATE users u SET stationery_design_id = d.design_id
+           FROM stationery_designs d
+          WHERE u.user_id = $1 AND u.erased_at IS NULL AND d.user_id = u.user_id AND d.design_id = $2`,
+        [userId, chosen.designId]
+      );
+    }
+    writeDiagnostic('info', 'draft.stationery_set', { theme: chosen.theme });
+    return null;
+  }, onWritten);
+}
+
+/**
+ * A letter draft's words changed in place (#586, set_letter_words): its body
+ * and sign-off, the preview drawn again from them, which the caller laid out
+ * in the draft's own stationery, and the pages it now takes. Under the same
+ * lock as a restyle, so a send or a Pay & Send checkout runs before or after
+ * it, never between, and its price is the draft's from then on.
+ *
+ * Returns the refusal, or null once the words are changed: 'changed' when the
+ * stationery changed since the caller read it, as the page was drawn in that,
+ * or the words it replaces did (#593 review round 1).
+ */
+export async function setDraftWords(
+  draftId: string,
+  userId: string,
+  /**
+   * `drawnIn`: the stored stationery the page was drawn in, as read.
+   * `replacing`: the words it replaces, as read.
+   */
+  change: {
+    bodyText: string;
+    signOff: string;
+    previewHtml: string;
+    pages: number;
+    drawnIn: unknown;
+    replacing: { bodyText: string; signOff: string | null };
+    /** The signature the page was drawn with (#608), as read; a change of it refuses. */
+    drawnWith?: string | null;
+  },
+  now: Date = new Date(),
+  /** Told the content version once written (#695). */
+  onWritten?: OnWritten
+): Promise<DraftRedrawRefusal | null> {
+  return withChangeableDraft(draftId, userId, now, async client => {
+    const drawnFrom: DrawnFrom = { words: change.replacing, stationery: change.drawnIn };
+    if (change.drawnWith !== undefined) drawnFrom.signature = change.drawnWith;
+    if (await drawnFromChanged(client, draftId, drawnFrom)) return 'changed';
+
+    await client.query(
+      `UPDATE letter_drafts
+       SET body_text = $2, sign_off = $3, preview_html = $4, pages = $5::smallint, updated_at = NOW()
+       WHERE draft_id = $1`,
+      [draftId, change.bodyText, change.signOff, change.previewHtml, change.pages]
+    );
+    // Counts only: the words never reach the log.
+    writeDiagnostic('info', 'draft.words_set', { pages: change.pages, characters: change.bodyText.length + change.signOff.length });
+    return null;
+  }, onWritten);
+}
+
+/**
+ * A letter draft signed or unsigned in place (#608, set_letter_signature):
+ * its own copy of the signature (the saved one's PNG as a data URI, or null
+ * for none), the renderer version that goes with it (pdf-4 with one; pdf-2
+ * or pdf-1 by its stationery without), its preview drawn again, which the
+ * caller made from the draft's own content, and the pages it now takes.
+ * Under the lock a restyle takes, so a send or a Pay & Send checkout runs
+ * before or after it, never between; refused as 'changed' when its words,
+ * stationery or signature changed since the caller read them.
+ *
+ * In the same transaction the account remembers the choice (migration 050's
+ * use_by_default), as a restyle remembers its theme: on or off, explicitly.
+ */
+export async function setDraftSignature(
+  draftId: string,
+  userId: string,
+  change: {
+    signatureImage: string | null;
+    previewHtml: string;
+    pages: number;
+    /** What the page was drawn from, as read: its words, stationery and signature. */
+    drawnFrom: { words: { bodyText: string; signOff: string | null }; stationery: unknown; signature: string | null };
+  },
+  now: Date = new Date(),
+  /** Told the content version once written (#695). */
+  onWritten?: OnWritten
+): Promise<DraftRedrawRefusal | null> {
+  return withChangeableDraft(draftId, userId, now, async client => {
+    if (await drawnFromChanged(client, draftId, change.drawnFrom)) return 'changed';
+
+    // The version from the row's own stationery, read under the lock, so
+    // 044's and 051's pairs hold whatever the caller drew.
+    await client.query(
+      `UPDATE letter_drafts
+       SET signature_image = $2::text,
+           renderer_version = CASE WHEN $2::text IS NOT NULL THEN 'pdf-4'
+                                   WHEN stationery IS NOT NULL THEN 'pdf-2'
+                                   ELSE 'pdf-1' END,
+           preview_html = $3,
+           pages = $4::smallint, updated_at = NOW()
+       WHERE draft_id = $1`,
+      [draftId, change.signatureImage, change.previewHtml, change.pages]
+    );
+    await client.query('UPDATE user_signatures SET use_by_default = $2 WHERE user_id = $1', [userId, change.signatureImage !== null]);
+    writeDiagnostic('info', 'draft.signature_set', { signed: change.signatureImage !== null, pages: change.pages });
+    return null;
+  }, onWritten);
+}
+
+/** What set_postcard_style reads of a draft to draw it again (#594). */
+export interface DraftForPostcardStyle {
+  mail_type: string;
+  status: string;
+  expires_at: Date;
+  redacted_at: Date | null;
+  renderer_version: string | null;
+  body_text: string;
+  sender: unknown;
+  recipient: unknown;
+  front_image_data: string | null;
+  front_image_url: string | null;
+  postcard_size: PostcardSize | null;
+  postcard_front: unknown;
+  preview_html: string | null;
+  is_gift_send: boolean;
+  required_credits: number;
+}
+
+/** The caller's draft, as set_postcard_style draws it again, or null when it is not theirs or not there. */
+export async function getDraftForPostcardStyle(draftId: string, userId: string): Promise<DraftForPostcardStyle | null> {
+  const result = await query<DraftForPostcardStyle>(
+    `SELECT mail_type, status, expires_at, redacted_at, renderer_version, body_text, sender, recipient,
+            front_image_data, front_image_url, postcard_size, postcard_front, preview_html, is_gift_send,
+            required_credits
+     FROM letter_drafts
+     WHERE draft_id = $1 AND user_id = $2`,
+    [draftId, userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Restyles a postcard draft (#594, set_postcard_style): its size, its front,
+ * the renderer version that goes with the front ('pdf-3' with one, 'pdf-1'
+ * without, as migration 048 holds them), its preview drawn again, and, at a
+ * new size, its picture cropped again. Under the same lock as a stationery
+ * change, so a send or a Pay & Send checkout runs before or after it, never
+ * between: one that goes first leaves this refused, and one that goes second
+ * sends and prices the new style.
+ *
+ * `drawnFrom` is the preview the caller read, which it drew from (the back
+ * and the picture it kept): one that changed since, under another restyle,
+ * refuses this as 'changed', to be tried again. A gift postcard is a 6x9
+ * (#579): one asked to leave it is refused as 'changed' too, though the tool
+ * refuses it first.
+ *
+ * Returns the refusal, or null once the draft is restyled.
+ */
+export async function setDraftPostcardStyle(
+  draftId: string,
+  userId: string,
+  change: {
+    size: PostcardSize;
+    front: PostcardFront | null;
+    previewHtml: string;
+    /** The picture cropped again at a new size; absent, the stored one stays. */
+    frontImageData?: string;
+    drawnFrom: { previewHtml: string | null };
+  },
+  now: Date = new Date(),
+  /** Told the content version once written (#695). */
+  onWritten?: OnWritten
+): Promise<DraftRedrawRefusal | null> {
+  const front = storedPostcardFront(change.front);
+  const rendererVersion = front ? POSTCARD_FRONT_RENDERER_VERSION : RENDERER_VERSION;
+  return withChangeableDraft(draftId, userId, now, async client => {
+    const locked = await client.query<{ preview_md5: string | null; is_gift_send: boolean }>(
+      'SELECT md5(preview_html) AS preview_md5, is_gift_send FROM letter_drafts WHERE draft_id = $1',
+      [draftId]
+    );
+    const row = locked.rows[0];
+    const drawnFrom = change.drawnFrom.previewHtml === null ? null : createHash('md5').update(change.drawnFrom.previewHtml, 'utf8').digest('hex');
+    if (!row || row.preview_md5 !== drawnFrom || (row.is_gift_send && change.size !== '6x9')) return 'changed';
+
+    await client.query(
+      `UPDATE letter_drafts
+       SET postcard_size = $2, postcard_front = $3::jsonb, renderer_version = $4, preview_html = $5,
+           front_image_data = COALESCE($6, front_image_data), updated_at = NOW()
+       WHERE draft_id = $1`,
+      [draftId, change.size, front ? JSON.stringify(front) : null, rendererVersion, change.previewHtml, change.frontImageData ?? null]
+    );
+    writeDiagnostic('info', 'draft.postcard_style_set', {
+      size: change.size,
+      layout: front?.layout ?? 'full_bleed',
+      pictureCroppedAgain: change.frontImageData !== undefined
+    });
+    return null;
+  }, onWritten);
 }
 
 // ============================================================================

@@ -1,6 +1,6 @@
 # Letter Status Labels Reference
 
-**Last Updated:** September 16, 2026
+**Last Updated:** October 1, 2026
 **Purpose:** Single source of truth for letter status values across database, API, dashboard, and widgets.
 
 ---
@@ -44,7 +44,11 @@ pre-dispatch failure returns it to `queued`; a definite rejection sets `failed`.
 not prove what happened (a timeout, a `5xx`, lost transport) sets `held`, and only an operator moves it
 on (`src/services/letterJobService.ts`). After acceptance, the six-hourly status sync
 (`src/services/statusSyncService.ts`) applies PostGrid's lifecycle, which reuses `processing` for the
-printer stage.
+printer stage. PostGrid's own statuses are `ready`, `printing`, `processed_for_delivery`, `completed` and
+`cancelled` (#566). It cancels a piece only while it is `ready`, before printing, so a `cancelled` piece
+fails here (`failProviderCancelledLetter`). What paid for it comes back by itself for prepaid and gift mail our
+record still held as `accepted`; a Pay & Send letter, or one our record had seen printing or mailed, is left to a
+person, with a critical alert.
 
 ---
 
@@ -57,21 +61,21 @@ migration `023_jit_recovery_state_machines.sql`) allows exactly the values below
 |--------|---------|--------|-----------|
 | `draft` | Letter row inserted; replaced by `queued` in the same transaction | the confirmed-send transaction | No |
 | `queued` | Committed with its outbox row, awaiting submission | job creation; a retryable failure; an operator retry | No |
-| `processing` | Being submitted to the provider, **or** at the printer (PostGrid `processed`/`printed`) | the outbox when it claims the job; status sync | No |
+| `processing` | Being submitted to the provider, **or** at the printer (PostGrid `printing`, or the older `processed`/`printed`) | the outbox when it claims the job; status sync | No |
 | `held` | Provider outcome unknown; an operator must reconcile it | the outbox on an ambiguous dispatch | No |
 | `accepted` | PostGrid accepted the order | the outbox on provider success; an operator decision; status sync | No |
 | `sent` | **Legacy** - same as `accepted` | old records only | No |
 | `in_transit` | Handed to USPS | status sync | No |
 | `delivered` | Delivered (estimated in live mode) | status sync | **Yes** |
 | `returned` | Returned to sender | status sync | **Yes** |
-| `failed` | Terminal failure: a definite provider rejection, exhausted retries, an operator's rejected decision, or a PostGrid cancellation | the outbox; an operator decision; status sync | **Yes** |
-| `cancelled` | Stopped before dispatch because the Pay & Send payment that funded it was refunded or disputed | commerce (`stopFundedMailBeforeFinancialReversal`) | **Yes** |
+| `failed` | Terminal failure: a definite provider rejection, exhausted retries, an operator's rejected decision, or a PostGrid cancellation (`cancelled`, before printing: an alert is raised, and what paid comes back by itself unless a person must decide, #566) | the outbox; an operator decision; status sync | **Yes** |
+| `cancelled` | Stopped before dispatch: the Pay & Send payment that funded it was refunded or disputed, the customer cancelled mail held to a date (#535), or the account was erased | commerce (`stopFundedMailBeforeFinancialReversal`); `cancel_scheduled_mail` and its REST route; account erasure | **Yes** |
 
 `printing` is **not** a database value; the constraint rejects it. It exists only in the MCP
 vocabulary below.
 
-Status sync skips terminal letters and letters without a `tracking_id`, and stores PostGrid's raw
-status in `provider_raw_status`. Every transition is recorded in `letter_status_history`.
+Status sync skips terminal letters and letters without a `tracking_id`, and stores the provider's status
+message ("Letter was canceled before sending", not PostGrid's raw `cancelled`) in `provider_raw_status`. Every transition is recorded in `letter_status_history`.
 
 ### Legacy compatibility
 
@@ -103,8 +107,11 @@ return. The mapping is `mapStatus()` in `src/store/fileAccountStore.ts`.
 | `returned` | Returned to sender | `returned` |
 | `failed` | Failed | `failed` |
 | `cancelled` | Cancelled | `cancelled` |
+| `scheduled` | Sent with an arrival date, waiting for its mail date (#535) | `queued` with `arrive_by` and `mail_on` |
 
 A `held` letter reads as `pending` to the customer on purpose: whether it was mailed is not yet known.
+
+Mail sent with an arrival date (#535) waits in the outbox, `queued`, until 09:00 New York time on its mail date. Until the outbox takes it, `get_order_status`, `list_orders` and the preview card's `get_draft_status` call it `scheduled`, with `arriveBy`, `mailOn` and `cancellable` (false for Pay & Send, whose refund a person decides). The send's answer calls it `scheduled` only while its mail date is ahead: sent after 09:00 New York on that day, it is due at once and reads as any send. Its timeline carries a line saying when it goes to the printer. Once taken, it reads as any other letter, keeping its dates.
 
 ---
 

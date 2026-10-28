@@ -2,6 +2,7 @@ import type { CommandOutcome, CommandPreview } from "../commands/runner.js";
 import { html, join, type SafeHtml } from "../ui/html.js";
 import { formatDate } from "../ui/format.js";
 import { csrfField } from "../ui/layout.js";
+import { isCancellableLeftJob, isFundingHeldMailJob, isHeldMailJob, isLeftForOperatorJob, type JobView } from "../queries/jobs.js";
 import { commandLink, definitionList } from "./common.js";
 
 /** The preview page: what will happen, and the confirmation form. */
@@ -24,6 +25,13 @@ export function renderCommandPreview(input: {
   return html`<h1>${input.title}</h1>
 <p class="muted">Preview. Nothing has happened yet. The confirmation below is bound to exactly this state; if the target changes before you confirm, the command is refused as stale.</p>
 ${definitionList(input.preview.display.map(([label, value]) => [label, value] as [string, string]))}
+${
+  // What the link that opened this preview carries into the confirmation, as
+  // sent: a crafted link cannot fill a field the preview does not show (#730).
+  input.hiddenFields.length > 0
+    ? html`<h2>Values sent with this command</h2>${definitionList(input.hiddenFields)}`
+    : ""
+}
 ${
   input.preview.warnings.length > 0
     ? html`<div class="flash flash-warn" role="status"><ul>${join(input.preview.warnings.map((warning) => html`<li>${warning}</li>`))}</ul></div>`
@@ -112,8 +120,17 @@ ${input.message ? html`<div class="flash flash-warn" role="alert">${input.messag
 </form>`;
 }
 
-/** Forms on the alert detail page that lead to previews. */
-export function alertActionPanel(input: { alertId: string; status: string; mode: string }): SafeHtml {
+/**
+ * Forms on the alert detail page that lead to previews. A suggested resolution
+ * code fills the resolve field for an alert type whose resolution is known (an
+ * erasure's follow-up, #453); the preview and the typed phrase still decide.
+ */
+export function alertActionPanel(input: {
+  alertId: string;
+  status: string;
+  mode: string;
+  suggestedResolution?: string;
+}): SafeHtml {
   if (input.status === "resolved") return html`<p class="muted">Resolved; no further transition.</p>`;
   const previewBase = `/commands/alert.transition/preview`;
   return html`<h2>Actions</h2>
@@ -132,18 +149,19 @@ ${
   <input type="hidden" name="target" value="${input.alertId}">
   <input type="hidden" name="status" value="resolved">
   <label for="resolutionCode">Resolution code (lowercase, 3 to 80 characters, e.g. <code>refund_issued_in_dashboard</code>)</label>
-  <input type="text" id="resolutionCode" name="resolutionCode" pattern="[a-z][a-z0-9_]{2,79}" required autocomplete="off">
+  <input type="text" id="resolutionCode" name="resolutionCode" pattern="[a-z][a-z0-9_]{2,79}" required autocomplete="off" value="${input.suggestedResolution ?? ""}">
   <div><button type="submit">Preview resolve…</button></div>
 </form>
 ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
 }
 
 /** Forms on the job detail page that lead to previews. */
-export function jobActionPanel(input: { jobId: string; status: string; providerOutcome: string; mode: string }): SafeHtml {
-  if (input.status === "held" && input.providerOutcome === "ambiguous") {
+export function jobActionPanel(input: { job: JobView; mode: string; now?: number }): SafeHtml {
+  const { job } = input;
+  if (job.status === "held" && job.providerOutcome === "ambiguous") {
     return html`<h2>Resolve with provider evidence</h2>
 <form method="get" action="/commands/job.resolve/preview" class="stack">
-  <input type="hidden" name="target" value="${input.jobId}">
+  <input type="hidden" name="target" value="${job.jobId}">
   <label for="decision">Decision</label>
   <select id="decision" name="decision" required>
     <option value="accepted">accepted: the provider shows the mail as created</option>
@@ -162,11 +180,41 @@ export function jobActionPanel(input: { jobId: string; status: string; providerO
 </form>
 ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
   }
-  if (input.status === "failed" && input.providerOutcome === "definite_failure") {
+  if (job.status === "failed" && job.providerOutcome === "definite_failure") {
     return html`<h2>Retry</h2>
 <form method="get" action="/commands/job.retry/preview" class="inline">
-  <input type="hidden" name="target" value="${input.jobId}">
+  <input type="hidden" name="target" value="${job.jobId}">
   <button type="submit">Preview retry…</button>
+</form>
+${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
+  }
+  if (isLeftForOperatorJob(job)) {
+    const funding = isFundingHeldMailJob(job);
+    const why = funding
+      ? `The letter pack that paid for this letter was ${job.holdReason === "funding_disputed" ? "disputed" : "refunded in full"}, so it waits here instead of printing.`
+      : "The account's sending is blocked, so this letter waits here instead of printing.";
+    return html`<h2>Left for the operator</h2>
+<p>${why}</p>
+${funding
+  ? html`<form method="get" action="/commands/job.dispatch_now/preview" class="inline">
+  <input type="hidden" name="target" value="${job.jobId}">
+  <button type="submit">Preview sending anyway…</button>
+</form>`
+  : ""}
+${isCancellableLeftJob(job)
+  ? html`<form method="get" action="/commands/job.cancel_held/preview" class="inline">
+  <input type="hidden" name="target" value="${job.jobId}">
+  <button type="submit">Preview cancelling…</button>
+</form>`
+  : html`<p class="muted">A Pay &amp; Send letter is cancelled by refunding its order in the Stripe dashboard.</p>`}
+${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
+  }
+  if (isHeldMailJob(job, input.now)) {
+    return html`<h2>Held for its mail date</h2>
+<p>The letter waits until its mail date. Sending it now puts it in the next hourly run, so it may arrive well before the date the customer chose.</p>
+<form method="get" action="/commands/job.dispatch_now/preview" class="inline">
+  <input type="hidden" name="target" value="${job.jobId}">
+  <button type="submit">Preview sending now…</button>
 </form>
 ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
   }

@@ -1,6 +1,6 @@
 # Letter and Postcard Send Flow
 
-**Last Updated:** September 16, 2026
+**Last Updated:** October 1, 2026
 **Purpose:** Draft, payment, outbox, and provider workflow for letters and postcards
 
 This document describes the current draft, payment, outbox, and provider workflow for letters and postcards.
@@ -12,28 +12,269 @@ Preview tools validate the user's input, render the appropriate widget, and crea
 | Tool | Layout | Text limit |
 | --- | --- | --- |
 | `quote_and_preview_letter` | text only | 1,600 characters / 24 lines |
-| `quote_and_preview_letter_with_header_image` | image at top | 1,100 characters / 17 lines |
+| `quote_and_preview_letter_with_header_image` | image at top | 1,100 characters / 15 lines (the legacy HTML takes 17) |
 | `quote_and_preview_letter_with_image` | image after signature | 800 characters / 12 lines |
 | `quote_and_preview_postcard` | image front, message back | postcard-specific message limit |
 
+Every preview tool also refuses characters the print can't show (#526). PostGrid prints all our mail
+in Open Sans, whatever font the HTML names, and prints a character the font lacks as an empty box.
+So the text and both addresses may hold:
+- Latin letters with the accents of European languages and Vietnamese;
+- modern Greek, Cyrillic and Hebrew letters;
+- common punctuation, € and ™;
+- the signs ₪ ₫ № ℓ ℮ ℅ ℠ and ◊, the maths signs − ∂ ∆ ∏ ∑ √ ∞ ∫ ≈ ≠ ≤ ≥, the fractions ⅛ ⅜ ⅝ ⅞,
+  the ligatures ﬀ to ﬄ, and superscript and subscript digits.
+
+Emoji, every other script, and anything that neither a test print nor the shipped font's glyph
+list shows are refused. Examples are arrows, stars, check marks, the hyphen and non-breaking hyphen,
+and polytonic Greek's breathings, circumflex and iota subscript. The glyph list is
+`sources/OpenSans-glyphset.txt` in googlefonts/opensans, which its build subsets every shipped font
+to, not the larger design master.
+
+A character the font lacks still prints when its canonical decomposition is made of characters that
+print. The renderer draws the parts, so pinyin tone letters and the letters with a dot above or
+below are allowed. The narrow no-break space prints as a space. The coverage probe of 2026-09-30
+showed both (#526). `src/services/printableText.ts` holds the ranges. Widen them only on that
+evidence.
+
+The refusal names each character and where it is. Invisible characters get a name and code point,
+and a character that may look like one that prints gets its code point. It comes before PostGrid
+checks the addresses, before any picture is downloaded, and before a draft is made.
+
 The preview response includes a `draftId`. Sending is a separate, explicit tool call requiring `confirm: true`.
+
+## Who Can Send: the Send Rule (#470)
+
+With `LETTER_IRL_SEND_CONFIRMATION_ENABLED` on, only the person can finish a
+send. The model can't, in any app. There are three ways to send:
+
+- **The card's Send button.** `send_letter` and `send_postcard` are card-only:
+  - They carry `_meta.ui.visibility: ["app"]` and `openai/visibility: "private"`, so an app that honours them keeps the tools away from its model.
+  - They also carry `anthropic/requiresUserInteraction: true`. Claude Code's MCP documentation describes this as prompting before every call. It is a hint only: Claude Code is protected by its profile, which gets the link.
+  - They stay callable by the card, which sends when the person presses Send.
+- **A confirmation link.** `request_send` returns `<website>/confirm/<draftId>`:
+  - There the person, signed in, sees the preview and the cost, and presses Send.
+  - Nothing is sent by the tool. It is read-only and needs only `mail:draft`.
+  - Its link text says nothing is sent until the person presses Send. For a preview with an arrival date (#535), it also says when, once sent, the mail goes to the printer and aims to arrive, and the answer carries the preview's `schedule`. A preview whose mail date has passed (by the send's own rule: today until noon New York time on a business day) is refused with `SCHEDULE_PASSED` instead of a link the page would refuse.
+- **The card's Pay & Send button, in ChatGPT only.** `create_mail_checkout` is card-only too (#475): the person sees the card, and the mail is sent when they pay. It was model-callable in ChatGPT until launch. But Codex also reaches Letter IRL through ChatGPT's own connection, where the server sees ChatGPT and no card shows the preview, and the server cannot tell the two apart. It is listed only for an app that takes purchases (the profile's `inAppPurchases`, ChatGPT today), where the card is its only caller. The server also answers it with the link, not a checkout, from any app that takes no purchases, shows no card, or can't keep card-only tools from its model. No app reaches that answer today: it guards a future profile.
+
+**Where the rule is enforced.** Hiding a tool is the app's side of the rule. The
+server enforces its own side by the calling app's profile
+(`src/auth/clientProfiles.ts`, #473):
+- **Apps that honour card-only tools** (ChatGPT, and Claude since CLIENT-01
+  step 11 showed its model does not have them, #474): a send tool call sends as
+  before.
+- **Every other caller:** a personal access token, an app with no card, or an
+  app we do not know. A send tool call, and a Pay & Send call from an app that
+  may not take a purchase:
+  - sends nothing;
+  - is authorized as `request_send` is, so a read-and-draft token gets the link
+    and not a scope error;
+  - answers with an error result carrying the link. A preview card that gets
+    this answer to its own Send offers the page in place of Send
+    ([ui-widgets.md](ui-widgets.md)).
+
+**Model-facing text.** While the rule is on:
+- every preview's text ends with how the person sends it, including the draft
+  id. Where our card shows, it points to the card's Send button, or in ChatGPT
+  to its Pay & Send button when the card offers that instead (the balance
+  can't pay and Pay & Send is on); elsewhere, to `request_send`;
+- the four preview tools' descriptions end the same way, without the draft id:
+  the card's Send where our card shows, `request_send`'s link elsewhere. They no
+  longer name `send_letter` or `send_postcard`. Claude Code's model sees
+  neither: it hides card-only tools, and the server still registers both and
+  answers a call with the link. That model reads the descriptions but not the
+  preview's text (#516);
+- where a send tool call answers with the link (every app without
+  `honorsCardOnlyTools`), `send_letter`'s and `send_postcard`'s own
+  descriptions say a call answers with the link to the page where the person
+  sends it, and name `request_send`. ChatGPT and Claude keep these tools from
+  the model, and they keep their own words there (#516, steering r20). The sentences
+  that said what a tool does not do to mail or money ("This does not send
+  mail", "Nothing is sent by this tool") were removed, since ChatGPT flagged
+  them as steering its risk rating, and a test keeps them out; new words follow
+  the style guide, by review (#543, #670, steering r50);
+- the server instructions say the model cannot send, and that the card or the
+  page offers another copy of mail sent recently. They name no checkout to
+  repeat, since the model cannot start Pay & Send;
+- `create_pack_checkout`'s description points to the card's Pay & Send for
+  paying for one draft. Buying a pack sends nothing, so the model may still
+  start one.
+
+**The confirmation page's API** is `GET` and `POST` `/api/sends/:draftId`
+(`src/api/sendConfirmationApiHandler.ts`). It accepts only a token issued to the
+website's own Auth0 application (`LETTER_IRL_WEBSITE_CLIENT_ID`). REST accepts
+the MCP audience, so without that check a local agent could read its own token
+and press Send itself. The check holds only while the website's application
+can get tokens by nothing but a person signing in: it must stay a confidential
+client with the `authorization_code` and `refresh_token` grants alone (see
+[auth0-tenant-configuration.md](auth0-tenant-configuration.md)). A change to its
+grants is a change to the send rule. The `GET` names what the page shows: the
+preview, the addresses, the cost and the balance; a letter's `stationery`
+(#563); and a postcard's `postcard`, its `size` in PostGrid's naming (`6x4` is
+the 4x6) and its front (`layout`, with its `caption` or `place`) as the print
+reads them: only for a postcard drawn as `pdf-3`, the photo alone otherwise
+(#594). For a front the print cannot read, `postcard` is left out, size and
+all. A letter our renderer drew carries `envelopeReveal: true` while the
+envelope reveal is on (#576, [ui-widgets.md](ui-widgets.md)). The `POST`:
+- runs the same service as the tools, below, so every check applies, the content version the `GET` gave included ([What the Person Saw](#what-the-person-saw-695));
+- rewords the service's refusals for the page.
+
+**Mail no pack pays for (#579)** is paid on the page with Pay & Send:
+- `GET` marks it `packPays: false` and, while the draft is ready, gives its `payment`: the quote's Pay & Send (`available`, the amount and its display, or why not now), its price resolved first. For a letter of more than one page (#586) it also gives `pages`, which no pack pays for; the page keys on `packPays`, not on `lettersRequired`.
+- `POST /api/sends/:draftId/checkout`, the website's alone like the rest and `mail:send` like `create_mail_checkout`, opens the Stripe checkout (`createJitCheckout`). It returns to the page: `?paid=1` when paid, `?paid=0` when turned back. The order records those addresses, so a retry from the page reuses the page's own sessionless order, and a sessionless one an app began is replaced. An order with a Stripe session already open is reused as it is, wherever that session returns: one session, one charge, and the paid webhook sends the mail either way.
+- Paying sends the mail, as everywhere else; the route itself sends nothing. Its refusals are worded for the page (`checkoutRefusalFor`), and `{ sendAnotherCopy: true }` buys another copy, as the send's body does.
+
+**Rollout.** The rule is off by default in development and test. Production refuses to start without it (`send_confirmation.required`, #730), and with it needs `LETTER_IRL_WEBSITE_CLIENT_ID`. It was turned on in development once:
+- the website's confirmation page is live (website #39);
+- the ChatGPT DEV regression pass has run with it on. It includes asking the model to send a preview: it must point to the card's Send button, or give the link, and never reach `send_letter` itself. Since #475 it also includes asking it to pay for one: it must point to the card's Pay & Send, and never reach `create_mail_checkout`, while the card's button still opens a checkout;
+- the development log shows ChatGPT's tokens resolving to the `chatgpt` profile.
+
+**Where it stands.**
+- **Development:** on since 2026-09-25, with all three conditions met. SEND-01 passed there ([manual-tests.md](manual-tests.md)).
+- **Production:** required since #730: the promotion that carries it does not start until it is on.
+  - **Before that promotion:**
+    - promote the website first this time, with its confirmation page (website #39, #41). Its calls to `/api/sends` fail against the older API until the API's promotion lands, which is harmless, since nothing links to the page until `request_send` is live;
+    - set and apply `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` and `LETTER_IRL_WEBSITE_CLIENT_ID` (the production website's client id; the website's token page needs it too, #730) on the production API, as [deployment.md](deployment.md)'s first step says for every preflight gap. The build production runs before that promotion has no send rule and ignores both;
+    - confirm `LETTER_IRL_IMAGE_GEN_MODE=off` on the production API, as the checked-in manifest assumes (24 tools).
+  - **After it:**
+    - refresh the production connector;
+    - make a production send from the card and from the page.
+
+A Pay & Send checkout opened before the switch still mails when the person
+pays, for as long as the checkout lasts: at most the draft's 24 hours. The
+person's own payment for that exact mail is the trigger, so this is expected,
+not a gap.
 
 ## Confirmed Send Transaction
 
 `send_letter` and `send_postcard` call the same atomic service. Inside one PostgreSQL transaction the service:
 
-1. selects the draft `FOR UPDATE`;
-2. validates ownership, mail type, state, and expiry;
+1. selects the draft `FOR NO KEY UPDATE` (#730: a foreign-key check on the draft is not blocked by it, [acid-transaction-standard.md](acid-transaction-standard.md));
+2. validates ownership, mail type, state, and expiry, and for a draft with an arrival date that its mail date has not passed (below);
 3. returns the existing order if the draft was already consumed;
 4. inserts the Letter IRL order;
-5. locks and deducts prepaid sends from the user's ledger;
-6. marks the draft consumed and links it to the order;
-7. inserts one `letter_jobs` outbox row;
-8. commits.
+5. locks and deducts prepaid sends from the user's ledger, or, for a draft previewed as a gift send, uses one gift letter under the same account lock and decides its card ([Gift Letters](gift-letters.md)). Neither pays for mail other than a one-page letter or a 6x9 postcard: such a draft is refused with `PACK_CANNOT_PAY` before any value moves, and is paid per send with Pay & Send (#579, [Pricing](pricing-and-credits.md));
+6. checks the daily caps (and, for a gift send, the daily gift budget), each counted under its own lock held to the commit, so two sends cannot both take the last place, and with open Pay & Send checkouts counted as the letters they will become until their checkout expires (#730); then refuses the same mail sent recently (below), unless the caller asked for another copy;
+7. marks the draft consumed and links it to the order;
+8. inserts one `letter_jobs` outbox row, due at once, or for held mail at 09:00 New York time on its mail date;
+9. commits.
 
 Any error rolls back every effect. An insufficient balance therefore creates no order, consumes no draft, inserts no job, and deducts no sends.
 
 Database constraints enforce one outbox row and one stable idempotency key per letter. Concurrent calls serialize on the draft lock, so the second call returns the first order.
+
+**Held mail (#535).** A draft can carry the date its mail should arrive by and the date it goes to the printer (`arrive_by` and `mail_on`, migration 040). The mail date is worked back from the arrival date by a lead time of business days, by `src/services/deliverySchedule.ts`.
+- **The preview sets them**, from the four preview tools' optional `arriveBy` (YYYY-MM-DD, `src/tools/arriveByInput.ts`).
+  - **Only while `LETTER_IRL_ARRIVE_BY_ENABLED` is on:** the served schemas, and `/manifest.json`, include `arriveBy` only then (`getServedInputSchema`, read at each registration).
+    - While the flag is off, the four previews are served as objects that pass unknown fields through, not the SDK's default strip. So an app that cached the field and passes it anyway reaches the preview, which refuses it ("Arrival dates are not available yet…") instead of mailing at once.
+    - An empty `arriveBy` counts as none.
+  - **Checked first**, before any picture is fetched or address validated, against the lead time (`LETTER_IRL_SCHEDULE_LEAD_DAYS`, default 7 business days; development may set 0, production refuses less than 3) and the horizon (`LETTER_IRL_SCHEDULE_HORIZON_DAYS`, default 60 days, and at most 60, the limit the privacy policy is to state for held mail, #701).
+  - **A date it cannot meet** is refused with the dates on offer: "The earliest this can arrive is Tue, Oct 13 (2026-10-13)…", "The latest arrival date on offer is…", "arriveBy must be a date written YYYY-MM-DD…", or "Arrival dates cannot be scheduled right now…".
+  - **A held preview's output** carries `schedule` (`arriveBy`, `mailOn`, `releasesAt`, `earliestArrival`, `latestArrival`). Its `deliveryEstimate`, which the cards show, reads "Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16." The narration says it is held until then and that USPS does not guarantee First-Class dates.
+  - **Every preview's output** carries `arrivalWindow` (`earliestArrival`, `latestArrival`) while the flag is on, with a date or without, so a card can offer the dates before one is chosen (`previewArrivalWindow`). They are the dates a held preview is checked against. The field is left out while the flag is off, and when no date can be scheduled.
+- **`set_arrival_date` moves them** (`src/tools/setArrivalDate.ts`), listed only while the flag is on: it sets, moves or clears a draft's dates without previewing again.
+  - **The date is checked first**, as the previews check theirs, and refused in the same words. Left out, or empty, it clears the dates, and the mail goes to the printer as soon as it is sent.
+  - **One transaction** (`setDraftSchedule`, `src/services/draftService.ts`) locks the draft row first, as the send and the Pay & Send checkout lock it before they read its dates. So they run one after the other: a send or checkout that goes first leaves the change refused, and one that goes second reads the new dates.
+  - **It changes only** a draft that is the caller's, pending, unexpired and not emptied by an erasure, with no live Pay & Send order (any status in `ACTIVE_JIT_STATUSES`, but a checkout whose window has passed). Payment sends the mail with the dates the draft has, so they do not move under it.
+  - **Its refusals** say what to do next: the preview was not found, has already been sent (`list_orders` shows it), has expired (the preview tools take `arriveBy` themselves), or is tied to a Pay & Send payment.
+  - **Annotations:** not read-only, not destructive (a draft sends nothing and expires on its own), and idempotent.
+  - **The cards may call it** (`openai/widgetAccessible`, MCP Apps' `ui.widgetAccessible`), and so may the model. `cancel_scheduled_mail` is the same. A result a card gets this way is the card's alone: the model does not see it ([ui-widgets.md](ui-widgets.md)).
+  - **The cards' Arrives row** calls it with the draft, and **Cancel** on mail sent with a date calls `cancel_scheduled_mail` ([ui-widgets.md](ui-widgets.md)).
+- **The hold:** the send copies both dates to the letter and creates its job with `next_attempt_at` at 09:00 New York time on the mail date. `scheduled_at` records the same moment, written as a timestamp without a zone in the database session's zone. Value moves at the send, as for any letter: sends, a gift letter or a paid order.
+  - The claim takes a job only once `next_attempt_at` has passed. So neither the inline dispatch right after the send nor the hourly run touches it before then, and the first hourly run after 09:00 sends it to PostGrid as an ordinary order. No PostGrid `sendDate` is used.
+  - **What the send and the order status say** (`src/tools/heldSend.ts`, `src/store/fileAccountStore.ts`): the send's answer carries `schedule` and `cancellable`, and while the mail waits its status is `scheduled`, with "Scheduled: Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16. It can be cancelled free until then." in place of "Queued for the print provider". `get_order_status` and `list_orders` say the same, from the letter's `arrive_by`, `mail_on`, `status` and `funding_type`; Pay & Send held mail is `scheduled` but not `cancellable` ([status-labels.md](status-labels.md)).
+- **Cancelling held mail** (`src/services/scheduledMailService.ts`): free until it goes to the printer. It is reached through `cancel_scheduled_mail { orderId, confirm: true }`, listed only while the flag is on, and through `POST /api/letters/:letterId/cancel` for the website, whatever the flag (scope `mail:draft`).
+  - **What can be cancelled:** the caller's letter with a mail date, still `queued`, whose job is `pending` and `not_dispatched`. That includes a letter past 09:00 on its mail date that the hourly run has not yet taken. Nothing outside Letter IRL is involved, since PostGrid has never seen it.
+  - **One transaction, in the outbox's lock order:**
+    - the letter (`FOR UPDATE`, which waits: its other holders are short, and a second cancel then finds it cancelled);
+    - its job (`FOR UPDATE NOWAIT`: the one holder of a job without its letter is the claim taking it to the printer, so a conflict answers "going to the printer right now");
+    - the account last, inside the return.
+  - **It writes:** the job and the letter `cancelled` (the job's `last_error` `cancelled_by_customer`), and a `letter_status_history` row with source `customer`.
+  - **What goes back:**
+    - a prepaid letter's credits, through `returnConsumedCreditsForLetter`, on lots that keep their expiry. The answer counts them in letters (two credits each), never credits, and only those still usable. Credits whose lot ran out while the mail was held go back on record as `expired`, so they are never returned twice. They are left out of the cached balance and the account's history, which the ledger would not spend, and the answer says so;
+    - a gift letter, through `returnGiftLetterForFailedSendWithClient`, its printed code voided as `send_cancelled`. Like credits, it keeps its own expiry (#683), where a refused send's gift gets a fresh lifetime: one that ran out while the mail was held comes back expired, is not counted, and the answer says so.
+    - Both use the failed send's exactly-once records (reason or source `send_failed`), so a replay returns nothing and the operator's retry guard (`isLetterAlreadyCompensated`) counts a cancel. `failure_code` and the descriptions say it was cancelled.
+  - **Refused**, where it is checked first so each answer is true of it (a letter a refund cancelled is already cancelled; printed mail is too late, whatever paid for it):
+    - someone else's or a missing letter, as not found;
+    - mail with no date;
+    - mail the outbox has taken, or that failed;
+    - Pay & Send, whose refunds a person decides (support@letterirl.com).
+  - **A repeat** answers as already cancelled, and nothing more goes back.
+  - **Cancelled letters free the duplicate guard**, so the same mail can be sent again.
+  - **Its content goes on the unpaid schedule (#701).** It was never printed, so the retention sweep (`purgeCancelledHeldLetterContent`, `src/services/retentionService.ts`) removes it 4 days after the customer's cancel, into the usual quarantine for 3 more, rather than 90 days after it was created. The clock is the cancel's `letter_status_history` row with source `customer`. An operator's cancel of mail held for its funding (#696) keeps the letter schedule, since it may be evidence in a dispute; so does a customer's cancel of mail whose pack was refunded or disputed, through the letter schedule's holds on the money. Those holds judge the credits that paid by the lot that first paid (#729): credits a cancel or a failed send gave back are a new lot with no order, linked to the lot they restore, and the sweeps follow that link (through returns of returns) to the pack and its order, so a letter sent again with them is no longer held back for good. The sent draft of any cancelled held letter, whoever cancelled it, is deleted 4 days after the cancel, however recently it was sent, rather than 7 days after the mail date or the send (`cleanupOldDrafts`, #730: at 7, the daily sweep could keep it past the letter's own copy); the letter keeps its content on its own schedule.
+  - **Only the claim that holds a job acts on it (#730).** The dispatch marker and the failure-before-dispatch path each require the job to be `processing` at the attempts its claim set: a claim adds one, a put-back takes one away and leaves it pending. So a claimant that stalled past its lock, and lost the job to a cancel, a refund, another claim or a put-back, neither marks it, returns it to pending, nor walks its letter back to queued; it reports no retry.
+- **What the website sees** (`src/api/letterApiHandler.ts`, `src/api/sendConfirmationApiHandler.ts`):
+  - `GET /api/letters` and `GET /api/letters/:letterId` give each letter:
+    - `arriveBy` and `mailOn`, null without dates (dates it cannot read are left out);
+    - `scheduled`: still `queued`, waiting for its mail date;
+    - `cancellable`: scheduled, and not Pay & Send;
+    - `mailService`: `standard`, `certified` or `certified_return_receipt` (#625), or null for text it does not know;
+    - `carrierTrackingNumber` and `carrierTrackingUrl`: USPS's number for certified mail and the USPS page that shows it, null until the status sync has stored the number (a number of the wrong shape is never shown). `trackingNumber` stays the printer's id for the letter, not a carrier number.
+
+    The list's `status` filter takes every letter status, and `scheduled` for that waiting mail. It used to refuse `accepted`, `in_transit`, `delivered`, `returned` and `held`.
+  - `POST /api/letters/:letterId/cancel` answers `letterId`, as the letters routes do. A refusal carries its reason as `code`, which the website's API client reads, and as `error`.
+  - The confirmation page's API:
+    - `GET /api/sends/:draftId` gives the draft's `schedule` (null without dates);
+    - and its `stationery` (#563): a themed draft's theme, date line, initials and headline, read as the print reads them (`stationeryOf`), or null for Classic, a legacy preview, or a theme the print would refuse;
+    - and a postcard's `postcard` (#594): its `size` in PostGrid's naming (`6x4` is the 4x6, `6x11` the 11x6) and its front as the print reads it, left out for a letter or for a front the print cannot read;
+    - its `POST` answers a dated send with `schedule`, `scheduled` and `cancellable`, as the send tools do. `scheduled` is true while its job is held past now. A hand-off that throws does not change that, since such a job cannot have been taken.
+- **Sending held mail early:** the admin panel's **Send held mail now** (`job.dispatch_now`, `releaseHeldLetterJobAsAdmin` in `src/services/letterJobService.ts`) makes a held letter's job due at once, so the next hourly run sends it ([Admin Panel](admin-panel-guide.md)).
+  - **Only mail still held:** the job held (`heldMailJobSql` in `src/services/heldMail.ts`: `pending`, `not_dispatched`, never attempted, carrying `mail_hold_until` (migration 055, #693) and not yet due by the database's clock); the letter `queued`; a Pay & Send letter's order still `fulfillment_pending`. It locks the order, the letter and the job, in the outbox's order.
+  - **What moves:** `next_attempt_at` and `scheduled_at`, to now. `mail_hold_until` keeps the original time, so the stuck-order condition below counts its grace from the later of the two. The stuck-order condition also reads the job's next attempt and attempts, so a released Pay & Send order that has not gone is called stuck 90 minutes after its release, or as soon as a first attempt fails.
+  - **The record:** a `commerce_operator_audit_events` row, `mail_job_release` (migration 042), with the hold that ended and the operator's reason hashed. A replay with the same key returns the first outcome.
+  - The customer can still cancel the letter until the run takes it.
+- **A passed mail date:** today counts as a mail date until noon New York time on a business day, so a draft previewed before the cutoff and sent after it has missed its date.
+  - A prepaid or gift send is then refused with `SCHEDULE_PASSED`, before anything is written: "The day this letter was to go to the printer has passed…". The person previews again with a new date.
+  - A Pay & Send checkout refuses such a draft before the charge, unless its session is already open (#700). A paid order whose date passes before fulfilment mails as soon as it can instead, logging `send.schedule_missed`, because refusing after the charge would strand the money.
+  - **The person is told (#700).** That fulfilment, from the webhook or the hourly recovery, records the order event `jit.schedule_missed` with the two dates, in its own savepoint: an event that cannot be written is logged (`commerce.schedule_missed_event_failed`) and never fails the fulfilment. While the order is being prepared or is with the printer, `get_purchase_status` adds to its message: "Its payment was confirmed too late for it to go to the printer in time to arrive by Fri, Oct 16, so it goes to the printer as soon as it can instead, and may arrive after that date."
+- **Room on a mail date (#700).** At most `LETTER_IRL_SCHEDULE_DAILY_CAP` letters (default 200, across every account) may wait at once for one mail date: letters still `queued` with that `mail_on`, counted on `idx_letters_held_mail_on` (`src/services/mailDateCapacity.ts`). A letter leaves the count once the outbox takes it or it is cancelled, so on the mail date itself, after the 09:00 run, the date has room again until the noon cutoff; mail sent then is due at once. A draft holds no place.
+  - **The preview tools and `set_arrival_date`** refuse a full date after their other checks (`previewScheduleWithRoom`), naming the nearest arrival dates on offer whose mail dates have room, one per mail date (its first arrival date, ranked by its nearest), at most three: "Mail to arrive by Fri, Oct 16 (2026-10-16) is fully booked. The nearest arrival dates with room are… Choose one of those, or no date to mail as soon as possible."
+  - **A prepaid or gift send** counts again under a transaction-scoped lock on the date, taken after the draft's lock and the open-checkout check, and before the account's, so two sends cannot both take a date's last place. A full date refuses with `SCHEDULE_FULL` before anything is written, carrying the open dates: the send tools say to choose another arrival date or none; the send page answers `409 schedule_full` and says to choose another date in the chat. A draft with an open Pay & Send checkout is refused for that first, as before.
+  - **`request_send`** refuses a full date as it refuses a passed one, by a plain count, so no link promises a send the page would refuse.
+  - **A Pay & Send checkout** refuses a full date, or a passed one, before the charge, by a plain count, only where it would open a new Stripe session: no order yet, or one whose session was never made. An open session, and an order paid or further on, are returned as before: refusing would change nothing, since a session can still be paid, and could tell someone who has just paid to buy again. A session holds no place on its date, so its paid fulfilment can take the date over the cap; one whose date has passed mails as soon as it can and says so. Its paid fulfilment is never refused for one: it has been charged, so a date that filled since takes it over the cap.
+    - **An order whose session was never made is cancelled by the refusal (#726).** Such an order exists only after a Stripe call that failed, and it would hold the draft until its window ended (up to about 40 minutes), so the refusal's advice, another date, could not be followed: `set_arrival_date` and a prepaid send refuse a draft with a pending checkout. Nothing was paid on it, so the refusal cancels it (`SCHEDULE_PASSED` or `SCHEDULE_FULL` as its last error, order event `checkout.schedule_refused`) and commits that before it is raised.
+    - **An open session whose date has passed is said before payment (#726).** It is handed back marked `scheduleMissed` (the two dates) while it is still `checkout_pending`. `create_mail_checkout` adds to its message that the day to go to the printer has passed, that paid it goes as soon as it can and may arrive late, and to tell the person before they pay. The send page's checkout answer carries the same mark, and the website then shows that sentence with **Pay anyway** and **Don't pay** instead of opening Stripe. The preview cards show it in place of the checkout note and do not open Stripe themselves: the person opens it from the checkout link.
+    - **And while it waits.** `get_purchase_status` marks such an order the same way (`scheduleMissed`, and a sentence for the model), while it can still be paid: a session open and its window not over. The preview cards poll it, so a card left open past the cutoff, or reopened after it from its kept checkout link, shows the note too, and puts it away once the order is paid or closed.
+  - **The words** suit a person and a model alike, since the cards show them: "Choose one of those, or no date to mail as soon as possible."
+- **An account erasure** cancels prepaid and gift mail still waiting for its mail date, with nothing returned, once nothing else holds the account back ([Account Erasure](account-erasure.md)). Held mail that is due, and held Pay & Send mail, hold the erasure back until they mail.
+- **A held gift letter** decides its card as of the moment it goes to the printer. A seed campaign that will have ended by then does not print its code, and a chain code's 90 days count from then ([Gift Letters](gift-letters.md)).
+- **DATE columns** are read as 'YYYY-MM-DD' strings (`src/db/dateParser.ts`). A draft whose dates are anything else is refused rather than read as some day.
+
+## What the Person Saw (#695)
+
+A send names a draft by its id, and a draft can change after the person saw it: `set_letter_words`, `set_stationery`, `set_letter_signature`, `set_arrival_date`, `set_mail_service` and `set_postcard_style` all change it in place, from the chat or from the card. So every reader of a draft gives its **content version**, and the send and the Pay & Send checkout take it back.
+
+- **What it is.** `contentVersionOf` in [contentVersion.ts](../src/services/contentVersion.ts): 16 hex characters of a SHA-256 over every column an in-place edit can change and every one that decides delivery, read from the stored row. These are the words and pages; the stationery, its design included; the signature, header, inline and front pictures, by their hash; the mail service and both dates; a postcard's size and front; both addresses; the layout; whether it is a gift letter; and the renderer. It does not cover the preview's HTML, which is drawn from these, the pictures' source addresses, which no edit changes, or the price. A new in-place editor must add any column it writes that the version does not cover.
+- **Who gives it.** Every preview (`contentVersion` on its answer), every in-place editor (the version it wrote, and the version it was made to as `contentVersionBefore`, both read in its own transaction under its lock), `get_draft_status` while the draft is ready, and the confirmation page's `GET /api/sends/:draftId`. The editors and `get_draft_status` read the pictures' hashes from the database (`encode(sha256(convert_to(x, 'UTF8')), 'hex')`); the send, the checkout and the page hash the pictures they read. The two agree, which `signatureDrafts.postgres.test.ts` proves against a real database, characters beyond ASCII included.
+- **Who takes it.** `send_letter`, `send_postcard` and `create_mail_checkout` take an optional `contentVersion`, and the page's `POST /api/sends/:draftId` and `/checkout` take it in their body; a body's `contentVersion` that is not a string is refused (`400 invalid_content_version`). The send compares it under the draft's lock, before any letter is spent. The checkout compares it under the same lock, before any order or Stripe session. The paid fulfilment does not compare again: the order holds the draft from its checkout on. No editor changes a draft while its Pay & Send order is live, and a checkout whose Stripe session has opened counts as live until Stripe closes it (its expiry webhook or the hourly sweep cancels the order), whatever our own window says (`lockChangeableDraft`).
+- **A version that differs** is refused with `DRAFT_CHANGED_SINCE_SHOWN`, nothing sent or charged. The tools say to show the person the mail as it is now and send once they have seen it. The page answers `409 changed_since_shown` and asks the person to refresh.
+- **The cards** send the version of what they show, and draw the mail again when it is refused ([ui-widgets.md](ui-widgets.md)).
+- **No version**, for one release, is let through and logged (`send.content_version_missing`, `checkout.content_version_missing`), while the cards and the confirmation page come to send it. A later change makes it required.
+
+## The Same Mail Twice
+
+Each draft is sent at most once, but two drafts can hold the same mail. On ChatGPT web a preview call approved with "Allow once" can finish late, after the preview card has made its own draft (#411). If the person sends one draft from the card and confirms the other in the chat, two identical letters are mailed and paid for (#412).
+
+So a send from balance, and a new Pay & Send checkout, is refused when the account has the same mail from the last 24 hours (a draft's whole lifetime), unless the call passes `sendAnotherCopy: true`. The check lives in `src/services/duplicateMailService.ts`.
+
+- **The same mail.** Every one of these matches, ignoring capitalization and runs of whitespace:
+  - the kind (letter or postcard), and the letter's layout or the postcard's size;
+  - the recipient's name and full address, and the return address;
+  - the body and sign-off, or the postcard message;
+  - the printed image, compared by the MD5 of the processed image data rather than by its link, because the two drafts can reach one picture through different links.
+- **Already out.** Any of these counts:
+  - mail created from the account, unless it failed or was cancelled;
+  - a Pay & Send order that is paid but not yet mail;
+  - a Pay & Send checkout that is still open.
+- **Where it runs.**
+  - For a send from balance, the check runs after the deduction, beside the daily caps. The account row is already locked there, so two sends from one account cannot both pass. A refusal rolls the send back.
+  - For Pay & Send, it runs in `prepareJitOrder` as the last step before a new order is inserted, before any Stripe session exists.
+    - An order handed back for the same draft is not checked again, because nothing new is bought: it is the same order at the same price. That covers an order with a Stripe session, and a sessionless one whose retry would send Stripe the same request, which gets a fresh session for the same order. It also covers an order past checkout: paid, being refunded, disputed or held.
+    - A sessionless order being replaced is checked. That happens when it is too near expiry for Stripe, when it was priced before a price change (a different amount, or a different Stripe Price at the same amount), or when its return URLs have moved with their configuration (#279). A refusal also rolls back that order's cancellation.
+    - This check is a best-effort net. Checkouts for two identical drafts lock different rows, so two made at the same moment can both pass.
+  - Pay & Send fulfilment, which runs after the customer has paid, is never checked.
+- **The refusal.** It is an MCP error result whose text starts with `Possible duplicate:`. The text tells the model what went out, when, and to ask the user before repeating the call with `sendAnotherCopy: true`. `_meta["letterirl/duplicateMail"]` carries `{kind, mailType, recipientName, ageMinutes}` for the preview cards, which say what went out and turn the button into **Send another copy** or **Pay for another copy**. On ChatGPT web a refused call reaches the card without `_meta`, so the cards recognise the refusal by its text and show a shorter notice ([ui-widgets.md](ui-widgets.md)).
 
 ## Immediate Provider Submission
 
@@ -43,6 +284,252 @@ A **Pay & Send** order takes a different route to the same outbox: the verified 
 consumes the draft and inserts the letter and its outbox row in one transaction, and nothing submits
 it in that request. The next hourly maintenance run does, so a paid item can wait up to an hour for
 provider acceptance. The PostGrid request uses the Letter IRL `letter_id` as `Idempotency-Key`.
+
+**How a letter goes to PostGrid (#534).** A letter prints with the renderer its preview was drawn with, recorded on the draft (`renderer_version`, migration 039) and copied into `letters.content.rendererVersion` at send:
+- without a version, as today's HTML;
+- with `pdf-1`, as our own PDF from `src/render`, uploaded as a multipart form with a 30-second budget;
+- with `pdf-2`, the same, in the stationery the preview was drawn in (`letters.content.stationery`, #563). A `pdf-2` letter whose stored stationery this build cannot read is refused (`render`), never printed as Classic.
+- a letter of more than one page (#586) also carries its page count, from the draft (migration 047): `letters.content.pages`, written only when above one.
+
+A `pdf-1` gift send prints its card as the PDF's second page, drawn by the renderer with the code the send minted (`letters.content.giftCard`). When our renderer refuses a letter before any request, it is held like any other failure that is not an explicit rejection, with the class `render_refused`. That happens for a version this build cannot print, an unreadable image, a letter that no longer fits its page or pages, a gift card it cannot lay out, or stationery it cannot read or fit. Every version the database admits must be in `PRINTABLE_RENDERER_VERSIONS`, which a test checks, so a new renderer never strands letters waiting under an older one. Resolving such a hold is in [deployment.md](deployment.md).
+
+**Held mail prints as previewed (#697, decision D3).** Mail held for its mail date (#535) waits up to the schedule's horizon, and a renderer, font or layout rule deployed meanwhile could move its line breaks. So, for mail our renderer draws (`content.rendererVersion` set) and held past the send (its release after now):
+- **In the send's transaction**, `recordHeldPrintWithClient` (`src/services/heldPrintService.ts`) lays the mail out as the print will (`src/services/printDocument.ts`, from the same params the outbox builds) and records `letters.print_layout_fingerprint` (`src/render/fingerprint.ts`: the layout, the renderer version, the layout engine's version and the fonts' bytes) and `print_layout_engine` (`LAYOUT_ENGINE_VERSION`). Under a savepoint: a failed write never refuses the send, and mail it cannot lay out is left unrecorded and prints, or is held, as before.
+- **After the commit**, `createMailOrderFromDraft` calls `storeHeldPrint`: it draws the PDF, stores it in the private bucket at `held-pdf/<letter_id>.pdf`, and only then records its SHA-256 in `print_pdf_sha256`, for a letter still queued, unredacted and laid out as recorded. A letter that stopped waiting meanwhile has its object deleted again. It never throws. Pay & Send's fulfilment commits elsewhere, so its held letters are stored by the hourly backfill.
+- **At the print**, the outbox reads the stored PDF before the dispatch marker (a store that cannot be read counts as none) and hands it to the provider only when its bytes hash to the recorded SHA-256 (`src/services/heldPrintPdf.ts`). PostGrid uploads those bytes as they are. Without them it lays the mail out again, and holds mail whose fingerprint differs as `render_refused` (`layout_changed`), or whose fingerprint is of a scheme this build cannot compare as `unknown_version`.
+- **Afterwards**, the PDF is deleted once the provider has accepted the mail, after a cancel, and by the hourly sweep (`sweepHeldPdfs`), which keeps an object only while its letter is `queued`, `processing` or `held`, unredacted and recording a PDF, and never one younger than 15 minutes. That covers erasure, retention, a definite rejection and an operator's cancel. Retention and erasure clear the three columns with the content they derive from.
+- **The backfill** (`backfillHeldPrints`, every maintenance run): a held letter with a fingerprint and no PDF, sent more than 15 minutes ago and due more than 15 minutes from now, is stored as at the send; one that now lays out otherwise is logged (`held_print.layout_changed`, an error) while there is still time before its date, and so is one our renderer now refuses (`held_print.unprintable`). It stops at the first store that fails for another reason, a bucket or the database, for the next run to try again.
+
+The stored bytes are checked against the hash recorded when they were stored, never a re-render against them: the compressed streams depend on the bundled pdfkit and zlib, so another build may draw other bytes for the same layout. Resolving a `layout_changed` hold is in [deployment.md](deployment.md).
+
+**A letter of two or three pages (#586)** prints from our renderer only, on both sides of the paper. Its page count is copied into `letters.content.pages` at send, from the draft (migration 047), and only when above one.
+- The print lays it out as a preview does, on up to three pages, and holds it unless it takes exactly its page count. So it reproduces the preview by construction, a last line of invisible characters included. A letter that fits one page is laid out as ever. The Dummy provider, in development only, ignores the page count. DIY never receives one: the outbox refuses DIY any mail our renderer drew (`renderer_refused`, #698), and a letter of more than one page always is.
+- `doubleSided` follows the letter's own pages, never the PDF's. A gift letter is one page, and its card keeps a sheet of its own.
+- Before any request, the print refuses (`render_refused`, reason `pages`):
+  - a count outside 1 to 3;
+  - more than one page on the legacy HTML or beside a gift card.
+
+  A letter that now lays out on more or fewer pages than it was previewed on, or past three, is an `overflow`: its layout changed since the preview.
+- PostGrid's `pageCount` counts sides (probe P13). The cost estimate adds about 10c per page past the first, or 20c in colour, to the 10c for double-sided.
+
+**How a postcard goes to PostGrid (#534 Phase 4).** A postcard carries the same `rendererVersion` from its draft.
+- With `pdf-1`, it prints as our own two-page PDF, front then back, at its size with a 0.125 in bleed (#594): 9.25 x 6.25 in for a 6x9, 6.25 x 4.25 in for a 4x6 and 11.25 x 6.25 in for an 11x6. It is uploaded to `/postcards` as a multipart form with a 30-second budget.
+  - The front image covers the whole page.
+  - The message fills the left part of the back:
+    - a 6x9: its left half, 16 lines of 14 pt Tinos;
+    - a 4x6: its left 3.25 in, above USPS's barcode clear zone, 11 lines of 12 pt;
+    - an 11x6: its left 6 in, 16 lines of 14 pt.
+  - The rest stays empty for PostGrid's addresses and postage: content there cancels the postcard (probes P9 and P14, [postgrid-pdf-rendering.md](learnings/postgrid-pdf-rendering.md)).
+- With `pdf-3` (#594, migration 048), it prints as the same two-page PDF, its front drawn as the preview drew it from `letters.content.postcardFront`, which the send copies from the draft's `postcard_front`:
+  - a border: the photo cut to a box inside a white border, its caption below in Caveat;
+  - a greeting: the photo covering the page, "Greetings from" over it, and the place in capitals.
+
+  A front the print cannot read (`postcardFrontOf`) is refused (`render`), never printed full bleed. A caption or place that no longer fits is refused as an `overflow`.
+- A gift send's card prints in a strip 1.75 in tall at the foot of the message, drawn by the renderer with the code the send minted (`letters.content.giftCard`). The message keeps the 11 lines above it. A gift postcard is a 6x9 (#579), with any front.
+- Refusals hold the postcard as `render_refused`, as for letters. The postcard is held for:
+  - a version this build cannot print;
+  - an unreadable image;
+  - a message past its room on the back;
+  - a gift card whose words run past its strip;
+  - a gift card on any size but 6x9;
+  - a size no writer stores, on either path;
+  - a `pdf-3` front the print cannot read, or one whose caption or place no longer fits (#594).
+- With the flag, a postcard preview records `pdf-1` (below), or `pdf-3` with a front. The print's overflow refusal is then a backstop: the preview measured the same back and the same front. A 4x6 or 11x6 with no renderer version prints on the legacy HTML, as before.
+- **The 4x6 and 11x6 are offered only while `LETTER_IRL_POSTCARD_SIZES_ENABLED`, `LETTER_IRL_PRINT_RENDERER=pdf` and Pay & Send are all on (#594).** The legacy back is a 9 x 6 in page whatever the card, so the tool never previews either on it, and none it makes reaches the legacy print.
+  - The preview crops the front to the size, measures the back at its size, and stamps the addresses where PostGrid prints them on it. The draft keeps the size.
+  - A 4x6 or 11x6 is paid with Pay & Send at its own price (`jit-postcard-4x6`, `jit-postcard-11x6`), never from a pack or as a gift letter (#579).
+  - Off, the tool's `size` is served as before, the 6x9 alone. A size from a schema cached while it was on is refused by validation, and the preview itself refuses any other size.
+- **Postcard collages are offered only while `LETTER_IRL_POSTCARD_COLLAGES_ENABLED` is on (#616, `isPostcardCollagesOffered`).** The preview takes `images` or `imageUrls`, two to four photos (`src/tools/collageSources.ts`), and draws them as one JPEG at the postcard's size (`downloadAndProcessCollageWithPreview`).
+  - The draft stores that picture in `front_image_data` as a single photo's crop is, with no source address (`front_image_url` null), and records the front as any postcard's: with our renderer, full bleed (`pdf-1`) or a border or greeting over the collage (`pdf-3`); on the legacy HTML path, no version. Nothing in the send or the print knows it was a collage, so either print path prints it and a collage costs what a postcard costs.
+  - A collage keeps the size it was made at: `set_postcard_style` refuses another (`COLLAGE_SIZE`), since the photos are not kept and cropping the composite again would cut them. Its front can still change.
+  - Off, the two arguments are not served and one sent anyway is refused. A collage already previewed still prints: the send and the print read the draft's own picture, never the flag.
+- **The postcard layouts are offered only while `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` and `LETTER_IRL_PRINT_RENDERER=pdf` are both on (#594, `isPostcardLayoutsOffered`).** The legacy HTML draws the photo alone, so the tool never previews a front on it.
+  - The preview takes `layout` (`full_bleed`, the default, `border` or `greetings`), a `caption` for a border and a `place` for a greeting (`src/tools/postcardFrontInput.ts`). Each layout takes only its own line, and a greeting needs its place.
+  - It measures the line at the postcard's size with the print's own layout, and refuses one too long, saying about how many of its characters fit. Its characters are checked as the message's are, in the face the line prints in: the caption in Caveat, the place in Tinos capitals.
+  - The draft records the front in `postcard_front` with `pdf-3`, and full bleed records none with `pdf-1`: migration 048's checks keep the two together. The send copies the front into `letters.content.postcardFront`, and the print draws it (above).
+  - A gift postcard keeps its front, with its card on the back as ever. A layout does not change the price.
+  - Off, the three are not served, and the postcard is served open to unknown keys. So a front from a schema cached while they were on reaches the preview, which refuses it rather than printing the photo alone.
+- **`set_postcard_style` changes a postcard preview's size and front in place** (#594, `src/tools/setPostcardStyle.ts`). It is listed while the sizes or the layouts are offered, and the postcard maker on the card calls it.
+  - It checks a size and a front as the preview does, at the postcard's size. A kept front is measured again at a new size, and a message a smaller back cannot hold is refused. A gift postcard stays a 6x9.
+  - At the same size it draws the front again and keeps the back as it was, a gift card's strip with it.
+  - At a new size it crops the picture again and lays the back out at that size. The crop comes from the picture's source while that still opens and still holds the same picture: made at the old size, it must reproduce the stored copy byte for byte (#730). Otherwise it comes from the stored copy, which was cropped to the old size.
+  - `setDraftPostcardStyle` writes the size, the front, its version (`pdf-3` with a front, `pdf-1` without), the page and any picture cropped again. It does so in one `UPDATE`, under the lock a send and a Pay & Send checkout take. A preview that changed since it was read, under another restyle, refuses the write as `DRAFT_CHANGED`.
+  - It prices the postcard again: a 4x6 or 11x6 is paid with Pay & Send, and a 6x9 by a pack, as a preview prices it.
+
+**How a preview is drawn (#534).** With `LETTER_IRL_PRINT_RENDERER=pdf`, the three letter previews are drawn by `src/render`, from the layout the PDF prints from:
+- the page is laid out with the image that prints, and a letter that runs past it is refused with the count: "Letter is 2 lines too long for one page: it takes 28 lines and the page holds 26." A page holds 26 lines of text only, 16 under a full 2-inch header image, and 13 above a full 3-inch enclosed image;
+- the legacy character and line estimates, calibrated for Open Sans, give way to a cap of 10,000 characters for each page the letter may take (30,000 while room to write is offered, #586), which only bounds the work;
+- the text is checked against Tinos, the font it prints in, which draws more than Open Sans (the non-breaking hyphen, for one). A letter carrying more than four marks is refused, and so are controls, line and paragraph separators, private-use characters and any space Tinos would draw as a box, since the font maps some of them to a visible box. The addresses are still checked against Open Sans, which PostGrid stamps them in;
+- `preview_html` holds the page as SVG in a minimal HTML document, which the website's confirm page and the letter card show. The page carries the addresses where PostGrid stamps them, at 9pt in upper case, as sent. It asks for Open Sans, which no card or confirm page loads, so a viewer sees a sans-serif fallback, slightly narrower than the print. The PDF leaves the addresses to PostGrid;
+- the draft records `renderer_version = 'pdf-1'`, so the letter prints as it was previewed.
+
+**Pages after the first (#586, room to write).** `layoutLetter` can lay a letter out over up to three pages (`maxPages`).
+- A letter that fits one page is laid out exactly as before, whatever the limit; a golden test pins every layout and theme.
+- A longer one flows on. Pages 2 and 3 start 1 in from the top and hold 33 lines of Classic.
+- The theme's corner, date and headline, and a header image, stay on the first page. Handwritten rules every page.
+- An enclosed image follows the last line where it fits, or starts a page of its own; it is never split.
+- `pageFit` says how full the letter is, for the card's fit meter.
+- The previews lay letters out on more than one page only while room to write is offered (below).
+
+**A signature on a letter (#608).** `layoutLetter` takes the person's saved signature (`LetterContent.signature`: the picture, and the paragraph of the text that holds the sign-off's first line).
+- It draws the picture in a band three lines tall (`SIGNATURE_LINES`, 0.8 in) right after that line, left with the text, at most 2.5 in wide and never past CSS pixel size, with 3 pt of air above it and at least 3 pt below. "Sincerely,\nPat Example" prints the closing, the signature, then the name; a one-line sign-off gets it below.
+- The band counts as three lines, so the page fit, room to write and a letter's overflow all see it.
+- A page break never parts the band from the closing above it: when it would, the closing and the band start the next page (of a closing that wraps, its last line). A continuation page never drops the band as blank lines.
+- Handwritten's rules skip the band, as they skip an enclosed image.
+- Without a signature the page is exactly the page without one.
+- The letter previews pass the saved signature while signatures are offered: their `signature` argument, or the account's choice ([tool-apis.md](tool-apis.md#letter-drafts-and-sending)). `signatureParagraph` finds the closing's paragraph, past any blank line the sign-off begins with; the preview and the print both ask it.
+- The draft keeps its own copy (`letter_drafts.signature_image`, migration 051) and records renderer `pdf-4`, with or without a theme. The send copies it into `letters.content.signatureImage`.
+- The preview draws it from a smaller copy (#614, `withDisplaySignature` in `src/services/signatureDisplay.ts`): at most 480 pixels across, twice the band's widest CSS width, in one grey channel, as a PNG, in the same box, so the page is still the print's. The preview tools and the three redraws (`set_stationery`, `set_letter_words`, `set_letter_signature`) make it before drawing; `preview_html`, the card's `_meta.previewHtml` and `letters.preview_html` carry it, in less than half the stored copy's bytes (about 40% for 1200 px line art). A signature no wider is drawn as stored, and one that cannot be reduced is drawn as stored too (`preview.signature_display_failed`). It keeps its `data-role="signature"` mark, so it is never taken for the letter's picture.
+- The print draws a `pdf-4` letter with that copy. One whose content lost it, or holds one that cannot be read, is held as a render refusal, never printed unsigned; a `pdf-1` or `pdf-2` letter prints no signature whatever its content holds. A postcard recording `pdf-4` is refused.
+
+**Certified mail (#625, in progress).** The draft records how the letter travels (`letter_drafts.mail_service`, migration 052): `standard` (first-class mail), `certified` (USPS Certified Mail) or `certified_return_receipt` (with an electronic return receipt). Only a letter that is not a gift send is ever certified, and it is paid per send (#579): `draftMailOption` reads the service beside the pages, so the checkout, the confirmation page and the send price and refuse it by what the draft holds.
+- **The draft records it, and the previews set it (below).** `createDraft` stores the service (refusing a gift send or an unknown value first, `DRAFT_MAIL_SERVICE_INVALID`), `setDraftMailService` changes it under the draft lock a schedule change takes (so a live Pay & Send order holds the price), the checkout peek reads it, and the confirmation API names it when it is not standard.
+- **The send copies it to the letter.** `createMailOrderFromDraft` writes `letters.mail_service` (migration 053) from the draft, for a letter only: a postcard is standard, and the checks of 052 and 053 hold any writer to that. A pack or a gift letter never pays for it (`PACK_CANNOT_PAY`), and a Pay & Send order pays only for the product of the service the draft asks for (`JIT_PRODUCT_MISMATCH` otherwise), so a letter is never paid for as certified and mailed as standard.
+- **The dispatch hands it to the provider, and refuses what the provider cannot send.** `letterParams` passes `extraService` (one of the two PostGrid sells; standard passes none). A provider says it sells extra services with `supportsExtraServices` (PostGrid and the dummy do; manual fulfilment does not). Before anything is submitted, `extraServiceRefusal` turns a letter away when its service is text this code does not know, when the provider does not say it can sell services, or when it is a postcard.
+  - The refusal is a definite rejection, by the road every other one takes: the job and the letter fail, a Pay & Send order goes to `refund_pending` and a pack's credits come back. The operator's record is the data-free class `extra_service_refused` (in `letter_jobs.last_error`, `orders.last_error` and the `provider.terminal_failure` event, where a provider's own answer reads `provider_rejected http_<status>`); the cause is the log line `outbox.extra_service_refused` with a fixed `reason` (`unknown_service`, `provider_cannot_sell` or `postcard`).
+  - The providers refuse too, as a second line: PostGrid any service it does not sell (`provider.postgrid.extra_service_refused`), manual fulfilment any service at all. None of them reads `null`, the empty string or `standard` as a service.
+- **Mail our renderer drew goes only to a provider that prints it (#698).** A letter or postcard whose content records a `rendererVersion` is printed from the PDF the preview showed, so the dispatch sends it only to a provider that declares `printsRenderedPdf` (PostGrid, and Dummy, which prints nothing). Any other, such as manual fulfilment, gets a definite rejection before anything is submitted (`rendererRefusal` in `src/services/letterJobService.ts`, beside `extraServiceRefusal`): the job and the letter fail, what paid for it comes back, the columns an operator reads say `renderer_refused`, and `outbox.renderer_refused` is logged with the reason. Mail the legacy HTML drew asks nothing of the provider.
+- **Rollout.** A build from before the send does not read `letters.mail_service` and would print a certified letter as ordinary mail: turn the flag on only once the api and the maintenance service both run the send, and pause the outbox (`LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false`) before rolling either back below it while certified letters wait ([deployment.md](deployment.md)). The admin panel's status sync runs as the operator role, whose letters UPDATE list gains `carrier_tracking_number`: re-run `npm run admin:provision-access` after migration 053.
+- **The status sync stores the carrier's number.** `getStatus` carries PostGrid's `trackingNumber` when it is shaped like one (`LetterStatus.carrierTrackingNumber`), and `syncLetterStatuses` writes it to `letters.carrier_tracking_number` on its own, since it usually arrives without a change of status. It writes only to a letter that travelled certified, and only when the number differs. A certified letter that was delivered before it had a number is still asked about (inside the same window) until it has one, for its number alone: its status stays delivered, whatever the provider now answers.
+- **Orders show the service and the number.** `FileAccountStore.fetchOrders` reads `letters.mail_service` and `carrier_tracking_number` into `OrderRecord.certified` through `certifiedFactsOf` (`src/config/certifiedMail.ts`): nothing for an ordinary letter or for service text it does not know, and the number only beside a certified service and only if it has the shape of a carrier number (`CARRIER_TRACKING_NUMBER_SHAPE`, held equal by a test to the one the status sync stores by). `get_order_status` and `list_orders` pass them on as `mailService`, `carrierTrackingNumber` and `carrierTrackingUrl` (USPS's page for the number, with the groups' spaces and hyphens taken out), shown whatever the flag says (a sent letter is a fact; the output schemas declare the fields either way). Steering rev 39.
+  - **`get_order_status` adds `certifiedNote`** (`certifiedOrderNote(facts, status, lookupEnded)`), worded by where the order stands, since what is true of the number depends on it: in flight (accepted, printing, in transit, delivered) the number is "not here yet, check again later" because the printer sets it some time after it accepts the letter and the provider status sync (every six hours) stores it; scheduled or pending (which also covers a letter held for an operator), the letter goes as certified mail and the number comes after the printer accepts it; failed or cancelled, it did not go out and has no number (no "check again", no receipt); returned, no number is looked for. A letter in flight still without a number once the sync has stopped looking for one (`carrierNumberLookupEnded` in `src/config/certifiedMail.ts`: sent, by `sent_at`, more than `CARRIER_NUMBER_SYNC_DAYS` ago, the 30 days the worker and `scripts/trigger-status-sync.ts` run the sync with, counted by the sync from `sent_at`; the sync runs every six hours, so its last look can come up to six hours before; an operator's sync from the admin panel can look further back, and a number it finds is shown) says no number came from the printer and Letter IRL stopped looking a month after the printer accepted it, with no "check again" and, for a return receipt, no "ask USPS with the tracking number"; `OrderRecord.carrierNumberLookupEnded` carries it to `get_order_status`, and the home card's snapshot reads `sent_at` for it. A stored number is always given. For the return receipt the note says it is the record USPS keeps of who signed, that Letter IRL does not send it, and to ask USPS for it with the tracking number once delivered; where the receipt is really delivered is an open question for the development check (CERTIFIED-01 step 10), so the words claim no more.
+  - `trackingSupport` is `carrier_tracking` only once the number is stored for a letter that went out (a failed or cancelled letter keeps the number but stays `estimated_only`), and its served description says what that does and does not mean (the status is still the printer's). `list_orders`' sentence is neutral about whether each certified entry went out.
+  - `GET /api/letters` gives `mailService` (`standard` for an ordinary letter, null for text it does not know), `carrierTrackingNumber` and `carrierTrackingUrl` (null until the number is stored), and `carrierNumberLookupEnded`, true for certified mail with no number once the sync has stopped looking for one, for the website to stop saying it is on the way (the website change that reads it follows #803); `trackingNumber` stays the printer's id.
+- **`set_mail_service` changes a preview's service.** Listed only while certified mail is offered (`isCertifiedMailOffered()`, filtered in `server.ts`). An app that cached the list gets the connection's own unknown-tool error over MCP, since an unlisted tool is not registered there; the handler refuses too (`MAIL_SERVICE_NOT_OFFERED`) for a call that reaches it directly. It reads the draft first (`getDraftForMailService`: only the columns the price comes from, the caller's draft only, no page and no picture, the postcard's size included, since `draftMailOption` reads it) and refuses a postcard for every service (`setDraftMailService` allows `standard` on a postcard, which is what a postcard is, but this tool prices a letter). It then calls `setDraftMailService`, whose refusals (`not_found`, `sent`, `expired`, `checkout_pending`, `not_a_letter`, `gift_send`) become sentences with their own codes that name a way out (for a gift draft, a new preview with `mailService` certified, which is decided as no gift). It reads the draft again, still pending (a send that took it meanwhile is `DRAFT_ALREADY_SENT`, not "nothing has been sent"), and answers with `letterPayment(draftMailOption(draft))` and the letter's `pages` above one (#648): a certified letter is Pay & Send whatever the balance, and the way back to `standard` is priced by the pages again, with a note that a new preview can use the account's gift letter when it has one, the letter is one page and the balance cannot pay. Nothing is drawn again: the certified label is on the envelope. The letter card's Mail choice on its Delivery tab calls it (#648), offered by the preview's card-only `_meta.mailServices` while certified mail is offered and the letter is not a gift letter ([ui-widgets.md](ui-widgets.md)).
+- **Every reader of a draft that prices it reads the whole option.** `src/services/mailOptions.ts` (#691) is where a draft's mail option is read and where the rule for what a pack or a gift letter pays for lives: `draftMailOption`, `letterOption`, `isPackPayable`, and the checks a draft is stored under (`storedPages`, `storedMailService`). The row `draftMailOption` takes names all four columns the price comes from (`DraftOptionRow`: `mail_type`, `postcard_size`, `pages`, `mail_service`), so a reader typed with part of them does not compile. The checkout's peek and `getDraftForMailService` select `DRAFT_OPTION_COLUMNS`, and `getDraftState` lists the four by hand. The compiler takes each query's declared row type on trust and never checks the SQL. So `getDraft` reads the whole row, and the checkout and the send lock it (`SELECT * ... FOR NO KEY UPDATE` in `prepareJitOrder` and `createMailOrderFromDraftWithClient`). `tests/unit/services/draftOptionColumns.test.ts` searches the source: it fails if a column list selects `pages` from `letter_drafts` without `mail_service`, or if any of those three reads narrows. It does not check that a hand-written list keeps `postcard_size`. It sees column lists only: a join, a list built in code, a CTE or a schema-qualified name would escape it, so a new reader of a draft is still reviewed for this by hand. The readers above the SQL (below) price from the row by `draftMailOption` or `letterOption`.
+- **So do the tools that restyle or read a ready letter.**
+  - `letterOption(layout, service)` is the letter's option: its pages and the draft's own service, read as the rest of the code reads a row's (`mailServiceOf`). `set_stationery`, `set_letter_words` and `set_letter_signature` price what they return by it, so a restyled certified letter is still certified-priced, `canSendNow` false, and the reason cannot be sent from the balance is "Certified mail is paid with Pay & Send." The service they price by is the written row's, told with its content version under the draft's lock (`OnWritten` in `withChangeableDraft`), not the one read before the lock, so a `set_mail_service` that landed between is not answered with the price before it, and the price is the one the answer's version describes.
+  - A change of pages moves nothing about who pays for a certified letter (one price whatever the pages), so their message says "The price is the same." and never that a pack or Pay & Send pays for the page (`pageChangeSentence`, shared by the three).
+  - `get_draft_status` gives a ready letter its terms (`canSendNow`, the reason, `sendEligibility`) whenever room to write or certified mail is offered, or the letter is certified: `set_mail_service` may have turned it certified, or back, since its preview, and the card must not offer a pack for one or Pay & Send for the other. Its terms say how the letter travels too: `letterPayment`, which builds the terms for every answer that carries them (`get_draft_status`, `set_stationery`, `set_letter_words`, `set_letter_signature`, `set_mail_service`), adds `mailService` (certified mail only; the absence beside the delivery words means ordinary mail) and the words that say how it is delivered (`deliveryClass`, `deliveryDisclaimer`, from `deliveryWordsOf`, the function the preview uses too) through `travelFields`, for a letter that is certified or while certified mail is offered, so a card that takes the price takes the service and the words with it, and its summary, note, Delivery line, price and buttons come from one answer. Like the other terms, only for a letter our renderer drew; text that is not a service gets neither, and a postcard none.
+  - No gift letter pays for certified mail: `earlyGiftChoice` takes the service and decides at once, refusing `sendAsGift: true` (`GIFT_NOT_FOR_CERTIFIED`) and choosing no gift when it is left out; `set_letter_words` never suggests a gift letter for a certified letter that shrinks to one page. The three previews pass the service (the next bullet). Whatever else sets it (`set_mail_service`, a card) must gate on `isCertifiedMailOffered()`: `setDraftMailService` does not check the flag. The copy that gives a certified letter the one-page pack rule is certified-aware where a person or a model reads it: `sendLinkText` and `howToSendText` in `registerTools.ts` (through `packRuleText`; the send-by-link answer to a refused pack send is built from `request_send`'s result, which now carries `mailService`). The letter card's pay note and summary are certified-aware (the cards part): `CERTIFIED_PAY_PAGE_NOTE`, chosen by the service the card holds (the preview's, or the last status answer's: see [ui-widgets.md](ui-widgets.md)), and `deliveryClass` ("USPS Certified Mail", with the receipt named for the second service) and `deliveryDisclaimer` (signed for at delivery; if no one signs for it or collects it from the Post Office, USPS returns it to the sender) replace First-Class's.
+- **The three letter previews take it.** While certified mail is offered (`isCertifiedMailOffered()`: the flag, and Pay & Send), `quote_and_preview_letter`, `quote_and_preview_letter_with_header_image` and `quote_and_preview_letter_with_image` accept `mailService`: `certified` or `certified_return_receipt`; `standard`, `null` and the empty string (the served schema reads both as none, as it does for the stationery, for a client that fills every field) and leaving it out are an ordinary letter.
+  - `chooseMailService` reads it right after the arrival date, before the sender, the picture, the address check, the gift choice and the draft, so a refusal creates nothing. While certified mail is not offered, anything else is `MAIL_SERVICE_NOT_OFFERED` whatever it says (a person is never told to use a value that is then refused, and a call's own text never reaches the log: it logs `certified`, `certified_return_receipt` or `unrecognized`). While it is offered, any other text is refused: by the schema's enum (the SDK's validation error, which lists the valid values) and again by `MAIL_SERVICE_INVALID`, never read as standard mail, which would send it as an ordinary letter at the ordinary price.
+  - The draft is created with the service and priced by `letterOption(layout, service)`; the preview returns `mailService` for certified mail only, and its narration says it goes by USPS Certified Mail once sent.
+  - `withheldInputKeys` leaves the argument out of `tools/list` and `/manifest.json` while certified mail is not offered. The output field is declared whatever the flag: the output schemas are closed, and a letter can outlive the flag. Mention it when the Apps SDK submission is next touched.
+  - `request_send` carries `mailService` for a certified draft, so the link's words say Pay & Send pays for it, never a letter pack or a gift letter; the how-to-send words do the same from the preview's output (`previewPayment().certified`); `paidPerSend`'s description says packs and gift letters never pay for certified mail. Steering rev 38.
+  - The preview's description says to pass it only when the person asks, that it costs more and that a new preview of a certified letter must pass it again (`set_mail_service` will change a preview without one). Its narration says the letter "goes by USPS Certified Mail" once sent, never that it was sent.
+  - **Turn the flag on only when the whole path is in:** the previews' words promise a tracking number, and the orders show it from part 5 (`get_order_status`, `list_orders`, `GET /api/letters`); the letter card's pay note is certified-aware from the cards part. The website still shows the printer's id as "Tracking" and the pack rule for certified mail until its own part.
+
+**Room to write on a preview (#586).** While `LETTER_IRL_ROOM_TO_WRITE_ENABLED` is on, the previews are drawn by `src/render` and Pay & Send is on (`isRoomToWriteOffered`), the three letter previews lay the letter out on up to three pages (`letterPageLimit`):
+- **Recorded and priced.** The draft records the pages (`letter_drafts.pages`, migration 047), counted before any gift page. A letter of two or three pages is Pay & Send at its own price: no pack pays for it, so `canSendNow` is false and the eligibility is priced as `jit-letter-2-pages` or `jit-letter-3-pages`. The output gives `pages`, and the narration opens "Preview ready: paid with Pay & Send." and adds "A two-page letter, printed on both sides of one sheet." A letter that fits one page is as before.
+- **Refused only past three pages:** "Letter is 6 lines too long for three pages: three pages is the longest letter we print. Please shorten your message to fit on three pages." The theme ways out are offered as on one page, at three pages. The character cap names three pages.
+- **The gift waits for the pages.** Without room to write the gift is decided first, so the printable check sees its card. With it, the gift is decided after the layout (`earlyGiftChoice`, `giftForLayout`): a gift letter pays for one page only (#579), so a longer letter is never a gift send. `sendAsGift: true` on one is refused, and none is chosen when it is left out. A gift chosen for a one-page letter then has its card's name checked (`validateGiftCardPrints`), after the image is fetched where there is one.
+- **`set_stationery` lays the letter out again on its pages,** on up to the limit, and a gift letter on one page. A theme whose face runs a gift letter past one page is refused as too long, as before.
+  - It draws every page again, finding the picture's small copy on whichever page showed it, and keeps a gift letter's card page.
+  - It stores the pages with the stationery, under the same lock, so an open Pay & Send checkout still refuses it.
+  - A restyle can change the price: a wider face can run a one-page letter on to a second page, which Pay & Send pays for, and Classic can bring it back to one, which a pack pays for. So it returns what the letter costs now: `pages` above one, `canSendNow`, `reasonCannotSend` and `sendEligibility`. Its message says when the pages changed.
+  - With room to write off, a restyle is laid out on one page, so a longer draft is refused as too long.
+- **`set_letter_words` changes the words in place** (`src/tools/setLetterWords.ts`), listed only while the words can be changed in place (room to write, or the words editor alone on one page, #647), and called by the card's Words tab.
+  - It checks them as a preview does: the character cap, what prints (`validatePrintableLetter`, in the draft's stationery), and the page.
+  - It lays them out in the draft's own stationery on up to three pages, and draws the page again as `set_stationery` does (`redrawLetterPreview`, shared by both).
+  - A gift letter is held to one page: words that run it past are refused in a gift's words, even past three pages, never priced again (`GIFT_LETTER_ONE_PAGE`). A letter brought back to one page that its balance cannot pay keeps its payment as it was; the message adds that a new preview can use the account's gift letter, when it has one, as only a preview decides a gift.
+  - **Which words it replaces.** The card and the chat can each change the words, and neither sees the other's call (#366). So the previews, `set_letter_words` and `get_draft_status` give the words' version (`wordsVersionOf`, a hash of the words, nothing stored), and a change names the version it replaces. One that names none, or one the words no longer have, is refused (`WORDS_CHANGED`) with the words as they are now and their version: the model's read of words changed on the card. `setDraftWords` checks the words again under the lock.
+  - `setDraftWords` writes the words, the page and the pages in one `UPDATE` under the same lock as a restyle, so an open Pay & Send checkout still refuses it. It returns what the letter costs now, as a restyle does, and its message says when the pages changed.
+  - **Two edits, one draft.** A restyle draws the words it read; new words are drawn in the stationery they read. Each writes what the other draws from, so whichever committed second would store a page drawn from what the first replaced. Each write reads what it was drawn from again under the lock (`drawnFromChanged`), and a change of words the words it replaces too, and is refused if one changed (`DRAFT_CHANGED`: "The letter changed while its page was being drawn again. Try ... again.").
+- **The checkout's price is the one its caps checked.** `createJitCheckout` checks the daily caps at the price the peek reads, before the transaction. That early answer counts letters alone; once `prepareJitOrder` has inserted the order, the mail caps are checked again in its transaction, under their locks and counting open checkouts, this one included (#730), and a refusal rolls the order back before any Stripe session. New words or a restyle can change the pages, and so the price, before the lock, so `prepareJitOrder` refuses an order whose locked price is not the one the caps were checked at (`DRAFT_CHANGED`), before any order or session. Trying again checks the caps at the price it charges. A session-bearing checkout made before the letter's product changed (its window passed, so the lock allowed the change) is not reused: it is refused (`PREVIOUS_CHECKOUT_CLOSING`) until Stripe's webhook or the sweep cancels it, since only Stripe's word cancels an order with a session.
+- **`get_draft_status`** gives a ready letter's `pages` when above one, as a restyle may have changed them. While room to write is offered, it also gives what the letter costs now: `canSendNow`, `reasonCannotSend` and `sendEligibility`, the preview's own terms (`letterPayment`). A card shown its preview's first answer again then draws the price the draft has.
+- **The fit line (#586).** While the words can be changed in place (room to write, or the words editor, #647), the previews, `set_stationery`, `set_letter_signature` and `set_letter_words` give the card `_meta.pageFit`, with `maxPages` (1 without room to write), which never reaches the model. It holds the pages, the sheets, double-sided, each page's lines, and the room left on the last page in lines and about how many characters. The letter card:
+  - says on the studio's Words tab how full the letter is: "Fits on one page, with room for about 1,940 more characters.", "Runs on to the back of the page: printed on both sides of one sheet." or "Three pages, on two sheets: the longest letter we print.";
+  - names a longer letter's pages in the studio's summary and the layout row: "2 pages, both sides";
+  - shows its Pay & Send price as the cost;
+  - after a restyle, or a status answer, draws the price and pages the server gave, laid over the preview's. A status answer lays nothing out, so the fit line keeps the preview's count while the draft's page is still the preview's, and says nothing of room once the chat has changed it.
+- **The Words tab's editor.** Where the Style row shows, while the words can be changed in place (room to write, or the words editor alone on one page, #647) and the draft is still a draft, the studio's Words tab shows the letter and its sign-off in two boxes to type in, a line that counts the room ("About 1,925 characters left on this page.", "About 60 characters past this page: Update the page to see how it runs on."), and, once the words differ from the draft's, **Update the page**, which calls `set_letter_words` with the version of the words the boxes were filled from, and **Put back**. The page, the price and the words it gave are the card's from then on. If the chat changed the words since the card showed them, the server refuses the change (the version check), and the card says in its own words, never the refusal written for the model, that its copy is out of date, keeping what was typed. The card asks for the draft again then, and whenever the person comes back to it: it shows the chat's words and page, keeps words typed meanwhile and says so, and an Update then replaces the chat's words ([ui-widgets.md](ui-widgets.md)). One change to the draft at a time: the Style row and the editor share one wait, and neither runs while the card sends or pays.
+- **Descriptions.** The three previews' descriptions add one sentence while it is offered (steering r32), and `set_letter_words` is listed (steering r33). The manifest pins the flag off.
+
+**Stationery on a preview (#563).** While `LETTER_IRL_STATIONERY_ENABLED` is on and the previews are
+drawn by `src/render`, the three letter previews take `stationery`, `monogram` and `headline`
+(`src/tools/stationeryInput.ts`):
+- **Served only then.** The served schemas and `/manifest.json` include them only then
+  (`withheldInputKeys`, read at each registration). Otherwise the three previews pass unknown fields
+  through, as for `arriveBy`, so a theme, initials or a headline from a cached schema is refused
+  ("Stationery is not available yet…") rather than printed on a plain page. Classic is always
+  accepted.
+- **Checked** after the sender is known and before the page is laid out:
+  - the theme is one of the six;
+  - initials go only with Monogram, a headline only with Celebration;
+  - asked-for initials are one to three letters; otherwise the return address's name gives them, without
+    the titles before it or the suffixes after it ("Md. Rafiqul Islam" keeps its M);
+  - a headline is one line, shrinking to 18pt and refused past it, saying how much fits, and at most
+    `STATIONERY_SLOT_MAX_LENGTH` characters as stored, so what is stored reads back;
+  - the initials and the headline are checked against Tinos; the text and sign-off against the face
+    the theme sets them in (`drawsGraphemeIn`), so a theme with its own refuses what it cannot draw,
+    naming itself and suggesting another stationery;
+  - a headline takes three lines of the page, and a letter it pushes past the page is refused with
+    the counts, "…on the celebration stationery with a headline…", and the ways out.
+- **The date line** is the day of the preview on the New York calendar, written out ("October 1, 2026").
+  It prints as previewed, like a letter dated the day it was written.
+- **Recorded:**
+  - a theme other than Classic draws the preview in it;
+  - the draft records `renderer_version = 'pdf-2'` and `stationery`, each slot as it prints;
+  - the preview's document names `pdf-2`;
+  - Classic records `pdf-1` and no stationery: the page as before.
+- **Said:** the output's `stationery` names the theme and what it prints, and `source`: `asked`,
+  `remembered` or `default`. The narration names a theme, and a remembered one as such.
+- **Remembered** (migration 045, `users.stationery_theme`):
+  - a preview that asks for no theme is drawn in the account's last choice, or Classic with none;
+  - a theme a preview asks for, Classic included, is remembered once its draft exists, so a refused
+    preview chooses nothing;
+  - only the theme is remembered, not the initials or a headline;
+  - nothing is read or written while stationery is not offered;
+  - erasure clears it, and both writers skip an erased account (`AND erased_at IS NULL`), so a
+    remember that waited on the erasure writes nothing ([account-erasure.md](account-erasure.md)).
+
+A gift send in a theme prints its themed page, then today's card page.
+
+**Typewriter and Handwritten** (#563 PR 8, migration 046) set the whole letter in a face of their own:
+- on Classic's line pitch, so a page holds as many lines (`bodyFace`):
+  - Typewriter in Cousine at 11pt, 70 characters to a line, so it fits fewer words than Classic;
+  - Handwritten in Caveat at 15pt, with a faint 0.5pt `#aaaaaa` rule under each of the page's lines,
+    left out where an enclosed image sits;
+- each prints its date line in its face, and neither takes initials or a headline;
+- the text and sign-off are checked against that face, which draws less than Tinos:
+  - Caveat has no Greek or Hebrew, almost no precomposed Vietnamese, no horn letters (Ơ, Ư), few of
+    the caron letters beyond Latin Extended-A's (no Ǎ, Ǧ or ǰ), few historic Cyrillic letters, no
+    arrows, few mathematical signs, and none of the symbols Tinos draws (♥, ♪, ☺, ●, ■) or its box
+    and shape characters. Many of its letters cannot carry an accent written apart from them (an
+    "i" followed by U+0301, as some systems store "í"): such a letter is refused in Handwritten,
+    and the same letter written as one character (U+00ED) prints;
+  - Cousine lacks superscript and subscript digits, most letterlike symbols, and the ﬃ and ﬄ
+    ligatures;
+  - neither has the non-breaking hyphen, the narrow no-break space or the other fixed-width spaces,
+    which ChatGPT's text often holds; each face draws them as the nearest dash or space it has
+    (`inFace`), so it takes what Classic takes of them. Lines still break as the text was written:
+    a non-breaking hyphen drawn as a hyphen keeps its word whole;
+- a refusal names the theme ("…which the handwritten stationery prints in its own typeface"), and
+  suggests another stationery when Classic would print what it cannot; a letter its face pushes past
+  the page is told so: "…too long for one page on the typewriter stationery…", with Classic offered
+  only when the letter fits it. A theme the call did not name, the account's remembered one, says so
+  first ("The account's remembered stationery is handwritten."), as does a remembered Celebration
+  whose headline pushes the letter past the page.
+
+The fonts are Google Fonts' files, each beside its licence in `assets/fonts`.
+
+**`set_stationery` restyles a preview** (#563, `src/tools/setStationery.ts`), listed only while
+stationery is offered:
+- **Checked as a preview's are:** the theme, initials and headline (`previewStationery`), the slots
+  against Tinos, the text in the theme's typeface, and the page laid out again in the theme, so a
+  headline or a wider typeface that pushes the letter past its page is refused.
+- **Drawn again from the draft:** its text, addresses and image. The page keeps the small copy of its
+  picture that the preview showed, and a gift letter's card page is kept as it was drawn
+  (`rendererDocumentPages`). Drawn back to Classic, the page is byte for byte the first preview's.
+- **One transaction** (`setDraftStationery`) locks the draft as `setDraftSchedule` does, with the same
+  refusals: not the caller's, sent, expired (or emptied by an erasure), or a live Pay & Send order.
+  So a send or a checkout runs before or after it, never between. It writes the stationery,
+  `renderer_version` (`pdf-2` for a theme, `pdf-1` for Classic) and `preview_html`, and
+  remembers the theme.
+- A postcard, or a preview the legacy HTML drew, is refused: make a new preview.
+
+A gift send is previewed like any other letter, with its card as the second page (#534 PR 5). Whether a preview is a gift send is decided before the checks, because the card prints the sender's name in Tinos: a name Tinos cannot draw is refused "in the sender's name, which the gift card prints", though PostGrid could stamp it in the return address. So is a name long enough to push the card past the page's bottom margin, about a thousand characters: "The sender's name is too long to print on the gift card." Without the flag, previews are the legacy HTML. The flag is read only when a letter is previewed, so changing it never changes a letter already previewed or queued.
+
+**How a postcard preview is drawn (#534 Phase 4).** With the same flag, a postcard preview is drawn by `src/render` too:
+- Before the picture is fetched, the message is measured on the back as it prints. A message that runs past 16 lines is refused with the count: "Postcard message is 1 line too long for the back: it takes 17 lines and the back holds 16." The legacy 500-character limit gives way to a cap of 1,000 characters, which only bounds the work.
+- The message is checked against Tinos, the addresses against Open Sans, as for letters.
+- The draft records `renderer_version = 'pdf-1'`. Its `preview_html` holds the front and the back as SVG: the front laid out with the full image's box and drawn with the small copy, the back with the addresses where PostGrid stamps them ("RETURN TO:" and the return address, then the recipient, probes P9 and P11). The addresses are the ones sent, after any correction; P11 showed PostGrid upper-casing them and nothing more, and its own standardisation at stamp time is not probed. The website's confirm page shows both, where it showed only the front before.
+- The tool's output carries the same document as `previewHtml`, which goes to the card's `_meta`, and the postcard card shows its two pages (#534 Phase 4b).
+- A gift postcard is drawn with its card in the strip at the foot of the message (#534 PR 8), so its message has 11 lines: "it takes 12 lines and the back holds 11 above the gift card." The legacy 350-character limit gives way as the 500 does.
+- Its sender's name is checked against Tinos, as on a gift letter, whichever card the preview shows: the send decides the card, and may print a funded one where the preview showed the plain one. The name must also fit the strip, for this card and for the longest card the send could print instead (`longestSendCard`: funded, with the longest date and a seed campaign's wording). A name of about a hundred characters is refused: "The sender's name is too long to print on the gift card." A seed campaign's long code takes room from the name, and one that does not fit even without a name (only the widest codes, 49 or 50 W's) is refused whatever the name: "This gift letter's card does not fit on a postcard. Send it as a letter, or set sendAsGift to false to pay from the balance." Only a seed code the preview never saw can still overflow the strip, and that print is held.
+- Any size but 6x9, and every postcard without the flag, keeps the legacy HTML, and a gift postcard there its 350-character limit.
+- The legacy front preview is landscape at every size (it drew a 6x9 card in portrait, cropping the picture on the confirm page).
 
 A claimed job is submitted to the provider exactly once. A successful response records the provider order ID and marks the job completed. Any outcome that does not prove what happened — `5xx`, timeout, transport loss, an unreadable body — may mean the piece was accepted and physically mailed, so it is never resubmitted: the job is held with `provider_outcome = 'ambiguous'` for operator reconciliation. Only an explicit provider rejection, which proves no mail exists, is terminal.
 
@@ -54,7 +541,7 @@ The tool response reports one of:
 
 ## Terminal Failure and the Letter Pack
 
-A confirmed send consumes the Letter Pack before the provider is called, so a terminal failure owes the customer compensation. A pay-per-send order moves to `refund_pending` and Stripe settles it. A prepaid send has its pack returned to the credit ledger.
+A confirmed send consumes the Letter Pack before the provider is called, so a terminal failure owes the customer compensation. A pay-per-send order moves to `refund_pending` and Stripe settles it. The hourly sweep adopts a refund already made for the order, by the app or in the Stripe dashboard for the whole amount, before it makes one. A refund that failed or was cancelled at Stripe is not made again: the order is held (`REFUND_NOT_COMPLETED`) and a critical `refund_not_completed` alert asks a person (#730). A prepaid send has its pack returned to the credit ledger.
 
 The return posts new compensating lots rather than reversing the original ones. It mirrors the original per-lot split recorded in `credit_consumption`, and each returned lot inherits its source lot's expiry, because credits are consumed FIFO by `expires_at` and collapsing them would silently move credits between expiry windows. It stores a stable failure code, never provider text.
 
@@ -68,11 +555,41 @@ Once a pack has been returned, an operator retry of that job is refused. Nothing
 
 An ambiguous outcome returns nothing. The piece may physically exist, and an unnecessary hold is recoverable while refunding posted mail is not.
 
+A gift letter (`funding_type = 'gift_letter'`) consumed no credits, so its compensation is a gift: the same three paths void the code printed on it and grant a replacement gift letter with the same budget, once, keyed by the letter. Nothing is returned if the code was already redeemed, which proves the letter arrived, or if the purchase that granted the gift has been refunded or disputed. Either counts as compensation for the retry guard.
+
+## When the Money Goes Back: Mail Left for the Operator (#696)
+
+A letter sent with an arrival date (#535) can wait weeks for its mail date, paid for by a letter pack whose money may go back meanwhile. Decision D2: such mail waits for a person instead of printing, and is never cancelled automatically, because a dispute can be won.
+
+- **A pack refunded in full, or disputed** (when a dispute that takes the money opens, or an inquiry becomes one; a card network's inquiry takes none; a dispute later won keeps the hold, for the operator to release; an event other than a close that Stripe delivers after the close changes nothing, #730): `holdMailFundedByOrder` (`commerceService`) finds the letters whose deduction drew on the pack's lots as their revocation finds them (the purchase lot and every lot returned from it carry the order id, or its checkout session), and the gift letters the pack granted. It reads them before the account lock, as every path that holds a letter and the account locks the letter first, so a send that commits between that read and the revocation is not held (a window of milliseconds). Each letter still `queued` is locked, then its job; a job still `pending` or claimed (`processing`), never dispatched, takes the `hold_reason` `funding_reversed` or `funding_disputed`. One `held_mail_funding_reversed` alert is raised per order (migration 056), once ever: a later reversal on the same order raises none, as its first alert already named the order. It runs before the pack's lots are revoked, and not while a refund is still pending, as it may fail. A proportional refund (unused letters only) holds nothing: what it leaves was paid for.
+- **The job keeps its state**: pending, never dispatched, as mail the outbox has not taken always is (a `held` job must have reached the provider). The funding hold is the `hold_reason` alone, `FUNDING_HOLD_REASONS` in `src/services/heldMail.ts`, read two-valued (`hold_reason IS NOT NULL AND hold_reason IN (...)`), since `NOT` of a `NULL IN (...)` would hold back every ordinary job.
+- **The outbox leaves it**, and any mail of an account whose sending is blocked (`users.sends_blocked_reason`, set when a dispute that takes the money opens or an inquiry becomes one, or by an erasure): the claim's due branch skips both, by a plain read. The dispatch marker reads the same again under its locks (the user's row `FOR SHARE`, after the letter and the job): a job that turned so between the claim and the mark, or a claim a crash left behind, goes back to pending with its attempt given back, never failed or refunded. A failure before dispatch does the same for such a job. The sweep for a crash on the last attempt puts these back the same way instead of failing them. The waiting count behind a pause leaves them out, and a run's summary does not count a put-back as a failure.
+- **The operator** sees it on the attention list and the job's page:
+  - **Send held mail now** (`job.dispatch_now`) releases mail held for its funding, whatever attempts it has left, due or not. The hold ends; the letter mails on its own date, or at the next run if that has passed or it has none. Mail of a blocked account still waits until the account is unblocked.
+  - **Cancel mail left for the operator** (`job.cancel_held`) cancels prepaid or gift mail held for its funding or of a blocked account, and gives back what paid for it as a failed send's would: nothing from a revoked pack, no gift from a refunded or disputed purchase (audit operation `mail_job_cancel`, migration 056). A Pay & Send letter is cancelled by refunding its order (in the Stripe dashboard) instead.
+  - The customer can still cancel held mail with an arrival date (`cancel_scheduled_mail`), and an erasure cancels mail held for its funding.
+
 ## Hourly Recovery
 
-Railway runs `npm run maintenance` once per hour. Outbox recovery atomically claims due rows with `FOR UPDATE SKIP LOCKED`, allowing safe concurrency. A job left in processing with a lock older than 15 minutes is treated as stale and can be reclaimed.
+Railway runs `npm run maintenance` once per hour. Outbox recovery atomically claims due rows with `FOR UPDATE SKIP LOCKED`, allowing safe concurrency. It claims batches of `MAINTENANCE_OUTBOX_BATCH_SIZE` (default 25) until one comes back short, so a mail date's held letters, all due at once, go in the same run (#700). `MAINTENANCE_OUTBOX_TIME_BUDGET_SECONDS` (default 600) bounds it: once that has passed, the batch in progress stops claiming and no other starts (`dispatchDueMail` in `src/cli/runMaintenance.ts`). Trouble ends the run's outbox, as a single batch always did: a batch with a retry, or with no more letters sent than failed, or a run that has failed as many as a batch holds. So a provider outage holds or retries at most one batch a run, and one letter the provider rejects, among letters it takes, does not stop the date's mail. The run's `Outbox summary` counts the batches. Held mail (#535) is due from 09:00 New York time on its mail date. A job left in processing with a lock older than 15 minutes is treated as stale and can be reclaimed.
 
 The same stable provider idempotency key is reused after timeout or process restart. This protects against a provider order succeeding while the application loses the response.
+
+**Held mail in the hourly run (#535):**
+- **Missed mail day.** A letter with a mail date that is not at the printer at 18:00 New York time that day raises one `schedule_missed_mail_day` alert (warning, migration 041), once per letter, and logs `schedule.missed_mail_day`. "Not at the printer" means never accepted by the provider (no `sent_at`), and still `queued`, taken, or `failed`: a letter the provider is printing reads `processing` after the status sync, and is at the printer (#699 review round 2); a letter `held` after an ambiguous dispatch has its own critical alert. A partial unique index keeps it to one per letter even if two runs overlap. The cause may be a pause, the provider being down, or retries running out. It runs right after the outbox, so mail the run has just sent is not counted, and it never throws. It is shown on the admin panel's alerts page, linked to the account. The run then posts one notice to `LETTER_IRL_OPERATOR_ALERT_URL` with the count (#699), and withholds its heartbeat while any letter with a date, never accepted, is still `queued` or taken after 18:00 on its mail day, and not left for the operator.
+- **Stuck Pay & Send orders.** A held letter's order stays `fulfillment_pending` until the letter is accepted. It is not counted as stuck (`commerce.stuck_orders_detected`, and the admin panel's health, which share `src/services/stuckOrders.ts`) until 90 minutes after its job falls due, and only until the run first tries it. The job falls due when its hold ends (`mail_hold_until`, migration 055, #693), or earlier when an operator sends it now, which moves `next_attempt_at` (and `scheduled_at`) but not `mail_hold_until`; both are read. The run's claim ends the grace: it takes an attempt.
+- **The pause count.** While the outbox is paused, a held job not yet due is not counted as waiting behind the pause, so held mail alone does not withhold the heartbeat. Only a held job is pending, never attempted and not yet due, and the count asks that it carries `mail_hold_until` too (`heldMailJobSql`, #693).
+- **Status sync and stuck letters** count from `sent_at`, when the provider took the letter, not `created_at`. So mail held for weeks is still followed for 30 days after it mails, and is not called stuck for the time it waited.
+
+**A cancel by the provider (#566).** PostGrid cancels a piece only while it is `ready`, before printing, and answers `cancelled`. The status sync hands that to `failProviderCancelledLetter` (`letterJobService.ts`) instead of writing the status itself. In one transaction, under the outbox's lock order (the funding order, the letter, its jobs), and only while the letter has not already ended:
+- the letter becomes `failed`, with a history row from the sync;
+- a prepaid send's credits come back, or a gift letter comes back with the code it printed voided. This happens exactly once, through the same returns as a definite rejection, and only while our record says `accepted`. A cancel after the sync saw the letter printing (`processing`) or mailed (`in_transit`) contradicts PostGrid's own lifecycle, so nothing comes back by itself and a person decides;
+- a Pay & Send order, already `fulfilled` when PostGrid accepted the letter, is not moved: a person decides its refund;
+- one `provider_cancelled_mail` alert per letter (migration 043) says what happened, with the status our record held before. It is a warning when what paid came back, and critical when a refund waits for a person.
+
+A held letter cancelled after its mail day may also raise `schedule_missed_mail_day`.
+
+**Paused outbox (#444).** With `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` on the API and the maintenance service, neither claims a job, so nothing reaches the provider. A send still commits and queues its job, and the tool answers `currentStatus: pending`, "Queued for the print provider" (mail sent with an arrival date answers `scheduled` while its mail date is ahead, as it would unpaused). Every waiting job keeps its attempts and backoff and goes out on the first maintenance run after the switch is back on. The crash sweeps still run; how a pause shows and how to rehearse it is in [operational-acceptance.md](operational-acceptance.md).
 
 Maintenance also performs image cleanup and conditionally runs six-hour provider status synchronization and daily credit/draft/payment maintenance. It closes all database and bucket clients before exit.
 
@@ -87,6 +604,7 @@ Generated images receive a capability URL backed by a private Railway bucket. Th
 ## Required Tests
 
 - duplicate and concurrent send calls create one order and one deduction;
+- a second draft of the same mail is refused within 24 hours, from balance and at a new Pay & Send checkout, and goes through only with `sendAnotherCopy: true` (`tests/integration/duplicateMail.postgres.test.ts`);
 - insufficient balance rolls back all effects;
 - `429`, `503`, timeout, and network failures are held as ambiguous rather than resubmitted;
 - a terminal failure returns the customer's Letter Pack exactly once, and an ambiguous one never does;

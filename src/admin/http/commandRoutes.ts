@@ -1,3 +1,4 @@
+import { ERASURE_FOLLOWUP_ALERT, ERASURE_FOLLOWUP_RESOLUTION } from "../../services/accountErasureService.js";
 import { AdminFoundationError } from "../errors.js";
 import { prepareCommandPreview, runAdminCommand, type CommandDefinition } from "../commands/runner.js";
 import {
@@ -9,6 +10,8 @@ import {
 } from "../pages/commands.js";
 import type { RequestContext, RouteHandler } from "./app.js";
 import { attemptElevation, dropElevation, isElevated } from "./elevation.js";
+import { databaseTotpCounterStore } from "./totpCounters.js";
+import { totpSecretFor } from "../runtimeConfig.js";
 import type { AdminRouter } from "./router.js";
 import type { RouteExtensions } from "./routes.js";
 import { hashSessionId } from "./session.js";
@@ -46,16 +49,28 @@ function backHrefFor(command: CommandDefinition<any>, targetId: string): string 
       return /^[0-9a-f-]{36}$/i.test(targetId) ? `/promos/${encodeURIComponent(targetId)}` : "/promos";
     case "image_reservation":
       return "/images";
+    case "gift_code":
+      return "/gifts";
+    case "quarantine":
+      return "/retention";
     case "provider_routing":
     case "provider":
       return "/routing";
+    case "daily_limit":
+      return "/limits";
+    case "address_request":
+      return "/support";
     default:
       return "/";
   }
 }
 
-function targetIdFrom(context: RequestContext): string {
-  const target = (context.form?.get("target") ?? context.url.searchParams.get("target") ?? "").trim();
+function targetIdFrom(context: RequestContext, command: CommandDefinition<any>): string {
+  const explicit = (context.form?.get("target") ?? context.url.searchParams.get("target") ?? "").trim();
+  // Only a command that names its target from its own fields may omit it
+  // (promo.create: the typed code). Before this, the create form had no way to
+  // send one and every campaign creation was refused.
+  const target = explicit || (command.targetFromFields?.(fieldsFrom(context)) ?? "").trim();
   if (!target || target.length > 255) throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
   return target;
 }
@@ -97,11 +112,37 @@ export function registerCommandRoutes(
   router.add("POST", "/elevate", async (context) => {
     const now = Date.now();
     const returnTo = safeReturn(context.form?.get("return"));
-    if (!context.config.totpSecret) throw new AdminFoundationError("ADMIN_COMMAND_DISABLED");
-    const attempt = attemptElevation(
+    if (context.config.mode !== "full") throw new AdminFoundationError("ADMIN_COMMAND_DISABLED");
+    // This operator's own secret (#730); in development, the shared one if
+    // they have none.
+    const totp = totpSecretFor(context.config, context.session.login);
+    if (!totp) {
+      // Denied, so audited as every denied elevation is (#730 review).
+      await context.appendAudit({
+        action: "admin.elevation_denied",
+        targetType: "session",
+        inputSummary: { reason: "no_secret" },
+        outcome: "denied",
+        errorCode: "ADMIN_FORBIDDEN",
+      });
+      return context.render(
+        "Elevate",
+        renderElevationForm({
+          csrfToken: context.csrfToken,
+          returnTo,
+          elevatedUntil: null,
+          lockedUntil: null,
+          message: `No TOTP secret is set for ${context.session.login}. An entry for this login in ADMIN_TOTP_SECRETS is needed before it can elevate.`,
+          ttlMinutes: Math.round(context.config.session.elevationTtlMs / 60_000),
+          mode: context.config.mode,
+        }),
+        { status: 403 },
+      );
+    }
+    const attempt = await attemptElevation(
       context.session,
       context.elevation,
-      context.config.totpSecret,
+      totp.secret,
       context.form?.get("code") ?? "",
       {
         ttlMs: context.config.session.elevationTtlMs,
@@ -109,6 +150,9 @@ export function registerCommandRoutes(
         failureWindowMs: context.config.session.elevationFailureWindowMs,
       },
       now,
+      // The accepted counter in the database, so a restart or a second
+      // process cannot accept the same code again (#730).
+      { counters: databaseTotpCounterStore(context.requireOperatorPool()), counterKey: totp.counterKey },
     );
     if (attempt.ok) {
       // Renew the session id after the privilege change; the store keeps the
@@ -151,7 +195,7 @@ export function registerCommandRoutes(
         lockedUntil: attempt.lockedUntil ? new Date(attempt.lockedUntil) : null,
         message:
           attempt.reason === "locked"
-            ? "Too many failed codes; elevation is locked for this operator until the window passes."
+            ? "Too many failed codes; elevation is locked for this operator until the time shown. Each lock lasts twice the last, up to a day."
             : attempt.reason === "replayed"
               ? "That code was already used; wait for the next one."
               : `The code was not accepted (${attempt.failuresLeft} attempts left before lockout).`,
@@ -171,7 +215,7 @@ export function registerCommandRoutes(
   router.add("GET", "/commands/:name/preview", async (context) => {
     const command = byName.get(context.params.name);
     if (!command) throw new AdminFoundationError("ADMIN_NOT_FOUND");
-    const targetId = targetIdFrom(context);
+    const targetId = targetIdFrom(context, command);
     const fields = fieldsFrom(context);
     const prepared = await context.read((client) =>
       prepareCommandPreview(command, client, context.config.environment, targetId, fields),
@@ -200,7 +244,7 @@ export function registerCommandRoutes(
   router.add("POST", "/commands/:name", async (context) => {
     const command = byName.get(context.params.name);
     if (!command) throw new AdminFoundationError("ADMIN_NOT_FOUND");
-    const targetId = targetIdFrom(context);
+    const targetId = targetIdFrom(context, command);
     const fields = fieldsFrom(context);
     const outcome = await runAdminCommand(
       {
@@ -226,8 +270,13 @@ export function registerCommandRoutes(
   }, { name: "command.execute", write: true });
 
   return {
-    alertActions: (context, alertId, status) => alertActionPanel({ alertId, status, mode: context.config.mode }),
-    jobActions: (context, jobId, status, providerOutcome) =>
-      jobActionPanel({ jobId, status, providerOutcome, mode: context.config.mode }),
+    alertActions: (context, alertId, status, alertType) =>
+      alertActionPanel({
+        alertId,
+        status,
+        mode: context.config.mode,
+        suggestedResolution: alertType === ERASURE_FOLLOWUP_ALERT ? ERASURE_FOLLOWUP_RESOLUTION : "",
+      }),
+    jobActions: (context, job) => jobActionPanel({ job, mode: context.config.mode }),
   };
 }

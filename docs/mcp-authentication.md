@@ -77,6 +77,10 @@ For MCP clients that don't support OAuth (custom agents, headless environments, 
 - Custom MCP client implementations
 - Testing and development
 
+### What a Token Can Do
+
+A token reads the account and makes previews (`mail:read`, `mail:draft`, #470). It cannot send, pay or buy: when an agent asks to send, it gets a link where the person checks the mail and sends it. It also cannot cancel scheduled mail, replace or remove the saved signature, replace or delete a saved design, or cancel an address request, whatever its scopes (#685): those tools answer with a sentence saying to do it on the website or in an app signed in with OAuth. It can still save a design under a new name, and set or clear the return address. The REST API takes no token, except to list tokens (`GET /api/tokens`).
+
 ### Getting a Token
 
 1. Log in to [letterirl.com/dashboard/tokens](https://letterirl.com/dashboard/tokens)
@@ -117,9 +121,10 @@ lirl_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ### Token Security
 
 - Tokens are hashed (bcrypt) - we never store the raw token
+- A token is found by the SHA-256 of the whole token, one indexed read (#730, migration 059). Tokens made without one (before that, or by an older image) are found once by their last four characters and a bcrypt compare, then given the hash; once none is left without one, what a request sends no longer chooses how much work is done
 - Shown only once at creation
 - Can be revoked anytime from the dashboard
-- Scope is per-user (same permissions as OAuth login)
+- Reads and drafts only (migration 037, #470). A token can use the read and preview tools and ask for the confirmation link (`request_send`). It cannot send, pay, redeem a promo code, or mint or revoke tokens. A send from a token becomes the link where the person sends it themselves ([letter-send-flow.md](letter-send-flow.md))
 
 ---
 

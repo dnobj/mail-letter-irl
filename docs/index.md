@@ -1,6 +1,6 @@
 # Letter IRL Documentation Index
 
-**Last Updated:** September 16, 2026
+**Last Updated:** October 6, 2026
 **Purpose:** Central navigation hub for all Letter IRL documentation
 
 Letter IRL prints and mails real US letters and postcards composed in ChatGPT. This repository is the
@@ -28,18 +28,22 @@ maintenance job.
 - [User Stories](user-stories.md) - stories and acceptance criteria
 - [Personas](personas.md) - user personas for design and testing
 - [Business Overview](business-overview.md) - users, model, goals, positioning
-- [Pricing and Credits](pricing-and-credits.md) - letter packs, Pay & Send, specifications, refunds
+- [Pricing and Credits](pricing-and-credits.md) - letter packs, Pay & Send, specifications, refunds, and `/capabilities.json`
 - [Letter Packages](credit-packages-spec.md) - pack definitions (plus planned ACP feed material)
 - [Account and Credits](account-credits.md) - how credits, letters and balances relate
+- [Gift Letters](gift-letters.md) - free sends that print a card with a code for the recipient (built, off by default)
 - [Just-in-Time Purchase Plan](just-in-time-purchase-plan.md) - Pay & Send design record (shipped)
 - [Future Roadmap](future-roadmap.md) - out-of-scope features and plans
+- [Letter Creator Vision](letter-creator-vision.md) - the mail-studio goal: principles, 13 concepts, interactive demos, and the build order (#534, #535)
+- [Plugin Extensions Plan](plugin-extensions-plan.md) - the ChatGPT home, selection, deep links, rich forms and the side panel: order, state and what each waits for (#652)
+- [Letter IRL Home](letter-home.md) - the sidebar home in ChatGPT: what it shows, its flags and its rollout (#639)
 
 ---
 
 ## MCP Tools, Widgets and the Apps SDK
 
-- [MCP Tool APIs](tool-apis.md) - the 22 tools, schemas, and how to add one
-- [UI Widgets](ui-widgets.md) - the 6 widgets, bridge notes, CSP
+- [MCP Tool APIs](tool-apis.md) - the tools, schemas, and how to add one
+- [UI Widgets](ui-widgets.md) - the widgets, bridge notes, CSP
 - [Status Labels](status-labels.md) - letter status values across database, API, dashboard, PostGrid
 - [OpenAI Apps SDK Guidelines](apps-sdk-guidelines.md) - Apps SDK guidance that affects Letter IRL
 - [App Instructions](app-instructions.md) - app description, onboarding copy, assistant instructions
@@ -57,10 +61,13 @@ maintenance job.
 - [Environment Files](env-files.md) - every `.env` file and what reads it
 - [Database Setup](database-setup.md) - creating and connecting to Neon
 - [Infrastructure](infrastructure.md) - cloud topology, runtime architecture, maintenance tasks
+- [Stripe custom checkout domain](stripe-custom-domain.md) - serving Checkout on pay.letterirl.com, and the order to set it up in (#373)
 - [Deployment](deployment.md) - release process and boot validation rules
+- [Launch Promotion Plan](launch-promotion.md) - the launch promotion: order, per-system steps, checks and rollback floors (#702)
 - [Railway Setup](railway-setup.md) - services, commands, variables, Serverless policy
 - [Idle-Cost Operations](idle-cost-operations.md) - cost controls and rollback runbook
 - [Admin Panel Guide](admin-panel-guide.md) - the tailnet-only operator panel in both environments
+- [Operational Acceptance](operational-acceptance.md) - watching, stopping and restoring the service before launch (#408)
 - [Manual Tests](manual-tests.md) - manual acceptance cases and their run records
 - [Testing with the Dummy Provider](testing-dummy-provider.md) - local sends without mailing anything
 - [Testing PostGrid](testing-postgrid.md) - PostGrid in test mode
@@ -81,6 +88,7 @@ maintenance job.
 ## Security, Privacy and Legal
 
 - [Security and Policy](security-and-policy.md) - consent, personal data, abuse prevention, retention, payment invariants
+- [Account Erasure](account-erasure.md) - carrying out a request to delete an account, and the steps done by hand
 - [Privacy Policy](privacy-policy.md) - published privacy policy
 - [Terms of Service](terms-of-service.md) - published terms
 
@@ -92,6 +100,8 @@ maintenance job.
 - [OpenAI Apps SDK Owner Checklist](app-submission/owner-checklist.md) - owner-managed tasks and the readiness gate
 - [OpenAI Test Cases](app-submission/openai-test-cases.md) - test prompts, expected behavior, tool annotations
 - [Demo Scenarios](app-submission/demo-scenarios.md) - demo scenarios for submission videos and reviewers
+- [MCP Registry](mcp-registry.md) - the listing in the official MCP Registry, and how to publish it
+- [MCP Clients Plan](mcp-multi-client-plan.md) - Claude, Codex and other agents before launch: send safety, sign-in, cards, the Connect page (#145)
 
 ---
 
@@ -103,12 +113,14 @@ Debugging notes and decision records.
 - [App Integration Learnings](learnings/app-integration-learnings.md) - integration quirks
 - [ChatGPT Auth0 OAuth Learnings](learnings/chatgpt-auth0-oauth-learnings.md) - OAuth debugging
 - [OAuth Metadata Is a Contract](learnings/oauth-metadata-is-a-contract.md) - where ChatGPT actually reads OAuth scopes
+- [ChatGPT Connector OIDC Setting](learnings/chatgpt-connector-oidc-setting.md) - untick OIDC on every ChatGPT connector, or the first link fails (#424)
 - [DCR Static Client Workaround](learnings/dcr-static-client-workaround.md) - the rollback-only registration shim
 - [Claude Desktop MCP](learnings/claude-desktop-mcp.md) - MCP client setup
 - [Generate Image Removal Decision](learnings/generate-image-removal-decision.md) - image generation history and the hybrid tool
 - [Widget CSP Enforcement](learnings/widget-csp-enforcement.md) - widget Content Security Policy evidence
 - [Widget Debugging Notes](learnings/widget-debugging-notes.md) - widget lifecycle and bridge debugging
 - [Suite Address Verification](learnings/suite-address-verification.md) - USPS secondary-unit handling
+- [PostGrid PDF Rendering](learnings/postgrid-pdf-rendering.md) - PostGrid flattens our PDFs at 300 dpi; the address zone it stamps (#534)
 - [Tool Annotation Decision](learnings/tool-annotation-decision.md) - MCP tool annotation correctness
 - [Layout Options Research](learnings/layout-options-research.md) - letter layout research
 
@@ -122,6 +134,7 @@ Not built yet.
 - [ACP Quickstart](acp-quickstart.md) - the phased ACP plan
 - [ACP Stripe Integration](acp-stripe-integration.md) - Shared Payment Token handling for ACP
 - [ACP Purchase Flow](credit-purchase-flow.md) - the planned in-ChatGPT purchase flow
+- [September 2026 Architecture Review](architecture-review-2026-09.md) - modularization recommendations to evaluate, with their status on 2026-10-15; not an implementation mandate
 
 ---
 
@@ -139,7 +152,7 @@ Kept for context. Most carry a banner saying what has changed; treat anything he
 - [PostGrid API Research](postgrid-api-research.md) - PostGrid research notes
 - [Account Switching Guide](account-switching-guide.md) - switching accounts; its `switch_account` tool was removed
 - [OAuth Plan](oauth-plan.md) - original Google Cloud/Firestore identity plan (never built)
-- [MCP SSE Plan](mcp-sse-plan.md) - SSE transport plan
+- [MCP SSE Plan](mcp-sse-plan.md) - SSE transport plan (superseded: the transport is retired, #730)
 - [Generated Image Result Bridge Plan](generated-image-result-bridge-plan.md) - `_meta` partitioning design
 - [Admin Interface Modernization Plan](admin-interface-modernization-plan.md) - superseded local-only admin plan; see the Admin Panel Guide
 - [Archived Dashboard Implementation](archive/dashboard-implementation.md), [quick reference](archive/dashboard-quick-reference.md), [setup guide](archive/dashboard-setup-guide.md) - the first customer dashboard
@@ -154,7 +167,7 @@ Kept for context. Most carry a banner saying what has changed; treat anything he
 npm run dev          # Development with watch
 npm run build        # Compile to dist/
 npm start            # Run the compiled server
-npm run verify       # Lint, build, unit and submission tests
+npm run verify       # Lint, build, the test type-check ratchet, unit and submission tests
 ```
 
 ### Admin Operations

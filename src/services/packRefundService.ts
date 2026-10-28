@@ -42,6 +42,7 @@ import { lockAccountForBalanceChange } from './accountLock.js';
 import {
   compensatePackRefund,
   lockPackRefund,
+  raisePackRefundAlertOnce,
   recordOrderEvent,
   revokePackLots,
   settlePackRefund,
@@ -68,6 +69,9 @@ const TERMINAL_STRIPE_REFUND_CODES = new Set([
   'amount_too_large',
   'amount_too_small'
 ]);
+
+/** How long a command may wait on a Stripe that cannot be asked before it alerts (#730). */
+const UNCONFIRMED_ALERT_AFTER_MS = 24 * 60 * 60 * 1000;
 
 /** Dispute statuses under which no money was, or will be, taken from us. */
 const NON_LOSS_DISPUTE_STATUSES = [
@@ -543,7 +547,11 @@ async function handleStripeFailure(row: PackRefundRow, error: unknown): Promise<
  * key may be pruned after 24 hours and a blind retry past that point would
  * create a second refund; only if nothing is found is the create retried with
  * the stored key. Rows pending for 30 days are re-read from Stripe. Rows past
- * the attempt limit are compensated.
+ * the attempt limit are compensated only once Stripe has said it holds no
+ * refund for them (#730): the last create may have refunded after timing out,
+ * and compensating then would leave the customer the money and the letters.
+ * While Stripe cannot be asked, such a row waits for the next sweep, with one
+ * alert for the operator.
  */
 export async function reconcilePackRefunds(
   stripeRefunds: PackRefundOperations = livePackRefundOperations,
@@ -553,32 +561,92 @@ export async function reconcilePackRefunds(
   const delaySeconds =
     options.retryDelaySeconds ?? positiveIntegerSetting('PACK_REFUND_RETRY_DELAY_SECONDS', 300, 60);
   const attemptLimit = positiveIntegerSetting('PACK_REFUND_STRIPE_ATTEMPT_LIMIT', 5, 1);
+  // Least recently touched first, so rows Stripe cannot be asked about, whose
+  // turn moves on below, do not keep newer ones from their turn (#730).
   const due = await query<PackRefundRow>(
     `SELECT * FROM commerce_pack_refunds
       WHERE status = 'letters_revoked' AND updated_at <= NOW() - ($1 * INTERVAL '1 second')
-      ORDER BY created_at ASC LIMIT 50`,
+      ORDER BY updated_at ASC, created_at ASC LIMIT 50`,
     [delaySeconds]
   );
   for (const row of due.rows) {
+    const atLimit = row.stripe_attempts >= attemptLimit;
+    let refunds: Awaited<ReturnType<PackRefundOperations['listPaymentRefunds']>>;
     try {
-      if (row.stripe_attempts >= attemptLimit) {
+      refunds = await stripeRefunds.listPaymentRefunds(row.stripe_payment_intent_id);
+    } catch (error) {
+      const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
+      writeDiagnostic('error', 'pack_refund.sweep_failed', { errorClass });
+      // Waits for the next sweep: its updated_at moves, so rows Stripe cannot
+      // be asked about do not hold the front of the queue (#730). Under the
+      // same locks as every other path, and only while it still waits.
+      await transaction(async client => {
+        await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [row.order_id]);
+        const locked = await lockPackRefund(client, row.pack_refund_id);
+        if (!locked || locked.status !== 'letters_revoked') return;
+        await client.query(
+          `UPDATE commerce_pack_refunds SET updated_at = NOW() WHERE pack_refund_id = $1`,
+          [row.pack_refund_id]
+        );
+        // At the attempt limit, or after a day of waiting: a failed list
+        // spends no attempt, so a row Stripe can never be asked about would
+        // otherwise wait with its letters taken and no one told.
+        const waitedMs = Date.now() - new Date(locked.created_at).getTime();
+        if (atLimit || waitedMs >= UNCONFIRMED_ALERT_AFTER_MS) {
+          await raisePackRefundAlertOnce(client, locked, 'stripe_unconfirmed', { attempts: locked.stripe_attempts, errorClass });
+        }
+      }).catch(waitError => {
+        writeDiagnostic('error', 'pack_refund.sweep_wait_failed', {
+          errorClass: classifyDiagnosticError(waitError, 'database_error')
+        });
+      });
+      continue;
+    }
+    try {
+      // This command's refund names it and is for its amount (#730). One that
+      // names it for another amount is not its money: the sweep goes on as if
+      // Stripe held none, and that refund's own webhook opens the alert for
+      // money the app did not issue.
+      // Of several, the one that went through, then one still on its way, then
+      // the newest: Stripe lists the newest first, and a newer pending or
+      // failed one must not hide the refund that went through (#730).
+      const candidates = refunds.filter(
+        refund => refund.metadata?.packRefundId === row.pack_refund_id && refund.amount === row.amount_cents
+      );
+      const found =
+        candidates.find(refund => refund.status === 'succeeded') ??
+        candidates.find(refund => refund.status !== 'failed' && refund.status !== 'canceled') ??
+        candidates[0];
+      const passedOver = refunds.filter(
+        refund => refund.metadata?.packRefundId === row.pack_refund_id && refund.amount !== row.amount_cents
+      );
+      if (passedOver.length > 0) {
+        // On the order, so whoever reads the compensation or the retry that
+        // follows sees Stripe did hold a refund naming this command.
+        await transaction(async client => {
+          await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [row.order_id]);
+          await recordOrderEvent(client, row.order_id, 'pack_refund.sweep_passed_over', null, null, {
+            packRefundId: row.pack_refund_id,
+            amountCents: row.amount_cents,
+            refunds: passedOver.map(refund => ({ stripeRefundId: refund.id, amountCents: refund.amount, status: refund.status }))
+          });
+        });
+      }
+      if (found) {
+        await finalizeWithStripe(row, found, 'pack_refund.sweep_adopted');
+        result.adopted += 1;
+      } else if (atLimit) {
         const outcome = await transaction(async client => {
           await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [row.order_id]);
           const locked = await lockPackRefund(client, row.pack_refund_id);
           if (!locked || locked.status !== 'letters_revoked') return null;
           return compensatePackRefund(client, locked, {
-            lastErrorCode: 'PACK_REFUND_STRIPE_UNREACHABLE',
-            failureReason: `Stripe unreachable after ${row.stripe_attempts} attempts`
+            // Stripe answered, and holds no refund for this command.
+            lastErrorCode: 'PACK_REFUND_NOT_AT_STRIPE',
+            failureReason: 'not_at_stripe'
           });
         });
         if (outcome) result.compensated += 1;
-        continue;
-      }
-      const refunds = await stripeRefunds.listPaymentRefunds(row.stripe_payment_intent_id);
-      const found = refunds.find(refund => refund.metadata?.packRefundId === row.pack_refund_id);
-      if (found) {
-        await finalizeWithStripe(row, found, 'pack_refund.sweep_adopted');
-        result.adopted += 1;
       } else {
         await submitPackRefund(row, stripeRefunds);
         result.retried += 1;

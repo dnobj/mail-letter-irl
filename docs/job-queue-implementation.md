@@ -5,8 +5,8 @@
 
 > pg-boss was removed. Confirmed sends now commit a `letter_jobs` outbox row with the order and are
 > submitted in the same request; an hourly Railway cron recovers the rest
-> ([letter-send-flow.md](letter-send-flow.md), migrations 020 and 023). `src/services/jobQueue.ts`
-> survives only as a stub that throws. Kept for the design history.
+> ([letter-send-flow.md](letter-send-flow.md), migrations 020 and 023). The last pg-boss stubs
+> (`src/services/jobQueue.ts`, `src/workers/letterWorker.ts`) were deleted in #686. Kept for the design history.
 **Technology:** pg-boss (PostgreSQL-backed job queue)
 
 ---

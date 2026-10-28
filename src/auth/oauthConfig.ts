@@ -6,7 +6,24 @@
  */
 export const PRODUCT_SCOPES = ["mail:read", "mail:draft", "mail:send"] as const;
 
-export const IDENTITY_SCOPES = ["openid", "profile", "email"] as const;
+/**
+ * Identity scopes: advertised, and since #425 asked for on every tool. Never
+ * demanded by a tool. ChatGPT does ask for them, but Auth0 grants none of
+ * them to ChatGPT: its CIMD client is a strict third-party client, and strict
+ * mode supports no OIDC scopes and no ID token in Auth0's current release
+ * (#424). ChatGPT identifies a connected account through the profile tool
+ * (src/tools/getProfile.ts) instead, and its connector must be created with
+ * "OIDC enabled" unticked, or the first link fails. These stay because
+ * advertising and requesting must agree, and because a client registered
+ * outside strict mode can use them.
+ *
+ * `profile` is deliberately absent. OpenAI's Apps SDK auth guidance names
+ * `openid` and `email`; `profile` is the widest OIDC scope - name, picture,
+ * locale and more - and is asked for by nothing we know of. Add it only if
+ * ChatGPT is shown to need a display name for its account picker, and say so
+ * here when you do.
+ */
+export const IDENTITY_SCOPES = ["openid", "email"] as const;
 
 /**
  * Grant types this deployment supports, advertised in authorization-server
@@ -47,6 +64,12 @@ export const DEFAULT_OAUTH_SCOPES = [
 
 export interface OAuthConfig {
   issuer: string;
+  /**
+   * Issuers accepted on tokens beside `issuer`, never published. A tenant moving to a custom domain stamps new tokens
+   * with the new address while apps that connected before keep refreshing at the old one, so for a while both are
+   * real. Each must be on the environment's allowlist, as `issuer` must.
+   */
+  additionalIssuers: string[];
   authorizationEndpoint: string;
   tokenEndpoint: string;
   jwksUri: string;
@@ -84,8 +107,13 @@ export function getOAuthConfig(env: NodeJS.ProcessEnv = process.env): OAuthConfi
   // the /mcp resource. Nothing needs a second audience.
   const audience = parseList(env.LETTER_IRL_OAUTH_AUDIENCE);
 
+  const issuer = env.LETTER_IRL_OAUTH_ISSUER ?? "";
+
   return {
-    issuer: env.LETTER_IRL_OAUTH_ISSUER ?? "",
+    issuer,
+    additionalIssuers: [...new Set(parseList(env.LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS))].filter(
+      (extra) => extra !== issuer
+    ),
     authorizationEndpoint: env.LETTER_IRL_OAUTH_AUTH_ENDPOINT ?? "",
     tokenEndpoint: env.LETTER_IRL_OAUTH_TOKEN_ENDPOINT ?? "",
     jwksUri: env.LETTER_IRL_OAUTH_JWKS_URI ?? "",
@@ -150,6 +178,12 @@ export function validateOAuthConfig(
       }
     }
   }
+  for (const extra of config.additionalIssuers) {
+    const extraUrl = requireHttpsUrl("LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS", extra, errors);
+    if (extraUrl && !extra.endsWith("/")) {
+      errors.push("Each LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS entry must end with /");
+    }
+  }
   if (resourceUrl && !resourceUrl.pathname.endsWith("/mcp")) {
     errors.push("LETTER_IRL_MCP_RESOURCE must be the exact canonical /mcp endpoint");
   }
@@ -167,7 +201,15 @@ export function validateOAuthConfig(
   if (config.algorithms.length !== 1 || config.algorithms[0] !== "RS256") {
     errors.push("LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS must be exactly RS256");
   }
-  for (const scope of PRODUCT_SCOPES) {
+  // Every scope a tool asks the customer to grant must be advertised here
+  // too. These are two separate channels - the per-tool securitySchemes carry
+  // the request, this list is what the metadata documents - and
+  // LETTER_IRL_OAUTH_SCOPES can override the default. Without this a
+  // deployment can request openid and offline_access per tool while
+  // advertising neither, which is the same advertised-versus-requested drift
+  // that caused #160, just pointing the other way. It bites hardest
+  // in static-DCR mode, where our metadata IS the document ChatGPT reads.
+  for (const scope of [...PRODUCT_SCOPES, ...SESSION_SCOPES, ...IDENTITY_SCOPES]) {
     if (!config.scopes.includes(scope)) {
       errors.push(`LETTER_IRL_OAUTH_SCOPES must include ${scope}`);
     }
@@ -181,22 +223,31 @@ export function validateOAuthConfig(
     );
   }
 
+  // The allowlist may name more than one issuer: a tenant's own address and its custom domain. Every issuer this
+  // deployment accepts, published or not, must be on it, so a token from the other environment's tenant can never be.
   const deploymentEnvironment = env.LETTER_IRL_DEPLOYMENT_ENVIRONMENT;
-  const expectedIssuer =
+  const allowlist =
     deploymentEnvironment === "development"
-      ? env.LETTER_IRL_OAUTH_DEV_ISSUER
+      ? parseList(env.LETTER_IRL_OAUTH_DEV_ISSUER)
       : deploymentEnvironment === "production"
-        ? env.LETTER_IRL_OAUTH_PROD_ISSUER
+        ? parseList(env.LETTER_IRL_OAUTH_PROD_ISSUER)
         : undefined;
   if (
     (deploymentEnvironment === "development" || deploymentEnvironment === "production") &&
-    !expectedIssuer
+    (!allowlist || allowlist.length === 0)
   ) {
     errors.push(
       `LETTER_IRL_OAUTH_${deploymentEnvironment === "development" ? "DEV" : "PROD"}_ISSUER is required for environment isolation`
     );
-  } else if (expectedIssuer && config.issuer !== expectedIssuer) {
-    errors.push(`OAuth issuer does not match the ${deploymentEnvironment} issuer allowlist`);
+  } else if (allowlist && allowlist.length > 0) {
+    if (!allowlist.includes(config.issuer)) {
+      errors.push(`OAuth issuer does not match the ${deploymentEnvironment} issuer allowlist`);
+    }
+    for (const extra of config.additionalIssuers) {
+      if (!allowlist.includes(extra)) {
+        errors.push(`An additional OAuth issuer is not on the ${deploymentEnvironment} issuer allowlist`);
+      }
+    }
   }
   if (
     deploymentEnvironment === "production" &&

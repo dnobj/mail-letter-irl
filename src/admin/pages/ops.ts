@@ -1,18 +1,61 @@
 import type { RetentionPreviewResult } from "../../services/retentionService.js";
-import type { FeatureRequestView, QuarantineView, RetentionCounts, RoutingRow, StuckLetterView, TokenStatsView } from "../queries/ops.js";
+import type {
+  FeatureRequestView,
+  QuarantineView,
+  RestoreOperationView,
+  RetentionCounts,
+  RoutingRow,
+  StuckLetterView,
+  TokenStatsView,
+} from "../queries/ops.js";
 import { html, join, type SafeHtml } from "../ui/html.js";
+import { csrfField } from "../ui/layout.js";
 import { statusBadge } from "../ui/format.js";
 import { accountLink, card, definitionList, letterLink, table, when } from "./common.js";
+
+/** Why the maintenance run refused a restore (retentionService.handleRetentionRestore). */
+const RESTORE_REFUSALS = new Map<string, string>([
+  // Purged when its window closed, or deleted by an account erasure.
+  ["window_closed", "the copy was removed before the run"],
+  ["not_redacted", "the content was already live"],
+  ["no_such_copy", "the request named no copy"],
+]);
+
+function sourceRow(sourceTable: string | null, sourceId: string | null): SafeHtml {
+  if (sourceTable === "letters") return letterLink(sourceId);
+  return sourceId ? html`<span class="mono">${sourceId}</span>` : html`—`;
+}
+
+function restoreOutcome(restore: RestoreOperationView): SafeHtml {
+  if (restore.status === "pending") {
+    // A failed attempt is retried at the next run, up to three in all.
+    const lastError = restore.result?.lastErrorClass;
+    return restore.attempts > 0
+      ? html`<span class="warn-text">retrying</span> after ${restore.attempts} failed ${restore.attempts === 1 ? "attempt" : "attempts"}${typeof lastError === "string" ? html` (<code>${lastError}</code>)` : ""}`
+      : html`queued`;
+  }
+  if (restore.status === "processing") return html`running`;
+  if (restore.status === "succeeded") {
+    return restore.result?.alreadyRestored === true ? html`restored by an earlier request` : html`restored`;
+  }
+  const reason = restore.result?.reason ?? restore.result?.errorClass;
+  const label = typeof reason === "string" ? (RESTORE_REFUSALS.get(reason) ?? reason) : null;
+  return html`<span class="bad-text">${restore.errorCode ?? "failed"}</span>${label ? html`: ${label}` : ""}`;
+}
 
 export function renderRetention(input: {
   counts: RetentionCounts;
   quarantine: QuarantineView[];
+  restores: RestoreOperationView[];
+  search: string | null;
+  /** A search too long to be any id, which was ignored. */
+  searchIgnored?: boolean;
   report: RetentionPreviewResult | null;
   reportError: string | null;
 }): SafeHtml {
   const { counts, report } = input;
   return html`<h1>Content retention</h1>
-<p class="muted">Report mode only. The hourly maintenance run redacts content past the published window; the restore path stays closed until its known defects are fixed, so there is no restore button here.</p>
+<p class="muted">Once a day the maintenance run counts what is past the published window, and with <code>CONTENT_RETENTION_MODE=enforce</code> on the maintenance service it moves that content into the quarantine below. A copy can be put back while its window is open; the restore is queued and the next hourly run carries it out.</p>
 <div class="cards">
   ${card("letters redacted", counts.lettersRedacted)}
   ${card("drafts redacted", counts.draftsRedacted)}
@@ -25,6 +68,7 @@ ${
   report
     ? html`${definitionList([
         ["letters due", html`${report.letters.due} (past window: ${report.letters.pastWindow}; held back: ${report.letters.heldBack}; oldest due ${report.letters.oldestDueDays ?? "—"} days)`],
+        ["cancelled held letters due", html`${report.cancelledHeldLetters.due} (held back: ${report.cancelledHeldLetters.heldBack}; emptied 4 days after the customer's cancel, its copy kept to day 7, #701)`],
         ["paid drafts due", html`${report.paidDrafts.due} (held back: ${report.paidDrafts.heldBack})`],
         ["abandoned drafts due", html`${report.abandonedDrafts.due} (held back: ${report.abandonedDrafts.heldBack})`],
       ])}
@@ -32,16 +76,42 @@ ${
     : html`<p class="bad-text">The report could not run${input.reportError ? html` (<code>${input.reportError}</code>)` : ""}.</p>`
 }
 <h2>Quarantine (metadata only)</h2>
+<form method="get" action="/retention" class="stack" role="search">
+  <label for="q">Find the copies of one letter or draft, or of every letter and draft on an account: its exact letter id, draft id or Auth0 subject</label>
+  <input type="search" id="q" name="q" value="${input.search ?? ""}" maxlength="255" autocomplete="off">
+  <div><button type="submit">Find</button>${input.search ? html` <a href="/retention">Show the newest</a>` : ""}</div>
+</form>
+${input.searchIgnored ? html`<p class="bad-text" role="alert">That search is longer than any id, so it was ignored.</p>` : ""}
+<p class="muted">${input.search ? html`Copies matching <code>${input.search}</code>, newest first.` : "The newest 100 copies. Search to find an older one."}</p>
 ${table(
   "redacted_content_quarantine",
-  ["Source", "Row", "Quarantined", "Purge after"],
+  ["Source", "Row", "Account", "Quarantined", "Purge after", "Restore"],
   input.quarantine.map((row) => [
     html`${row.sourceTable}`,
-    row.sourceTable === "letters" ? letterLink(row.sourceId) : html`<span class="mono">${row.sourceId}</span>`,
+    sourceRow(row.sourceTable, row.sourceId),
+    accountLink(row.userId),
     when(row.quarantinedAt),
     when(row.purgeAfter),
+    html`<form method="get" action="/commands/retention.restore/preview" class="inline">
+  <input type="hidden" name="target" value="${row.quarantineId}">
+  <button type="submit">Preview restore…</button>
+</form>`,
   ]),
-  "empty.",
+  input.search ? "no copy matches." : "empty.",
+)}
+<h2>Recent restores</h2>
+<p class="muted">A restore is queued on confirmation and carried out by the next hourly maintenance run. A copy that went back leaves the quarantine, so this is where its outcome shows.</p>
+${table(
+  "Restores",
+  ["Requested", "Source", "Row", "Outcome", "Finished"],
+  input.restores.map((restore) => [
+    when(restore.requestedAt),
+    html`${restore.sourceTable ?? "—"}`,
+    sourceRow(restore.sourceTable, restore.sourceId),
+    restoreOutcome(restore),
+    when(restore.completedAt),
+  ]),
+  "none yet.",
 )}`;
 }
 
@@ -81,7 +151,7 @@ ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, e
 <h2>Provider status sync</h2>
 <form method="get" action="/commands/mail.status_sync/preview" class="stack">
   <input type="hidden" name="target" value="letters">
-  <label for="sync-days">Letters created in the last (days)</label>
+  <label for="sync-days">Letters mailed in the last (days)</label>
   <input type="number" id="sync-days" name="days" min="1" max="90" value="30">
   <label for="sync-mode">Mode</label>
   <select id="sync-mode" name="dryRun">
@@ -93,13 +163,13 @@ ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, e
 <h2>Letters stuck in a non-terminal status for 14+ days</h2>
 ${table(
   "Stuck letters",
-  ["Letter", "Status", "Created", "Days"],
-  input.stuck.map((letter) => [letterLink(letter.letterId), statusBadge(letter.status), when(letter.createdAt), html`${letter.daysInStatus}`]),
+  ["Letter", "Status", "Mailed", "Days"],
+  input.stuck.map((letter) => [letterLink(letter.letterId), statusBadge(letter.status), when(letter.mailedAt), html`${letter.daysInStatus}`]),
   "none.",
 )}`;
 }
 
-export function renderSupport(input: { tokenStats: TokenStatsView; featureRequests: FeatureRequestView[] }): SafeHtml {
+export function renderSupport(input: { tokenStats: TokenStatsView; featureRequests: FeatureRequestView[]; csrfToken?: string | null; mode?: string }): SafeHtml {
   const { tokenStats } = input;
   return html`<h1>Support</h1>
 <h2>Personal access tokens</h2>
@@ -126,5 +196,14 @@ ${table(
     when(request.resolvedAt),
   ]),
   "none.",
-)}`;
+)}
+<h2>Delete an address request</h2>
+<p class="muted">When the person an address request was sent to, or its sender, asks for it to be deleted (#701). The panel cannot read address requests: paste the whole link the person was sent, or the request id, and the next page confirms the delete. The link is reduced to its fingerprint before anything else sees it.</p>
+${input.mode === "full"
+    ? html`<form method="post" action="/support/address-request">
+  ${csrfField(input.csrfToken ?? null)}
+  <label>Link or request id <input type="text" name="request" autocomplete="off" spellcheck="false" required></label>
+  <button type="submit" class="danger">Preview the delete…</button>
+</form>`
+    : html`<p class="muted">Read-only mode: deleting an address request needs full mode.</p>`}`;
 }

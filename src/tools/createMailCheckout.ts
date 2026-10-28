@@ -1,11 +1,20 @@
 import { carriedDiagnosticClass, isTerminalDiagnosticClass } from '../utils/diagnosticLog.js';
 import { formatAmountForCurrency } from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { createMailCheckoutInputSchema, createMailCheckoutOutputSchema } from '../schemas.js';
 import { createJitCheckout } from '../services/commerceService.js';
+import { SpendLimitError } from '../services/betaSpendLimits.js';
+import { chooseAgainSentence, openArrivalsOf, openArrivalsSentence } from '../services/mailDateCapacity.js';
+import {
+  DuplicateMailError,
+  duplicateMailMessage,
+  isDuplicateMailError
+} from '../services/duplicateMailService.js';
 
 interface CreateMailCheckoutInput {
   draftId: string;
+  sendAnotherCopy?: boolean;
+  /** The content version the person was shown (#695). */
+  contentVersion?: string;
 }
 
 interface CreateMailCheckoutOutput {
@@ -18,9 +27,35 @@ interface CreateMailCheckoutOutput {
   status: string;
   reused: boolean;
   message: string;
+  /** Arrive-by (#726): an open checkout whose mail date has passed since it was opened. */
+  scheduleMissed?: { arriveBy: string; mailOn: string };
+}
+
+/**
+ * Said before the person pays an open checkout whose mail date has passed
+ * (#726): paid, it goes to the printer as soon as it can, so it may arrive
+ * after its date. Dates as the schedule carries them, YYYY-MM-DD.
+ */
+export function scheduleMissedSentence(schedule: { arriveBy: string; mailOn: string }): string {
+  return `This checkout was opened for mail to arrive by ${schedule.arriveBy}, but its day to go to the printer (${schedule.mailOn}) has passed. If it is paid, it goes to the printer as soon as it can and may arrive after ${schedule.arriveBy}. Tell the person this before they pay; to choose a new date instead, leave it unpaid until it closes, then set the arrival date again.`;
 }
 
 export function friendlyCheckoutError(error: unknown): Error {
+  // A daily limit (betaSpendLimits): Pay & Send checks the day's mail and
+  // the day's spending before it creates anything. The sentence is fixed and
+  // ours, and it says when to come back, so it is passed on as it is, as the
+  // send and pack tools do. Before this it fell to the default below, "Please
+  // try again", which cannot work until the next day (#511's follow-up).
+  if (error instanceof SpendLimitError) {
+    return Object.assign(new Error(error.message), { code: error.code });
+  }
+  // #412: server-authored, and the model needs this tool's own retry advice.
+  if (isDuplicateMailError(error)) {
+    return new DuplicateMailError(
+      error.duplicate,
+      duplicateMailMessage(error.duplicate, 'create_mail_checkout')
+    );
+  }
   const source = (error ?? {}) as { code?: string };
   // The helper, not a fifth hand-rolled cast: an unchecked cast asserts the
   // property is a string without verifying it, so a non-string class
@@ -54,9 +89,50 @@ export function friendlyCheckoutError(error: unknown): Error {
       return friendly(
         'This draft is expired or too close to expiry. Please create a new preview.'
       );
+    case 'DRAFT_IS_GIFT':
+      return friendly(
+        'This draft uses a gift letter, so there is nothing to pay. Send it with the Send action.'
+      );
+    case 'SCHEDULE_PASSED':
+      // Arrive-by (#535): refused before the charge, so nothing was paid.
+      return friendly(
+        'The day this mail was to go to the printer has passed, so it can no longer arrive by its date. Please create a new preview with a new arrival date.'
+      );
+    case 'SCHEDULE_FULL':
+      // #700: refused before the charge, so nothing was paid.
+      return friendly(
+        'Mail to arrive by its date is now fully booked, so nothing was charged. ' +
+          `${openArrivalsSentence(openArrivalsOf(error), new Date(), true)} ` +
+          chooseAgainSentence(openArrivalsOf(error), 'then try again')
+      );
     case 'PREPAID_BALANCE_AVAILABLE':
       return friendly(
         'You already have enough prepaid balance to send this draft. Use the Send action.'
+      );
+    case 'DRAFT_CHANGED':
+      // New words or a restyle changed its pages, and so its price, while the
+      // checkout was being made (#586): refused before any order, so a retry
+      // prices it as it is now.
+      return friendly(
+        'This letter changed while its payment was being opened, so nothing was charged. Please try again.'
+      );
+    case 'DRAFT_CHANGED_SINCE_SHOWN':
+      // An edit came after what the person saw (#695): refused before any order.
+      return friendly(
+        'This mail changed after it was shown, so nothing was charged. Show the person the mail as it is now (its preview card, or a new preview), and open the payment once they have seen it.'
+      );
+    case 'PREVIOUS_CHECKOUT_CLOSING':
+      // The letter changed after its last checkout opened, and that checkout
+      // is still closing at the old price (#586): nothing is charged here.
+      return friendly(
+        'This letter changed after its last payment link was opened, and that link is still closing. Please try again in a few minutes; it can take up to an hour.'
+      );
+    case 'JIT_OPTION_NOT_SOLD':
+      // Its option's flag is off (#578): nothing can pay for this draft now,
+      // so the way on is a new preview, which the option's absence keeps to
+      // what is sold.
+      return friendly(
+        "Pay & Send isn't available for this mail. Please create a new preview."
       );
     case 'JIT_NOT_CONFIGURED':
     case 'PACK_AMOUNT_NOT_CONFIGURED':
@@ -105,7 +181,9 @@ async function handler(
   try {
     const result = await createJitCheckout({
       userId: context.user.userId,
-      draftId: input.draftId
+      draftId: input.draftId,
+      allowDuplicate: input.sendAnotherCopy === true,
+      contentVersion: input.contentVersion
     });
     const pending = result.status === 'checkout_pending';
     return {
@@ -117,8 +195,9 @@ async function handler(
       expiresAt: result.expiresAt,
       status: result.status,
       reused: result.reused,
+      ...(pending && result.scheduleMissed ? { scheduleMissed: result.scheduleMissed } : {}),
       message: pending
-        ? `Pay ${result.currency.toUpperCase()} ${formatAmountForCurrency(result.amountCents, result.currency)} to authorize printing and mailing this exact physical item.`
+        ? `Pay ${result.currency.toUpperCase()} ${formatAmountForCurrency(result.amountCents, result.currency)} to authorize printing and mailing this exact physical item.${result.scheduleMissed ? ` ${scheduleMissedSentence(result.scheduleMissed)}` : ''}`
         : 'This purchase is already paid or being fulfilled. Check its purchase status instead of opening another checkout.'
     };
   } catch (error) {
@@ -131,11 +210,10 @@ export const createMailCheckoutTool: McpToolDefinition<
   CreateMailCheckoutOutput
 > = {
   name: 'create_mail_checkout',
+  title: 'Pay & Send a letter or postcard',
   description:
-    'Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward.',
+    'Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.',
   readOnly: false,
-  inputSchema: createMailCheckoutInputSchema,
-  outputSchema: createMailCheckoutOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Preparing secure checkout...',
     'openai/toolInvocation/invoked': 'Pay & Send checkout ready',

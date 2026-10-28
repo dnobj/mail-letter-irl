@@ -17,6 +17,8 @@ export interface CampaignView {
   endsAt: Date | null;
   requiresNewUser: boolean;
   status: string;
+  /** Non-null on a seed campaign (docs/gift-letters.md). */
+  giftGenerationsRemaining: number | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -38,6 +40,7 @@ interface CampaignRow {
   ends_at: Date | null;
   requires_new_user: boolean;
   status: string;
+  gift_generations_remaining: number | null;
   created_by: string | null;
   created_at: Date;
   updated_at: Date;
@@ -46,7 +49,7 @@ interface CampaignRow {
 const CAMPAIGN_COLUMNS = `
   campaign_id, code, name, description, credits_amount, expiration_policy, expiration_days,
   fixed_expiration_date, max_total_redemptions, max_per_user, current_redemptions, starts_at,
-  ends_at, requires_new_user, status, created_by, created_at, updated_at
+  ends_at, requires_new_user, status, gift_generations_remaining, created_by, created_at, updated_at
 `;
 
 function toCampaignView(row: CampaignRow): CampaignView {
@@ -66,6 +69,7 @@ function toCampaignView(row: CampaignRow): CampaignView {
     endsAt: row.ends_at,
     requiresNewUser: row.requires_new_user,
     status: row.status,
+    giftGenerationsRemaining: row.gift_generations_remaining,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -101,7 +105,9 @@ export interface CampaignRedemptionView {
   redemptionId: string;
   userId: string;
   emailMasked: string;
-  ledgerId: string;
+  /** Null when a seed campaign granted only a gift letter. */
+  ledgerId: string | null;
+  giftId: string | null;
   redeemedAt: Date;
 }
 
@@ -114,10 +120,11 @@ export async function listCampaignRedemptions(
     redemption_id: string;
     user_id: string;
     email: string;
-    ledger_id: string;
+    ledger_id: string | null;
+    gift_id: string | null;
     redeemed_at: Date;
   }>(
-    `SELECT r.redemption_id, r.user_id, u.email, r.ledger_id, r.redeemed_at
+    `SELECT r.redemption_id, r.user_id, u.email, r.ledger_id, r.gift_id, r.redeemed_at
      FROM promo_redemptions r JOIN users u ON u.user_id = r.user_id
      WHERE r.campaign_id = $1::uuid ORDER BY r.redeemed_at DESC LIMIT $2`,
     [campaignId, limit],
@@ -127,6 +134,7 @@ export async function listCampaignRedemptions(
     userId: row.user_id,
     emailMasked: maskEmail(row.email),
     ledgerId: row.ledger_id,
+    giftId: row.gift_id,
     redeemedAt: row.redeemed_at,
   }));
 }

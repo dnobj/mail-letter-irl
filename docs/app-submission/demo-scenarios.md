@@ -10,7 +10,7 @@ This document captures the recommended demo scenarios for OpenAI submission vide
 - Show how sending is paid for: prepaid letters bought in the conversation (or on `letterirl.com`), or Pay & Send for a single item
 - Show a playful, prose-forward letter flow
 - Show a visual, image-forward postcard flow
-- Show explicit preview-before-send confirmation
+- Show that only the person sends: the preview first, then **Send** pressed on the card (asked in chat, ChatGPT points to the card)
 - Show that Mail Letter IRL turns ChatGPT output into real physical mail
 
 ## Recommended demo sequence
@@ -64,7 +64,7 @@ This scenario is intentionally cheeky and memorable. It shows ChatGPT generating
 2. Confirm the response is routed into the inline-image letter preview flow
 3. Show the formatted letter preview and embedded image
 4. Emphasize that nothing is mailed yet
-5. Optionally show explicit send confirmation
+5. Optionally press **Send** on the card
 
 ## Scenario 2: Postcard With Edited Travel Photo
 
@@ -129,5 +129,5 @@ This scenario is a good candidate for mobile testing because it uses a realistic
 - Show the purchase step briefly (a pack checkout or Pay & Send), with Stripe Checkout opening outside ChatGPT
 - Avoid long typing pauses by preparing the prompts in advance
 - Make sure the preview widgets render fully before advancing
-- Keep send confirmation explicit and visible
+- Keep the **Send** press on the card visible: the person sends, never ChatGPT
 - If mobile image editing fails, switch to desktop or fallback flow instead of forcing a broken take

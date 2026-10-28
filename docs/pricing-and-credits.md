@@ -1,6 +1,6 @@
 # Letter IRL Pricing & Packages
 
-**Last Updated:** September 16, 2026
+**Last Updated:** October 2, 2026
 **Purpose:** Letter pack and Pay & Send pricing, letter specifications, and refund handling
 
 ## Overview
@@ -22,6 +22,11 @@ Letter IRL offers letter packages for purchase. Users buy letter packs and use t
 **Recommended:** Regular Pack - best balance of value and flexibility
 
 **Best Value:** Power Pack - 10% discount per letter compared to Regular
+
+**Gift letter:** while `LETTER_IRL_GIFT_LETTERS_ENABLED` is on, every pack also grants one gift
+letter: a free send that prints a card for the recipient with a code for a letter of their own
+([Gift Letters](gift-letters.md)). The pack price does not change. At most one further free letter
+descends from each pack's gift, so the most a pack's gift can cost is about $2.66 in postage.
 
 ---
 
@@ -198,7 +203,58 @@ Approving a launch price other than the pinned one requires a code edit and a
 deploy, not a Railway change.
 Payment authorizes immediate fulfillment of the immutable previewed item.
 
+### The mail options (#578, proposed)
+
+Letters longer than one page and postcards in other sizes are sold through Pay &
+Send only, each at its own price. The prices are the proposal on epic #537,
+used in development until the owner approves them:
+
+| Option | Product | Price | Flag |
+|--------|---------|-------|------|
+| One-page letter | `jit-letter` | $4.99 | none |
+| Two-page letter, double-sided | `jit-letter-2-pages` | $5.99 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` |
+| Three-page letter, double-sided | `jit-letter-3-pages` | $6.99 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` |
+| 4x6 postcard | `jit-postcard-4x6` | $3.99 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` |
+| 6x9 postcard | `jit-postcard` | $4.99 | none |
+| 11x6 postcard | `jit-postcard-11x6` | $5.99 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` |
+| Certified mail letter (one to three pages) | `jit-letter-certified` | $11.99 | `LETTER_IRL_CERTIFIED_MAIL_ENABLED` |
+| Certified mail letter with electronic return receipt | `jit-letter-certified-receipt` | $14.99 | `LETTER_IRL_CERTIFIED_MAIL_ENABLED` |
+
+Certified mail (#625) is USPS Certified Mail, sent through PostGrid's `extraService`, for a letter only: never a
+postcard, never a gift send. The price is flat for one to three pages. PostGrid's public prices are $6.94 for certified
+mail and $9.85 with the electronic return receipt. If those include the letter itself, these prices leave about $4.40
+after Stripe's fee; if they are added to the letter's own cost of roughly $1.06 (our 2025 notes of PostGrid's price list, in
+[layout-options-research.md](learnings/layout-options-research.md), list certified as an add-on), about $3.30. That is
+to be confirmed with PostGrid. They are the proposal on issue #625, the owner's call, used in development until
+approved. Production waits for that approval.
+
+- **Flags:** an option is sold only while its flag is on, as well as Pay & Send. Each flag also switches its option on, so an option is never offered without a price. The longer letters and the 4x6 and 11x6 postcards are offered only on our renderer as well (`LETTER_IRL_PRINT_RENDERER=pdf`, #586, #594).
+- **Off:** with its flag off, an option has no price at all. A quote offers no Pay & Send for it, and a checkout is refused rather than charging a smaller option's price.
+- **Ordering:** a checkout is priced by the product its order recorded.
+- **Fulfilment:** a paid order mails only the mail it paid for. A draft whose option no longer matches the order's product, such as a letter that changed length after its checkout opened, is refused (`JIT_PRODUCT_MISMATCH`) and the order goes to `refund_pending`, rather than mailing at another option's price (#586). A letter's pages are stored on its draft (`letter_drafts.pages`, migration 047), and every price, refusal and checkout reads them there.
+- **Packs and gift letters** pay for one-page standard letters and 6x9 postcards only (#579), in any layout and stationery. Every other option, certified mail included (#625), is paid per send with Pay & Send, whatever the balance:
+  - the quote offers no pack and no send from the balance for it;
+  - the send refuses a pack or gift letter for it (`PACK_CANNOT_PAY`);
+  - a Pay & Send checkout for it is never refused because the balance could pay.
+- **Where it is paid:** in an app that takes purchases (ChatGPT), on the card. In Claude, VS Code and for agents, on the confirmation page that the card's button and `request_send` link to.
+
 Qualifying purchases grant explicit image entitlements. The defaults are five
 per prepaid physical-mail entitlement and two future generations per completed
 JIT order (`IMAGE_ENTITLEMENTS_PER_JIT_ORDER`, default 2), both configurable. `IMAGE_TRIAL_ENABLED` remains false unless a
 separate, budget-capped acquisition experiment is approved.
+
+## Published capabilities and prices (#630)
+
+`GET /capabilities.json` (`src/api/capabilitiesApi.ts`) publishes what this deployment sells, for agents and for the
+website's `/capabilities` page and `llms.txt`, which are built from it. It needs no sign-in and may be cached for five
+minutes.
+
+- **Built from the tables above,** on each request: the packs and the Pay & Send prices from `src/config/products.ts`,
+  the options from the switches that offer them, and the delivery words the previews use (`src/content/delivery.ts`).
+- **Only what is offered:** a Pay & Send price appears only while its product is sold and the previews offer its option
+  (for the longer letters and the other postcard sizes, our renderer as well). Production therefore shows only what
+  production sells.
+- **Nothing internal:** no product codes, price ids, settings or flags.
+- **The test** (`tests/unit/api/capabilitiesApi.test.ts`) fails when a listed price disagrees with the product table, or
+  when a product is sold but not listed.
+- **The copy** is plain: the job, the cost, the delivery time, the limits and who sends. It promises no delivery date.

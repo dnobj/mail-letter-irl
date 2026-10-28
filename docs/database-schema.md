@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** September 8, 2026
+**Last Updated:** October 6, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as defined by `db/migrations` at the head of `dev` (Neon
@@ -23,7 +23,12 @@ migration 021 as its immediate predecessor.
 | Feedback | `feature_requests` |
 | System | `migrations`, `personal_access_tokens` |
 | Operations | `commerce_operational_alerts`, `commerce_operator_audit_events`, `maintenance_tasks`, `provider_routing` |
+| Daily limits | `daily_limit_overrides`, `daily_limit_refusals`, `daily_limit_defaults` |
 | Images | `image_entitlements`, `image_generation_reservations`, `recent_uploads` |
+| Gift letters | `gift_letters`, `gift_codes` |
+| Address requests | `address_requests` |
+| Signatures | `user_signatures` |
+| Stationery designs | `stationery_designs` |
 | Retention | `redacted_content_quarantine` |
 | Admin foundation | `admin_environment_marker`, `admin_audit_events`, `admin_command_runs`, `admin_operations` |
 
@@ -37,8 +42,8 @@ User accounts with credit balances and tier information.
 
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
-| user_id | VARCHAR(255) | NO | - | Primary key. Auth0 user ID |
-| email | VARCHAR(255) | NO | - | Unique email address |
+| user_id | VARCHAR(255) | NO | - | Primary key. Auth0 user ID (the linked identity's primary subject) |
+| email | VARCHAR(255) | NO | - | Unique confirmed email address. **This is the account's identity** |
 | credits | INTEGER | NO | 0 | Current credit balance (computed from ledger) |
 | credits_purchased | INTEGER | NO | 0 | Total credits ever purchased |
 | credits_used | INTEGER | NO | 0 | Total credits ever used |
@@ -47,11 +52,33 @@ User accounts with credit balances and tier information.
 | tier_calculated_at | TIMESTAMPTZ | YES | NOW() | Last tier calculation |
 | created_at | TIMESTAMPTZ | NO | NOW() | Account creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update (auto-trigger) |
+| erased_at | TIMESTAMPTZ | YES | NULL | Set by the account erasure (#289); sign-in refuses an erased account |
+| stationery_theme | TEXT | YES | NULL | The theme the account last chose (#563, migrations 045 and 046): `classic`, `monogram`, `botanical`, `celebration`, `typewriter` or `handwritten`. A letter preview that asks for none is drawn in it. Erasure clears it |
+| stationery_design_id | UUID | YES | NULL | The account's remembered stationery design (#649, migration 054): one of its own `stationery_designs` (composite FK with `user_id`); deleting the design clears it (ON DELETE SET NULL on this column only), and so does remembering a theme: a remembered design comes before the remembered theme, so the last choice is the one remembered. Erasure clears it |
+
+**Erased accounts (migration 035).** An erasure keeps the row as a tombstone, because orders, ledger
+lots, disputes and refunds keep foreign keys to it ([account-erasure.md](account-erasure.md)). The
+`users_erased_tombstone` check requires an erased row to have no return address and an
+`erased-<uuid>@erased.invalid` email, so no later write can put a real address back unless the same
+statement clears `erased_at`. The admin panel reads an account as erased from that placeholder, since
+neither admin role is granted `erased_at`.
 
 **Indexes:**
-- `idx_users_email` on email
+- `users_email_lower_key`, unique, on `lower(email)` (058; it replaced 001's inline `users_email_key` and `idx_users_email`)
 - `idx_users_created_at` on created_at
 - `idx_users_tier` on tier
+
+**The unique index on `lower(email)` is load-bearing, and it is called
+`users_email_lower_key`.** Auth0 mints a subject per sign-in method, so one person
+arriving by a second method presents an address the first already holds. The
+index is what stops that becoming two accounts, and since migration 058 (#730) it
+ignores case: `Bob@example.com` and `bob@example.com` are one address. Until then
+it was 001's inline UNIQUE, `users_email_key`, which compared the address as written.
+The address itself is kept as the sign-in gave it.
+- **Moving an address, or opening an account inside a grant:** `EmailAlreadyLinkedError` matches the index's name on a 23505 (PostgreSQL reports a unique index's name as the constraint), in `updateUserEmail` and in `ensureAccountRowWithClient`. A migration that renames or replaces the index has to update `EMAIL_UNIQUE_CONSTRAINT` in `src/services/userService.ts` to match.
+- **Opening an account on a first request:** `createUser` skips a conflict on any unique index, then reads what the conflict was (#457). The subject's own row means a request made at the same moment opened it. Otherwise, another subject holding the address, in any case, is the collision (`getUserByEmail` compares `lower(email)`, as the index does).
+
+Both are proven against a real database in `tests/integration/accountIdentity.postgres.test.ts` (`src/services/userService.ts`).
 
 ---
 
@@ -146,7 +173,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | body_text | TEXT | NO | - | Letter content (message for postcards) |
 | sign_off | TEXT | YES | - | Closing text (NULL for postcards) |
 | required_credits | INTEGER | NO | - | Credits needed (> 0) |
-| preview_html | TEXT | YES | - | Generated preview |
+| preview_html | TEXT | YES | - | Generated preview: the legacy HTML, or, when `renderer_version` is `pdf-1`, `pdf-2` or `pdf-3`, the page or pages as SVG in a minimal HTML document (#534): a gift letter's card and a postcard's back are pages too, a `pdf-2` page is drawn in its stationery (#563), and a `pdf-3` postcard's front with its border or greeting (#594) |
 | sender_validation | JSONB | YES | - | Cached address validation |
 | recipient_validation | JSONB | YES | - | Cached address validation |
 | status | draft_status | NO | 'pending' | pending, consumed, expired, cancelled |
@@ -154,8 +181,17 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | consumed_at | TIMESTAMPTZ | YES | - | When draft was sent |
 | consumed_letter_id | VARCHAR(255) | YES | - | FK to letters (after send) |
 | front_image_data | TEXT | YES | - | Base64 JPEG for postcard front (NULL for letters) |
-| front_image_url | TEXT | YES | - | Original image URL for debugging |
+| front_image_url | TEXT | YES | - | The photo's address: where `set_postcard_style` crops it again from at a new size, if what it holds now, made at the stored copy's size, is that copy byte for byte (#730), and otherwise from the stored copy; and how a collage is told from a photo. Every single photo records it; NULL for a collage (#616), for a letter, and once the draft is redacted |
 | postcard_size | VARCHAR(10) | YES | - | Postcard size: '6x9' (NULL for letters) |
+| is_gift_send | BOOLEAN | NO | false | Previewed as a gift send: funded by a gift letter and printed with its card (033) |
+| renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534), `pdf-2` for our own PDF in stationery (044, #563), `pdf-3` for a postcard with a front other than full bleed (048, #594), `pdf-4` for our own PDF with the person's signature, in any theme (051, #608). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
+| stationery | JSONB | YES | - | The stationery the preview was drawn in (044, #563): `{"theme": "monogram" \| "botanical" \| "celebration" \| "typewriter" \| "handwritten", "dateLine"?, "monogram"?, "headline"?}`. NULL is Classic. Set always with `renderer_version` `pdf-2`, and with `pdf-4` when the signed letter has a theme (051). The send copies it into `letters.content.stationery`; redaction keeps the theme and drops the slot text |
+| postcard_front | JSONB | YES | - | A postcard's front, when not full bleed (048, #594): `{"layout": "border", "caption"?}` (the photo in a white border over its caption) or `{"layout": "greetings", "place"}`. NULL is full bleed. Set exactly when `renderer_version` is `pdf-3`, and only on a postcard. The send copies it into `letters.content.postcardFront`, and the print reads it (`postcardFrontOf`); redaction keeps the layout and drops the caption or place |
+| signature_image | TEXT | YES | - | The person's signature as the letter was previewed with it (051, #608): a PNG data URI, the draft's own copy, so replacing or removing the saved one (`user_signatures`) never changes a letter already previewed. Set exactly when `renderer_version` is `pdf-4`, and only on a letter. The send copies it into `letters.content.signatureImage`, and the print draws it under the sign-off's first line. Redaction empties it to `''`, never NULL, which would break the pair |
+| arrive_by | DATE | YES | - | The date the mail should arrive by, in America/New_York; NULL to mail as soon as possible (040, #535) |
+| mail_on | DATE | YES | - | The date it goes to the printer, worked back from `arrive_by` by the lead time (040, #535). The send copies both to the letter and holds its job until then |
+| pages | SMALLINT | NO | 1 | The pages the letter prints on, 1 to 3, printed on both sides when more than 1 (047, #586). The send, the checkout and the confirmation page price and refuse the draft by it (`draftMailOption`): a letter of more than one page is paid per send. `createDraft` refuses a count it would not store, before writing (`DRAFT_PAGES_INVALID`). The send copies it into `letters.content.pages` when above one, for the print |
+| mail_service | TEXT | NO | 'standard' | How a letter travels (052, #625): `standard` (first-class mail), `certified` (USPS Certified Mail) or `certified_return_receipt` (with an electronic return receipt). Only a letter that is not a gift send is ever certified; it is paid per send (#579). The checkout, the confirmation page, the tools that read or restyle a ready letter and the send price and refuse the draft by it (`draftMailOption`, `letterOption`). The send copies it to the letter (`letters.mail_service`, 053) and the dispatch hands it to the provider as `extraService` |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
 
@@ -166,6 +202,19 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `postcard_requires_image`: Postcards must have front_image_data
 - `postcard_requires_size`: Postcards must have postcard_size
 - `valid_postcard_size`: postcard_size must be '6x4', '6x9', or '6x11'
+- `letter_drafts_renderer_version_known`: renderer_version must be NULL, 'pdf-1', 'pdf-2', 'pdf-3' or 'pdf-4' (039, then 044, 048 and 051; a new version extends it in its own migration)
+- `letter_drafts_stationery_theme_known`: stationery's theme is 'monogram', 'botanical', 'celebration', 'typewriter', 'handwritten' or 'custom', a saved design's copy with its design and name (044, 046, 054)
+- `letter_drafts_stationery_drawn_by_pdf_2`: stationery only with renderer_version 'pdf-2' or 'pdf-4', never with none, and 'pdf-2' always with stationery (044, then 051)
+- `letter_drafts_signature_letters_only`: signature_image only on a letter (051)
+- `letter_drafts_signature_drawn_by_pdf_4`: signature_image is set exactly when renderer_version is 'pdf-4' (051)
+- `letter_drafts_postcard_front_layout_known`: a postcard_front is a postcard's, and its layout is 'border' or 'greetings' (048)
+- `letter_drafts_postcard_front_drawn_by_pdf_3`: postcard_front is set exactly when renderer_version is 'pdf-3' (048)
+- `letter_drafts_schedule_pair`: arrive_by and mail_on are both set or both NULL (040)
+- `letter_drafts_schedule_order`: mail_on is never after arrive_by (040)
+- `letter_drafts_pages_known`: pages is 1 to 3 (047)
+- `letter_drafts_pages_paid_per_send`: more than one page only for a letter our renderer drew (renderer_version set), never a gift send (047, #586)
+- `letter_drafts_mail_service_known`: mail_service is 'standard', 'certified' or 'certified_return_receipt' (052)
+- `letter_drafts_mail_service_paid_per_send`: a service other than standard only for a letter, never a gift send (052, #625)
 
 **Indexes:**
 - `idx_letter_drafts_user_pending` on (user_id, status) WHERE status='pending'
@@ -188,8 +237,8 @@ Sent letters with content and tracking.
 | content | JSONB | NO | - | Letter content (body, sender, etc.) |
 | recipient | JSONB | NO | - | Recipient address |
 | credits_cost | INTEGER | NO | - | Credits charged (> 0) |
-| status | VARCHAR(50) | NO | - | queued, processing, sent, failed, cancelled |
-| preview_html | TEXT | YES | - | HTML preview |
+| status | VARCHAR(50) | NO | - | draft, queued, processing, held, sent, accepted, in_transit, delivered, returned, failed, cancelled (migration 023's `valid_letter_status`) |
+| preview_html | TEXT | YES | - | The draft's preview, copied at send: legacy HTML, or the page as SVG for a `pdf-1` or `pdf-2` letter (#534, #563) |
 | tracking_id | VARCHAR(255) | YES | - | Provider tracking ID (PostGrid) |
 | provider | VARCHAR(50) | YES | - | postgrid, dummy |
 | cost_cents | INTEGER | YES | - | Actual provider cost |
@@ -197,11 +246,27 @@ Sent letters with content and tracking.
 | created_at | TIMESTAMPTZ | NO | NOW() | Letter creation |
 | sent_at | TIMESTAMPTZ | YES | - | When sent to provider |
 | updated_at | TIMESTAMPTZ | YES | - | Last update |
+| arrive_by | DATE | YES | - | The date the mail should arrive by (America/New_York), copied from the draft at send; NULL when sent as soon as possible (040, #535) |
+| mail_on | DATE | YES | - | The date it goes to the printer; its job is held until 09:00 New York time that day (040, #535) |
+| mail_service | TEXT | NO | 'standard' | How the letter travelled (053, #625): `standard`, `certified` or `certified_return_receipt`, copied from the draft by the send. The print reads it (`LetterParams.extraService`); a provider that cannot honor it rejects the letter before sending, and what paid for it comes back |
+| carrier_tracking_number | TEXT | YES | - | The USPS number of a certified letter (053, #625), 1 to 64 characters, set by the status sync once PostGrid has it; NULL before that and for standard mail. Not `tracking_id`, which is PostGrid's own id for the letter |
+| print_layout_fingerprint | TEXT | YES | - | Held mail's print (065, #697): `fp<n>:` and a SHA-256 of what the print lays out (`src/render/fingerprint.ts`), recorded by the send for held mail our renderer draws. The print holds mail that lays out otherwise. NULL for mail not held, and cleared with the content by retention and erasure |
+| print_layout_engine | TEXT | YES | - | `layout-<n>` (`LAYOUT_ENGINE_VERSION`) that laid the mail out when it was fingerprinted (065, #697); set exactly when `print_layout_fingerprint` is |
+| print_pdf_sha256 | TEXT | YES | - | The SHA-256 (64 lowercase hex) of the PDF stored at `held-pdf/<letter_id>.pdf` in the private bucket (065, #697), set only after the upload succeeded, only with a fingerprint and only for mail with a `mail_on`. The print uploads those bytes when they hash to it. NULL otherwise |
 
 **Enums:**
 - `mail_type`: letter, postcard
 
+**Constraints:**
+- `letters_schedule_pair`: arrive_by and mail_on are both set or both NULL (040)
+- `letters_schedule_order`: mail_on is never after arrive_by (040)
+- `letters_mail_service_known`: mail_service is 'standard', 'certified' or 'certified_return_receipt' (053)
+- `letters_mail_service_letters_paid_per_send`: a service other than standard only for a letter paid with Pay & Send (funding_type jit_order): never a postcard, a pack or a gift letter (053, #625)
+- `letters_carrier_tracking_certified_only`: a carrier tracking number only on a letter with an extra service (053)
+- `letters_carrier_tracking_length`: a carrier tracking number is 1 to 64 characters (053)
+
 **Indexes:**
+- `idx_letters_held_mail_on` on mail_on WHERE status = 'queued' AND mail_on IS NOT NULL: mail waiting for its date (040)
 - `idx_letters_user_id` on user_id
 - `idx_letters_status` on status
 - `idx_letters_created_at` on created_at DESC
@@ -222,12 +287,13 @@ Background job tracking for letter processing.
 | status | VARCHAR(50) | NO | - | pending, processing, completed, failed, cancelled |
 | attempts | INTEGER | NO | 0 | Number of attempts |
 | max_attempts | INTEGER | NO | 3 | Retry limit |
-| scheduled_at | TIMESTAMPTZ | NO | - | When job should run |
-| started_at | TIMESTAMPTZ | YES | - | When processing started |
-| completed_at | TIMESTAMPTZ | YES | - | When finished |
+| scheduled_at | TIMESTAMP | NO | NOW() | When the job should run: for held mail (#535), the release time. Without a zone, written in the database session's zone (UTC), unlike `next_attempt_at` |
+| started_at | TIMESTAMP | YES | - | When processing started (without a zone, as `scheduled_at`) |
+| completed_at | TIMESTAMP | YES | - | When finished (without a zone, as `scheduled_at`) |
 | error_message | TEXT | YES | - | Legacy twin of `last_error`; an error class and provider status only, never provider or driver message text (migrations 031, 032) |
-| metadata | JSONB | YES | - | Job-specific data |
-| created_at | TIMESTAMPTZ | NO | NOW() | Job creation |
+| metadata | JSONB | YES | - | Job-specific data: `source`. Held mail also carries `heldUntil` (#535): before migration 055 the hold's only record, and for one release after it written beside `mail_hold_until` so code from before 055 still reads it after a rollback (#693). Nothing reads it now |
+| mail_hold_until | TIMESTAMPTZ | YES | - | The hold an arrive-by job was created with (#535; migration 055, #693): set when held mail's job is created, null for mail due now, and kept for the job's life, as `metadata.heldUntil` was. An operator's early release moves only `next_attempt_at`. Held now is `src/services/heldMail.ts`'s predicate: pending, not dispatched, never attempted, with a hold, and not yet due. Not the operator's `held` status, `held_at` and `hold_reason` (023) |
+| created_at | TIMESTAMP | NO | NOW() | Job creation (without a zone, as `scheduled_at`) |
 
 **Indexes:**
 - `idx_letter_jobs_status` on status
@@ -282,6 +348,14 @@ an error class only: `provider_rejected http_<status>` (migration 031), the draf
 rewrote earlier text (#394). The checkout and amount-mismatch codes store fixed server-authored
 sentences (amounts and product codes, never message text). The refund claim no longer writes it.
 
+For `jit_mail`, `product_snapshot.stripeRequest` records the Stripe Price and the return URLs the
+order's checkout sends (#279). A retry of an order whose session creation failed reuses the order,
+and its idempotency key, only when it would send the same request; otherwise it cancels the order
+(`PRICE_CHANGED_BEFORE_SESSION` or `CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION`) and opens a fresh one
+with a fresh key, because Stripe refuses a key it has seen with different parameters. Orders from
+before the field are compared on amount and currency alone. An arrive-by refusal (#726) cancels such an order too, with
+`SCHEDULE_PASSED` or `SCHEDULE_FULL`, and opens none: nothing was paid on it, and it held the draft.
+
 ### stripe_disputes
 
 Chargeback tracking for admin monitoring.
@@ -295,7 +369,7 @@ Chargeback tracking for admin monitoring.
 | amount_cents | INTEGER | NO | - | Dispute amount |
 | currency | TEXT | NO | 'usd' | Currency |
 | reason | TEXT | YES | - | Dispute reason |
-| status | TEXT | NO | 'open' | open, won, lost, under_review |
+| status | TEXT | NO | 'open' | Stripe's dispute status: warning_needs_response, warning_under_review, warning_closed (an inquiry), needs_response, under_review, won, lost, prevented; kept against an older status delivered late (#730) |
 | evidence_due_by | TIMESTAMPTZ | YES | - | Evidence deadline |
 | stripe_created_at | TIMESTAMPTZ | YES | - | When Stripe created dispute |
 | created_at | TIMESTAMPTZ | NO | NOW() | Record creation |
@@ -320,7 +394,7 @@ Promotional credit campaigns with redeemable codes.
 | code | VARCHAR(50) | NO | - | Unique promo code (case-insensitive) |
 | name | VARCHAR(255) | NO | - | Campaign name |
 | description | TEXT | YES | - | Description |
-| credits_amount | INTEGER | NO | - | Credits per redemption (> 0) |
+| credits_amount | INTEGER | NO | - | Credits per redemption (>= 0 since 007). Only a seed campaign may carry 0; 034 ended the ordinary ones that did |
 | expiration_policy | VARCHAR(50) | NO | 'days_from_activation' | Expiration policy |
 | expiration_days | INTEGER | YES | 90 | Days until credits expire |
 | fixed_expiration_date | TIMESTAMPTZ | YES | - | For fixed_date policy |
@@ -331,6 +405,7 @@ Promotional credit campaigns with redeemable codes.
 | ends_at | TIMESTAMPTZ | YES | - | Campaign end (NULL = no end) |
 | requires_new_user | BOOLEAN | NO | false | New users only |
 | status | VARCHAR(50) | NO | 'draft' | draft, active, paused, ended, expired |
+| gift_generations_remaining | INTEGER | YES | - | Set on a seed campaign: redeeming grants a gift letter with this budget (033) |
 | created_by | VARCHAR(255) | YES | - | Admin who created |
 | created_at | TIMESTAMPTZ | NO | NOW() | Creation timestamp |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
@@ -351,11 +426,15 @@ User promo code redemption tracking.
 | redemption_id | UUID | NO | gen_random_uuid() | Primary key |
 | campaign_id | UUID | NO | - | FK to promo_campaigns |
 | user_id | VARCHAR(255) | NO | - | FK to users |
-| ledger_id | UUID | NO | - | FK to credit_ledger |
+| ledger_id | UUID | YES | - | FK to credit_ledger; NULL when a seed campaign granted only a gift letter (033) |
+| gift_id | UUID | YES | - | FK to gift_letters, for a seed campaign (033) |
+| email_normalized | TEXT | YES | - | The redeemer's normalised email, written for seed campaigns only (033) |
 | redeemed_at | TIMESTAMPTZ | NO | NOW() | Redemption timestamp |
 
 **Constraints:**
 - UNIQUE(campaign_id, user_id) - One redemption per user per campaign
+- `promo_redemption_grants_something`: ledger_id or gift_id is set
+- `idx_promo_redemptions_campaign_email` (unique, partial): one claim of a seed campaign per normalised email
 
 ---
 
@@ -377,37 +456,43 @@ Historical record of all status changes for letters and postcards.
 
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
-| id | SERIAL | NO | - | Primary key |
-| letter_id | VARCHAR(255) | NO | - | FK to letters |
-| old_status | VARCHAR(50) | YES | - | Previous status (NULL for first entry) |
-| new_status | VARCHAR(50) | NO | - | New status |
+| history_id | SERIAL | NO | - | Primary key |
+| letter_id | TEXT | NO | - | FK to letters |
+| old_status | TEXT | YES | - | Previous status (NULL for the first entry) |
+| new_status | TEXT | NO | - | New status |
+| provider_raw_status | TEXT | YES | - | The provider's own status, when the change came from it |
+| source | TEXT | NO | `'sync'` | Where the change came from: `sync`, `send`, `manual`, `webhook`, `backfill`, `customer` for a cancel of held mail, or `erasure` for held mail an account erasure cancels (#535) |
 | changed_at | TIMESTAMPTZ | NO | NOW() | When status changed |
-| changed_by | VARCHAR(50) | YES | - | Source of change (system, worker, admin) |
-| metadata | JSONB | YES | - | Additional context |
 
 **Indexes:**
-- `idx_letter_status_history_letter_id` on letter_id
-- `idx_letter_status_history_changed_at` on changed_at DESC
+- `idx_letter_status_history_letter_id` on (letter_id, changed_at DESC)
 
 ---
 
 ### personal_access_tokens
 
-API tokens for programmatic access (future use).
+Personal access tokens (`lirl_pat_…`). People make them on the website, under Dashboard, then Tokens, for MCP clients that take a bearer header (migrations 011 and 037).
 
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
-| token_id | UUID | NO | gen_random_uuid() | Primary key |
+| token_id | SERIAL | NO | - | Primary key |
 | user_id | VARCHAR(255) | NO | - | FK to users |
+| name | VARCHAR(100) | NO | - | User-friendly name |
 | token_hash | VARCHAR(255) | NO | - | Bcrypt hash of token |
-| name | VARCHAR(255) | NO | - | User-friendly name |
+| token_lookup | CHAR(64) | YES | - | SHA-256 (hex) of the whole token, how `validateToken` finds it (059, #730). NULL only on a token made without one (before 059, or by an older image) and not used since: that one is found by its last four characters and a bcrypt compare, and given its hash on first use. A token may last up to 365 days, so check `SELECT max(expires_at) FROM personal_access_tokens WHERE token_lookup IS NULL` before removing that path. A revoked or expired token without a hash is logged as not found |
+| token_prefix | CHAR(4) | NO | - | Last 4 characters, for display |
+| status | pat_status | NO | 'active' | `active` or `revoked` |
+| expires_at | TIMESTAMPTZ | NO | NOW() + 90 days | When the token stops working. Every token has one since 057 (#730), which gave each older token 90 days from its creation, never sooner than 30 days from the migration |
 | last_used_at | TIMESTAMPTZ | YES | - | Last usage timestamp |
-| expires_at | TIMESTAMPTZ | YES | - | Expiration (NULL = never) |
 | created_at | TIMESTAMPTZ | NO | NOW() | Token creation |
+| revoked_at | TIMESTAMPTZ | YES | - | When it was revoked |
+| scopes | TEXT[] | NO | `{mail:read,mail:draft}` | What the token may do (037, #470). The allowed values are `mail:read`, `mail:draft` and `mail:send`, and nothing grants `mail:send` today, so no token sends. A send from a token becomes the confirmation link (docs/letter-send-flow.md) |
 
 **Indexes:**
-- `idx_personal_access_tokens_user_id` on user_id
-- `idx_personal_access_tokens_token_hash` on token_hash
+- `idx_pat_user_id` on user_id
+- `idx_pat_user_active` on user_id, where active
+- `idx_pat_expires_at` on expires_at, where active
+- `idx_pat_token_lookup`, unique, on token_lookup where it is set (059)
 
 ---
 
@@ -470,20 +555,39 @@ operator's typed reason lives in `admin_audit_events` alone (#394).
 
 ### commerce_operational_alerts
 
-The operator alert queue: dispute created or closed, ambiguous mail-provider outcome, refunded mail
-already dispatched, unmatched money event. Each alert has a severity and a three-state lifecycle
+The operator alert queue: dispute created (or escalated from an inquiry, #730) or closed, ambiguous mail-provider outcome, refunded mail
+already dispatched, unmatched money event, and the steps an account erasure leaves an operator to do by
+hand (`account_erasure_followup`, migration 036, #453). That last one has no order or source event; its
+`details` hold the account id and nothing else. A daily limit's first refusal of a UTC day opens
+`daily_limit_reached` (migration 038, warning): its `details` hold the limit key, the UTC day, the value
+in force and, for the per-account limits, the first account's id. Held mail not at the printer by 18:00 New York time on its mail
+date raises `schedule_missed_mail_day` (migration 041, #535, warning), once per letter: its `details` hold the letter id and the
+mail date, and its order is a Pay & Send letter's, else none. Mail the provider cancelled after accepting it raises
+`provider_cancelled_mail` (migration 043, #566), once per letter: a warning when what paid for it came back, critical
+when a refund waits for a person (a Pay & Send letter, or one our record had already seen printing or mailed); its
+`details` hold the letter and account ids, the funding type, `refundForAPerson` and `statusBefore` (our record's status
+before the cancel), and its order is the Pay & Send order, else none. Each alert has a severity and a three-state lifecycle
 (`open`, `acknowledged`, `resolved`) whose timestamps and resolution code the constraints keep
 consistent, and the acknowledging or resolving actor is stored as a hash. One alert per source event
-and type. The panel's acknowledge and resolve commands are the only writers besides the sweeps that
-raise them.
+and type. Besides the panel's acknowledge and resolve commands, alerts are written by the paths that
+raise them (each type below names its own).
+`address_request_reported` (migration 061, #730), warning, once per request: the recipient of an address request link said they do not know who sent it, and the link closed as declined. Raised in the decline's own statement, so it exists exactly when the decline does. "Once" rests on the request's state machine (a request closes once and never waits again), not on a unique index. Its `details` hold the account that made the link (`userId`) and the request id, nothing else (docs/deployment.md).
+`refund_not_completed` (migration 060, #730), critical, at most one open per order: a full refund failed or was cancelled at Stripe, and the hourly sweep holds the order (`last_error_code` `REFUND_NOT_COMPLETED`, which it and the refund claim skip) instead of refunding again, and so does the webhook when a full refund comes back failed or cancelled; its `details` hold the refund id and status. A person checks the order's refunds and any dispute in Stripe and refunds what is still owed (a refund whose webhook completes the order clears the hold's code), or settles it by hand when the card can't take a refund, and resolves the alert once Stripe shows the money went back or it was settled by hand (docs/deployment.md).
+`held_mail_funding_reversed` (migration 056, #696), once per order: a warning that mail a letter pack paid for is held because the pack was refunded in full or disputed; its `details` hold the reason and how many letters.
 
 ### commerce_operator_audit_events
 
 The older operator audit table from the commerce recovery work: hashed idempotency key, actor and
 target, a reason code, before and after state, provider evidence and an outcome. `retention_expires_at`
-marks two years from the row (#395); nothing enforces it yet, and the purge is designed under #398.
-The admin panel writes `admin_audit_events` instead; this table is kept for the four operations it
-recorded.
+marks two years from the row (#395). The hourly maintenance's daily `audit-retention-sweep` deletes a row two days before it
+(#398, migration 062). This table is also the replay record for the operator commands that write it: a repeated
+`idempotency_key_hash` returns the first outcome. Once the purge deletes a row its key is free again. The admin
+panel's own replays are stopped by `admin_command_runs`, which the same sweep deletes on about the same schedule
+(#771), so both keys are freed together; a freed panel key belongs to a confirmation two years old.
+The admin panel writes `admin_audit_events` for every command; the services behind some commands also
+write a row here: a retried or released mail job, a resolved ambiguous job or reservation, an alert
+transition, a pack refund. `valid_commerce_operator_audit_operation` lists them; 042 added
+`mail_job_release` (#535).
 
 ### commerce_pack_refunds
 
@@ -501,6 +605,24 @@ operator command, with its reference and order), the quantity, how many are cons
 (`active`, `depleted`, `expired`, `revoked`) and an optional expiry. One entitlement per source
 reference, so a replayed grant is a no-op.
 
+### gift_letters
+
+The gift letter entitlement ([gift-letters.md](gift-letters.md)): one row per gift letter, with its
+budget (`generations_remaining`), its source (`pack_purchase`, `seed_redemption`,
+`chain_redemption`, `operator`, `send_failed`) and reference, the order or campaign that granted it,
+the chain code that granted it (`parent_code`), an optional seed campaign whose code it prints
+(`card_campaign_id`), a status (`available`, `consumed`, `expired`, `revoked`), an expiry, the letter
+that used it, and `source_reversed_at` when the purchase behind a used gift is refunded or disputed.
+Unique per `(source, source_reference_id, grant_index)`, so a replayed grant is a no-op.
+
+### gift_codes
+
+Single-use chain codes, one per gift letter sent with budget left: the canonical 8-character
+Crockford code (primary key, format CHECK), the gift letter and the letter it was printed on (each
+UNIQUE: the branching factor of 1 that bounds the cost), the sender, the budget it grants, a status
+(`issued`, `redeemed`, `void`), an expiry, the redeemer, and a void class (`send_failed`,
+`send_cancelled` for held mail cancelled before it printed (#535), `purchase_reversed`, `operator`).
+
 ### image_generation_reservations
 
 One row per generation attempt against an entitlement, `reserved` while the provider call is in
@@ -511,7 +633,9 @@ panel's image recovery page lists those and the resolve command settles them wit
 
 The most recent uploaded image per user (one row per `user_id`), kept so a widget that lost its
 in-memory state can recover the image it was about to send. The URL is a capability URL and is
-treated as one (#282):
+treated as one (#282). For a photo uploaded through the card in an app with no file store (#474),
+`image_url` is instead the reference `letterirl-upload:latest`, which the image service resolves
+only to that account's own photo in the image store ([tool-apis.md](tool-apis.md)).
 
 - A read returns the row for at most `LETTER_IRL_RECENT_UPLOAD_TTL_MS`. The default is one hour,
   the cap in code is six hours, and an unreadable value falls back to one hour.
@@ -520,12 +644,137 @@ treated as one (#282):
 - The API process also holds a copy in memory, and drops it once it is older than the TTL. That is
   checked on every call and every five minutes.
 
+### address_requests
+
+An address request link (#604, concept 10): a sender asks someone for their U.S. address, and that
+person gives it, or declines, on the website, signed out (migration 049). Behind
+`LETTER_IRL_ADDRESS_REQUESTS_ENABLED`; the tools are `request_address`, `get_address_request` and
+`cancel_address_request` ([tool-apis.md](tool-apis.md)).
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| request_id | UUID | NO | gen_random_uuid() | Primary key, the `requestId` the tools take |
+| user_id | VARCHAR(255) | NO | - | The sender's account (FK users, ON DELETE CASCADE) |
+| token_hash | BYTEA | NO | - | SHA-256 of the link's token, 32 bytes, unique. The token itself is never stored: the link is shown once, in `request_address`'s answer |
+| recipient_name | TEXT | NO | - | What the sender calls the recipient (1 to 100 characters): the envelope's name unless the recipient gives another. Never shown on the page |
+| sender_first_name | TEXT | NO | - | All the page shows of the sender (1 to 40 characters) |
+| status | TEXT | NO | 'waiting' | `waiting`, `answered`, `declined` or `cancelled`. A waiting request past `expires_at` reads as expired, which is not stored |
+| address | JSONB | YES | - | The address given, in the preview tools' recipient shape. Set exactly when `status` is `answered` |
+| expires_at | TIMESTAMPTZ | NO | - | When the link stops working: `LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS` (default 7) after it was made |
+| created_at | TIMESTAMPTZ | NO | NOW() | When the sender made it |
+| closed_at | TIMESTAMPTZ | YES | - | When it was answered, declined or cancelled. NULL exactly while waiting |
+
+**Constraints:**
+- `address_requests_token_hash_key`: one request per token hash
+- `valid_address_request_token_hash`: the hash is 32 bytes
+- `valid_address_request_status`: the four states above
+- `valid_address_request_address`: an address exactly when answered
+- `valid_address_request_closed`: `closed_at` exactly when not waiting
+- `valid_address_request_names`: the two names' lengths
+- `valid_address_request_expiry`: `expires_at` after `created_at`
+
+**Indexes:** `idx_address_requests_user_created` (user_id, created_at DESC), for the caps: 10 waiting
+and 20 a day per account (`LETTER_IRL_ADDRESS_REQUEST_WAITING_CAP`, `LETTER_IRL_ADDRESS_REQUEST_DAILY_CAP`).
+
+A request is answered or declined once: one UPDATE that requires `waiting` and an unexpired link.
+An answer's `address` holds the recipient's own name for the envelope, or else `recipient_name`.
+Account erasure deletes the account's requests ([account-erasure.md](account-erasure.md)). Erasure keeps
+the `users` row, so the cascade does not reach them. The reader role is never granted the table; the
+operator role only what the delete below needs.
+
+**Retention (#604):** the maintenance task `address-requests-sweep` deletes a request, address included,
+`LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (default 7, at most 30, #701) days after `COALESCE(closed_at, expires_at)`: when
+it closed, or for one never answered, when its link expired. It runs whatever the feature's flag says.
+On request, an operator deletes one sooner with `address_request.delete` (#701): the operator role holds
+`SELECT (request_id, token_hash, status, created_at)` and `DELETE` on the table, never its names or address.
+
+### user_signatures
+
+A saved signature (#608, concept 3): one cleaned picture of the person's handwritten signature per
+account (migration 050), which their letters print under the closing. Behind
+`LETTER_IRL_SIGNATURES_ENABLED`; the tools are `set_signature`, `get_signature`, `clear_signature` and
+`set_letter_signature`, and
+the website's routes `/api/signature` ([tool-apis.md](tool-apis.md#signatures)).
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| user_id | VARCHAR(255) | NO | - | Primary key: the account (FK users, ON DELETE CASCADE) |
+| image_png | BYTEA | NO | - | The cleaned signature: a grayscale PNG of dark ink on white, cropped to the ink (`src/services/signatureImage.ts`) |
+| width | INTEGER | NO | - | Its width in pixels, 1 to 1200 |
+| height | INTEGER | NO | - | Its height in pixels, 1 to 400 |
+| use_by_default | BOOLEAN | NO | TRUE | The remembered choice (Principle 4): true when saved, then whatever the last preview chose |
+| created_at | TIMESTAMPTZ | NO | NOW() | When the first signature was saved |
+| updated_at | TIMESTAMPTZ | NO | NOW() | When this one was saved: a new signature replaces the row in place |
+
+**Constraints:**
+- `valid_user_signature_png`: 8 bytes to 1 MB, starting with the PNG signature
+- `valid_user_signature_size`: the size limits above
+- `valid_user_signature_times`: `updated_at` not before `created_at`
+
+A letter draws a signature from its own copy, taken into the draft when it is previewed
+(`letter_drafts.signature_image`, migration 051), so replacing or removing this row never changes a letter
+already previewed. A preview's explicit `signature`, true or false, sets `use_by_default`, as does
+`set_letter_signature` (#608 part 4). It is kept until the
+person removes it (`clear_signature`, or the website) or the account is erased: erasure keeps the
+`users` row, so it deletes this one explicitly ([account-erasure.md](account-erasure.md)). Neither admin
+role is granted the table.
+
+### stationery_designs
+
+An account's saved stationery designs (#649): a name the person gives each and four choices, each made of
+what the built-in themes already draw (`src/render/stationery.ts`). No picture: the first version is
+parameters only (#657 is the later step). Read and written by `src/services/stationeryDesignService.ts`.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| design_id | UUID | NO | gen_random_uuid() | Primary key |
+| user_id | VARCHAR(255) | NO | - | The account (FK users, ON DELETE CASCADE) |
+| name | TEXT | NO | - | The person's name for it, 1 to 40 characters, trimmed; never printed. One per account whatever its case (`stationery_designs_user_name`, a unique index on `user_id, lower(name)`) |
+| face | TEXT | NO | - | The body's face: `serif` (Tinos), `typewriter` (Cousine) or `handwritten` (Caveat) |
+| ornament | TEXT | NO | - | The corner's ornament: `none`, `monogram`, `sprig` or `confetti` |
+| ruled | BOOLEAN | NO | - | Faint rules under each line |
+| tone | TEXT | NO | - | The ornament's grey: `black` (#222), `dark` (#555), `medium` (#888) or `light` (#aaa) |
+| created_at | TIMESTAMPTZ | NO | NOW() | When it was first saved |
+| updated_at | TIMESTAMPTZ | NO | NOW() | When it was last saved: saving under its name replaces it in place |
+
+**Constraints:**
+- `stationery_designs_name_length`, `stationery_designs_name_trimmed`: the name rules above
+- `stationery_designs_face_known`, `stationery_designs_ornament_known`, `stationery_designs_tone_known`: the choices above
+- `stationery_designs_times`: `updated_at` not before `created_at`
+- `stationery_designs_owned`: unique `(design_id, user_id)`, the target of `users_stationery_design_owned`
+
+An account holds at most ten: the service counts them under the account's row lock. A letter draws a
+design from its own copy, taken into the draft when it is previewed (`letter_drafts.stationery` with theme
+`custom`), so changing or deleting a design never changes a letter already previewed. Designs are kept
+until the person deletes them or the account is erased: erasure keeps the `users` row, so it deletes them
+explicitly ([account-erasure.md](account-erasure.md)). Neither admin role is granted the table.
+
 ### maintenance_tasks
 
 One row per scheduled maintenance task (`task_name` is the key) with its last start, completion,
 lock, status and error class (a class since migration 032, never the driver's message). The panel's
 maintenance page shows whether a task has an error, never the
 text. The maintenance runner claims a task by its `locked_at` so two instances cannot run it at once.
+
+### daily_limit_overrides
+
+An operator's value for one of the four daily limits (`global_daily_mail`, `account_daily_mail`,
+`account_daily_charge_cents`, `gift_daily_send`), for everyone (`user_id` NULL) or, for the two
+per-account limits only, one account, until `expires_at` (NULL: until cleared). Written only by the
+panel's `limit.set` and `limit.clear`, which record their command ids. Rows are never deleted:
+clearing sets `cleared_at`, and a unique index allows one uncleared row per limit and account. The
+API's checks read it on every send and checkout (`src/services/dailyLimits.ts`, migration 038).
+
+### daily_limit_refusals
+
+How many times each daily limit refused someone, per UTC day (`limit_key`, `utc_day` is the key). The
+insert of a day's first row is what opens that day's `daily_limit_reached` alert, so simultaneous
+refusals open one. No account ids.
+
+### daily_limit_defaults
+
+The value of each daily limit in the API process's environment, written when the API starts, so the
+admin panel (a separate service with its own environment) can show it.
 
 ### provider_routing
 
@@ -541,6 +790,16 @@ Where the content-retention sweep (migration 026) puts what it clears from `lett
 write-back, with a `purge_after` deadline. One live row per source row. The admin reader role has
 column-level `SELECT` on this table that omits `content`.
 
+The first copy wins. A sweep saves a row's content only when no copy of it exists
+(`ON CONFLICT DO NOTHING`), and a copy is never updated, so a sweep re-run over a row whose `redacted_at`
+was cleared by hand keeps the copy that holds the content. Migration 026's comment on
+`uniq_quarantine_source` says a re-redaction replaces the copy; that stopped being true with #153's
+enforce-path fixes, and applied migrations are not edited. Do not edit a redacted row's content by hand
+while its copy exists: the next sweep empties it without saving it. Restore it instead.
+
+`purge_after` is the row's own clock plus its published period, or one day after the sweep when that is
+later: a row swept after its period (the backlog an enforcing run starts with) keeps its copy for a day.
+
 ### admin_environment_marker
 
 Singleton database identity used to fail closed when a development/production selection does not match
@@ -551,13 +810,20 @@ guess or seed it. A constant unique index enforces at most one row.
 
 Append-only actor/action/target/outcome history. UUIDs, stable error codes, session hashes, reasons, and
 three bounded JSONB summaries support later authenticated reads, reveals, and commands. A trigger rejects
-every `UPDATE` and `DELETE`; public privileges are revoked and provisioned application roles receive no
+every `UPDATE` and `DELETE`; only the retention purge (below), which switches it off inside its own
+transaction, deletes. Public privileges are revoked and provisioned application roles receive no
 mutation privilege beyond `INSERT`.
 
 Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Rows are
-kept for 2 years after the action they record and are exempt from account erasure for that period
-(#395); nothing enforces the period yet, and the purge is designed under #398. Application rollback
-retains all rows.
+kept for at most 2 years after the action they record and are exempt from account erasure while they are
+kept (#395). The daily `audit-retention-sweep` deletes them as the two years run out (#398),
+through migration 062's `purge_expired_audit_records(batch_size)`: inside its own transaction it
+locks both audit tables against writers (the commerce table first, as an admin command writes them,
+waiting at most 5 seconds for each), switches each append-only trigger
+off, deletes only rows due (two days before their two years are up, so a late run stays inside the
+policy; oldest first, at most `batch_size` from each), and switches it back on. Only the owner can run it. The triggers
+themselves are unchanged and refuse every other `UPDATE` and `DELETE`. Application rollback retains all
+rows.
 
 ### admin_command_runs
 
@@ -566,23 +832,53 @@ Durable command state keyed uniquely by `(environment, idempotency_key)`. The ta
 digest, expected version, timestamps, correlation ID, bounded sanitized result, and stable error code.
 Status and timing constraints reject inconsistent outcomes.
 
+A run is kept for at most 2 years after it finished (#771): the daily `audit-retention-sweep`, after
+the audit rows, calls migration 064's `purge_expired_admin_command_records(batch_size)`, which deletes a
+finished run, and its operation first, two days before its two years are up; a run left pending or
+running (a command interrupted between its provider call and its completion) on the same schedule
+counted from when it was requested. It never deletes a run whose operation is pending, processing or not yet due itself, or one
+an audit row still names. Only the owner can run it. The run is also what stops a panel confirmation
+running twice; a key it frees belongs to a confirmation two years old, whose own form cannot be sent
+again (its CSRF token was bound to a session long gone). A row that names a run and outlives it
+(`commerce_pack_refunds.admin_command_id`, `daily_limit_overrides.created_by_command_id` and
+`cleared_by_command_id`) then links to a command the panel no longer finds.
+
+### admin_totp_counters
+
+The last TOTP counter (a 30-second step) accepted for the admin panel's write elevation, by
+`counter_key`: an operator's tailnet login, since each has a secret of their own (`ADMIN_TOTP_SECRETS`),
+or one shared key under the development-only shared secret (migration 063, #730). A code is accepted
+only for a counter above the stored one, raised in one upsert, so a code cannot be used twice, even
+across a restart or a second process. `last_counter` and `updated_at` only; no customer data. The
+operator role reads, inserts and updates it; the reader has no access. `PUBLIC` is revoked.
+
 ### admin_operations
 
-Environment-scoped provider-operation queue for a later deployed worker. Each command can enqueue one
-operation. Payload/result size, status, attempts, lock, and completion constraints support deterministic
-claim/retry behavior; a partial index covers claimable pending rows.
+Environment-scoped queue of work a command asks for and a deployed worker performs. Each command can
+enqueue one operation. Payload/result size, status, attempts, lock, and completion constraints support
+deterministic claim/retry behavior; a partial index covers claimable pending rows.
+
+Its one consumer today is the account erasure (#289): `account.erase` queues an `account.erase`
+operation with `{ userId }`. The hourly maintenance run claims operations for its own database's
+environment (the admin marker) with `SKIP LOCKED` and erases each account in one transaction as the owner
+role. It records `succeeded` with counts, or `failed` with `ACCOUNT_ERASURE_BLOCKED`,
+`ACCOUNT_ERASURE_NOT_FOUND` or, after three attempts an hour apart, `ACCOUNT_ERASURE_ERROR`
+(`src/services/accountErasureService.ts`).
+
+An operation goes with its command run, at most 2 years after both finished (#771, above).
 
 ### Admin grants and provisioning
 
 Migration 022 revokes `PUBLIC` privileges but creates no role or credential. The explicit provisioning
 script (`npm run admin:provision-access`) requires pre-existing, environment-specific reader/operator
-login roles, verifies migrations 021, 022 and the latest migration the grants depend on (032) plus the
+login roles, verifies migrations 021, 022 and the latest migration the grants depend on
+(`ADMIN_LATEST_REQUIRED_MIGRATION` in `src/admin/provisioning.ts`) plus the
 database marker, rejects privileged roles, and reapplies the grant set in `src/admin/provisioning.ts`:
 
 - **Reader** (`letter_irl_admin_reader_<env>`): `SELECT` on the commerce, ledger, outbox, alert, audit
   and admin tables, and **column-level** `SELECT` on `users` (no `return_address`), `letters` (no
   `content`, `recipient`, `preview_html`), `letter_drafts` (no bodies, addresses, validations or
-  images), `personal_access_tokens` (no `token_hash`), `feature_requests` (no `contact_email`),
+  images), `personal_access_tokens` (no `token_hash`, no `token_lookup`, no `scopes`), `feature_requests` (no `contact_email`),
   `redacted_content_quarantine` (no `content`), and `credit_transactions` and `credit_ledger` (no
   `description`); `INSERT` on `admin_audit_events` only; no `EXECUTE` on functions, including the
   `PUBLIC` default.
@@ -590,7 +886,8 @@ database marker, rejects privileged roles, and reapplies the grant set in `src/a
   `users`, `letters` and `letter_drafts` (the domain services select whole rows), **column-scoped**
   `INSERT`/`UPDATE` on exactly the columns the enabled commands write (so an operator can adjust
   `users.credits` but not `users.email` or `letters.content`), `INSERT` and a column-limited `UPDATE`
-  on the command and operation tables, and sequence usage. `DELETE` exists only on `promo_campaigns`.
+  on the command and operation tables, `INSERT` and a column-limited `UPDATE` (the clearing columns)
+  on `daily_limit_overrides`, and sequence usage. `DELETE` exists only on `promo_campaigns`.
 - Both: `UPDATE`, `DELETE` and `TRUNCATE` on `admin_audit_events` are revoked; the trigger refuses
   them regardless.
 
@@ -635,6 +932,39 @@ Production provisioning and the first production connection remain separate owne
 | 30 | 030_ledger_description_minimisation.sql | Recipient names and operator reasons rewritten out of the two ledger description columns (#162) |
 | 31 | 031_provider_error_minimisation.sql | Provider message text rewritten out of the job, order and order-event error columns (#162) |
 | 32 | 032_error_text_minimisation.sql | Raw error text and operator reasons rewritten out of the order, event, outbox, pack-refund and maintenance columns (#394) |
+| 33 | 033_gift_letters.sql | Gift letters: gift_letters, gift_codes, the gift_letter funding type, gift drafts, seed campaigns and gift-only redemptions |
+| 34 | 034_end_zero_letter_promos.sql | Ends the ordinary promo campaigns that grant no letters (the preview-gate codes 007 seeded), which could never be redeemed (#420) |
+| 35 | 035_account_erasure.sql | Account erasure: `users.erased_at`, and the `users_erased_tombstone` CHECK that holds an erased row to its placeholder email and no return address (#289) |
+| 36 | 036_account_erasure_followup_alert.sql | The `account_erasure_followup` alert type, which an erasure opens for the steps done by hand (#453) |
+| 37 | 037_personal_access_token_scopes.sql | `personal_access_tokens.scopes`: every token reads and drafts, and none sends (#470) |
+| 38 | 038_daily_limits.sql | The daily limits' operator values, refusal counts and the API's configured values, and the `daily_limit_reached` alert type. Re-run admin provisioning after it |
+| 39 | 039_renderer_version.sql | `letter_drafts.renderer_version`: the renderer that drew a draft's preview, NULL or `pdf-1` (#534). The reader role's column grants leave it out, and the operator role's table-wide SELECT covers it; no provisioning re-run |
+| 40 | 040_arrive_by.sql | `arrive_by` and `mail_on` on `letter_drafts` and `letters`: mail held to arrive by a date (#535), with the pair and order CHECKs and `idx_letters_held_mail_on`. DATEs are read as 'YYYY-MM-DD' strings (`src/db/dateParser.ts`). No provisioning re-run, as for 039 |
+| 41 | 041_missed_mail_day_alert.sql | The `schedule_missed_mail_day` alert type (#535), restated inside the `to_regclass` guard as 038 does, and a partial unique index on its letter (`idx_commerce_alerts_missed_mail_day_letter`) so it is raised once per letter. No provisioning re-run: the roles read the alerts table whole |
+| 42 | 042_mail_job_release_audit.sql | The operator audit operation `mail_job_release` (#535), written when the admin panel sends held mail early (`job.dispatch_now`). Restated inside the `to_regclass` guard as 029 does. No provisioning re-run: the operator role inserts into the table whole, and the release updates only `letter_jobs` columns already granted |
+| 43 | 043_provider_cancelled_alert.sql | The `provider_cancelled_mail` alert type (#566), restated inside the `to_regclass` guard as 041 does, and a partial unique index on its letter (`idx_commerce_alerts_provider_cancelled_letter`) so it is raised once per letter. No provisioning re-run: the roles read the alerts table whole |
+| 44 | 044_stationery.sql | `letter_drafts.stationery` (#563): the theme a preview was drawn in and its slot text, NULL for Classic. `renderer_version` admits `pdf-2`, set exactly when a draft has stationery. No provisioning re-run, as for 039 |
+| 45 | 045_stationery_default.sql | `users.stationery_theme` (#563): the account's remembered theme, with a CHECK on the four themes. No provisioning re-run: the reader's column list leaves it out and the operator writes only its listed columns |
+| 46 | 046_stationery_faces.sql | Typewriter and Handwritten (#563 PR 8): `letter_drafts_stationery_theme_known` and `users_stationery_theme_known` admit `typewriter` and `handwritten`. No provisioning re-run: neither check changes what a role may read or write |
+| 47 | 047_room_to_write.sql | `letter_drafts.pages` (#586): the pages a letter prints on, 1 to 3, default 1, with `letter_drafts_pages_known` and `letter_drafts_pages_paid_per_send` (more than one page only for a letter our renderer drew, never a gift send). No provisioning re-run, as for 039 |
+| 48 | 048_postcard_fronts.sql | `letter_drafts.postcard_front` (#594): a postcard's front when not full bleed, a border with its caption or a greeting with its place, NULL for full bleed. `renderer_version` admits `pdf-3`, set exactly when a draft has a front, with `letter_drafts_postcard_front_layout_known` and `letter_drafts_postcard_front_drawn_by_pdf_3`. No provisioning re-run, as for 039 |
+| 49 | 049_address_requests.sql | `address_requests` (#604): address request links, the token stored as its SHA-256, an address exactly when answered, `closed_at` exactly when not waiting. No provisioning re-run: neither admin role is granted it |
+| 50 | 050_user_signatures.sql | `user_signatures` (#608): one saved signature per account, a grayscale PNG within 1200 x 400 px, with the remembered choice. No provisioning re-run: neither admin role is granted it |
+| 51 | 051_signature_drafts.sql | `letter_drafts.signature_image` (#608): a letter's own copy of the signature it was previewed with. `renderer_version` admits `pdf-4`, set exactly when a draft has one, with `letter_drafts_signature_letters_only` and `letter_drafts_signature_drawn_by_pdf_4`; `letter_drafts_stationery_drawn_by_pdf_2` admits a theme with `pdf-4`. No provisioning re-run: the reader role's column list leaves it out, as for 039 |
+| 52 | 052_mail_service.sql | `letter_drafts.mail_service` (#625): how a letter travels, 'standard' by default, with `letter_drafts_mail_service_known` and `letter_drafts_mail_service_paid_per_send` (certified or certified with a return receipt only for a letter, never a gift send). No provisioning re-run, as for 039 |
+| 53 | 053_letter_mail_service.sql | `letters.mail_service` (#625): how the letter travelled, copied from the draft by the send, standard by default; `letters.carrier_tracking_number`: the USPS number of a certified letter, set by the status sync, NULL before and for standard mail. Four CHECKs: `letters_mail_service_known`, `letters_mail_service_letters_paid_per_send` (only a letter funded by a Pay & Send order), `letters_carrier_tracking_certified_only`, `letters_carrier_tracking_length` (1 to 64). The admin operator role's letters UPDATE list gains `carrier_tracking_number` (the panel's status sync writes it): re-run `npm run admin:provision-access` in each environment after it |
+| 54 | 054_stationery_designs.sql | `stationery_designs` (#649): an account's saved designs, a name and four choices, at most ten per account (counted by the service). `users.stationery_design_id`, the remembered design, with the composite `users_stationery_design_owned` (only the account's own; deleting it clears the column). `letter_drafts_stationery_theme_known` admits `custom`. No provisioning re-run: neither admin role is granted the table, and the reader's users column list leaves the column out |
+| 55 | 055_letter_jobs_mail_hold_until.sql | `letter_jobs.mail_hold_until` (#693): the hold an arrive-by job was created with, which `metadata.heldUntil` held until now, backfilled from it row by row (a value that is not a time is left out, with a notice, rather than failing the migration; the backfill may be run again). For one release the code also still writes `metadata.heldUntil`, so a rollback across 055 still knows its held mail. Held now is one predicate, `src/services/heldMail.ts`. Provisioning: no re-run (both roles read `letter_jobs` whole, and the release writes no new column); `ADMIN_LATEST_REQUIRED_MIGRATION` is 055, since the panel reads the column |
+| 56 | 056_held_mail_funding_reversed.sql | The `held_mail_funding_reversed` alert type (#696), restated inside the `to_regclass` guard as 043 does, and a partial unique index on its order (`idx_commerce_alerts_held_mail_funding_order`) so it is raised once per order; and the operator audit operation `mail_job_cancel` (`job.cancel_held`), restated as 042 does. The hold itself is a `letter_jobs.hold_reason` (023), `funding_reversed` or `funding_disputed`, on a job still pending. Provisioning: no re-run (the roles read the alerts table whole, and the release's new write, `hold_reason`, is in the operator's list); `ADMIN_LATEST_REQUIRED_MIGRATION` is 056 |
+| 57 | 057_personal_tokens_expire.sql | `personal_access_tokens.expires_at` (#730) is NOT NULL, defaulting to 90 days from insertion. A token stored with none gets one first: 90 days after it was made, but never sooner than 30 days from the migration. Provisioning: no re-run (the reader role already reads the column, and neither role writes the table); `ADMIN_LATEST_REQUIRED_MIGRATION` is 057 |
+| 58 | 058_users_email_case_insensitive.sql | `users.email` is unique whatever its case (#730): `users_email_lower_key`, a unique index on `lower(email)`, replaces 001's inline `users_email_key`, and the plain `idx_users_email` goes. Addresses that already differ only in case stop the migration with a unique_violation (23505 in the deploy log) whose message names the problem, for an operator to join or correct the accounts first; development and production had none. `EMAIL_UNIQUE_CONSTRAINT` names the new index. Code from before 058 (the old image while the pre-deploy runs, or a rollback across 058) still names `users_email_key`: a collision is still refused, but reaches the customer as a generic error instead of the "already belongs" sentence. Provisioning: no re-run (indexes carry no grants); `ADMIN_LATEST_REQUIRED_MIGRATION` is 058 |
+| 59 | 059_personal_tokens_lookup.sql | `personal_access_tokens.token_lookup` (#730): the SHA-256 of the whole token, unique where set (`idx_pat_token_lookup`), so a token is found by one indexed read, not by its last four characters and a bcrypt compare per match. Tokens made without it are found the old way and given the hash on first use; one can last up to 365 days, so the old way stays until none is left without a hash. Provisioning: no re-run (the reader's column list leaves it out, and neither role writes the table); `ADMIN_LATEST_REQUIRED_MIGRATION` is 059 |
+| 60 | 060_refund_not_completed_alert.sql | The `refund_not_completed` alert type (#730), restated inside the `to_regclass` guard as 056 does, with a partial unique index on its order while it is open (`idx_commerce_alerts_refund_not_completed_order`). Provisioning: no re-run (the roles read the alerts table whole); `ADMIN_LATEST_REQUIRED_MIGRATION` is 060 |
+| 61 | 061_address_request_reported_alert.sql | The `address_request_reported` alert type (#730), restated inside the `to_regclass` guard as 060 does. Provisioning: no re-run (the roles read the alerts table whole); `ADMIN_LATEST_REQUIRED_MIGRATION` is 061 |
+| 62 | 062_audit_retention_purge.sql | Operator audit retention (#398): `purge_expired_audit_records(batch_size)` switches each audit table's append-only trigger off inside its caller's transaction, deletes only rows due, two days before their two years are up (`admin_audit_events.occurred_at` plus two years, `commerce_operator_audit_events.retention_expires_at`), oldest first, and switches it back on. The triggers are not changed, so a database that applies 022 late converges; the body resolves each table when it runs and skips one that is absent. `EXECUTE` revoked from `PUBLIC`. Provisioning: no re-run; `ADMIN_LATEST_REQUIRED_MIGRATION` is 062 |
+| 63 | 063_admin_totp_counters.sql | `admin_totp_counters` (#730): write elevation's last accepted TOTP counter per operator, in the database instead of the admin process's memory. Provisioning: **re-run once** (the operator role is granted `SELECT`, `INSERT` and `UPDATE (last_counter, updated_at)`); `ADMIN_LATEST_REQUIRED_MIGRATION` is 063 |
+| 64 | 064_admin_command_retention.sql | Admin command retention (#771): `purge_expired_admin_command_records(batch_size)` deletes `admin_command_runs`, and their `admin_operations` first, two days before two years after they finished (or, left unfinished, were requested), oldest first, taken `FOR UPDATE SKIP LOCKED`; never a run with an operation pending, processing or not yet due, or named by an audit row. Skips when a 022 table is absent. `EXECUTE` revoked from `PUBLIC`. Provisioning: no re-run; `ADMIN_LATEST_REQUIRED_MIGRATION` is 064 |
+| 65 | 065_letters_print_pdf.sql | Held mail's print (#697): `letters.print_pdf_sha256`, `print_layout_fingerprint` and `print_layout_engine`, with six CHECKs: each value's shape (`letters_print_pdf_sha256_shape`, `letters_print_layout_fingerprint_shape`, `letters_print_layout_engine_shape`), the engine exactly with the fingerprint (`letters_print_layout_engine_with_fingerprint`), and a PDF only with a fingerprint (`letters_print_pdf_needs_fingerprint`) and only for mail with a mail date (`letters_print_pdf_held_only`). Provisioning: no re-run (the reader's letters column list leaves them out, the operator reads letters whole, and no command writes them); `ADMIN_LATEST_REQUIRED_MIGRATION` is 065 |
 
 ---
 
@@ -653,6 +983,21 @@ Production provisioning and the first production connection remain separate owne
     "state": "ST",
     "postalCode": "12345",
     "country": "US"
+  }
+}
+```
+
+A gift letter also carries the card the send decided, so every process that prints it prints the
+same code and link:
+
+```json
+{
+  "giftCard": {
+    "state": "funded",
+    "code": "K7M2QX9A",
+    "url": "https://letterirl.com/g/K7M2QX9A",
+    "displayUrl": "letterirl.com/g",
+    "redeemBy": "2026-12-16"
   }
 }
 ```
@@ -740,5 +1085,6 @@ reservation/entitlement mutation share one transaction.
 `commerce_operational_alerts` stores sanitized Stripe dispute work in the same
 transaction as `stripe_webhook_events`. Its unique source-event/type key makes
 replay safe, while open/acknowledged/resolved states survive process restarts.
-The same table surfaces ambiguous mail dispatch and refund-after-dispatch work;
+The same table surfaces ambiguous mail dispatch and refund-after-dispatch work,
+and the manual follow-up of an account erasure;
 operator transitions are idempotent and append an audit event atomically.

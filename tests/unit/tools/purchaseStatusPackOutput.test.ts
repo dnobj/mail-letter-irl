@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * A letter-pack order has no letter, so `orders.letter_id` is NULL, and its
@@ -16,8 +16,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * sees, so they come from one place and are absent, never null, on Pay & Send
  * orders.
  *
- * The schema under test is the SERVED one (zodSchemas.ts), not the tool
- * definition's copy in schemas.ts; registerTools serves the former.
+ * The schema under test is the SERVED one (zodSchemas.ts), which registerTools
+ * serves and /manifest.json is generated from (#688).
  */
 
 const mocks = vi.hoisted(() => ({ query: vi.fn(), transaction: vi.fn() }));
@@ -27,7 +27,7 @@ vi.mock('../../../src/db/index.js', () => ({
   pool: {}
 }));
 
-import { getPurchaseStatus } from '../../../src/services/commerceService.js';
+import { getPurchaseStatus, ourCheckoutUrl } from '../../../src/services/commerceService.js';
 import { getPurchaseStatusOutputZ } from '../../../src/zodSchemas.js';
 
 function orderRow(overrides: Record<string, unknown>) {
@@ -139,7 +139,7 @@ describe('get_purchase_status output against the served schema', () => {
           status: 'fulfilled'
         })
       ]
-    });
+    }).mockResolvedValueOnce({ rows: [] });
 
     const output = await getPurchaseStatus('user-1', 'order-1');
 
@@ -148,8 +148,144 @@ describe('get_purchase_status output against the served schema', () => {
     for (const field of PACK_FIELDS) {
       expect(field in output).toBe(false);
     }
-    // No ledger query for an order that has no lots.
-    expect(mocks.query).toHaveBeenCalledTimes(1);
-    expect(output.message).toMatch(/print provider/i);
+    // No ledger query for an order that has no lots: only the one for a missed mail date (#700).
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+    expect(String(mocks.query.mock.calls[1][0])).toContain('commerce_order_events');
+    expect(output.message).toBe('The physical mail item was accepted by the print provider.');
+  });
+});
+
+describe('a Pay & Send order whose mail date passed before it was paid (#700)', () => {
+  // A Thursday in October 2026, so the date needs no year.
+  beforeEach(() => {
+    mocks.query.mockReset();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-08T14:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const payAndSend = (status: string, event: Record<string, unknown> | null) => {
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [orderRow({ order_type: 'jit_mail', letter_id: 'letter-9', credits: null, product_snapshot: { name: 'Pay & Send One Physical Letter', mailType: 'letter' }, status })]
+      })
+      .mockResolvedValueOnce({ rows: event ? [event] : [] });
+    return getPurchaseStatus('user-1', 'order-1');
+  };
+
+  it('says, while it is prepared, that it goes to the printer as soon as it can and may arrive after its date', async () => {
+    const output = await payAndSend('fulfillment_pending', { arrive_by: '2026-10-16', mail_on: '2026-10-06' });
+
+    expect(output.message).toBe(
+      'Payment is confirmed and the mail item is being prepared. ' +
+        'Its payment was confirmed too late for it to go to the printer in time to arrive by Fri, Oct 16, so it goes to the printer as soon as it can instead, and may arrive after that date.'
+    );
+    expect(issues(getPurchaseStatusOutputZ.safeParse(output))).toBe('ok');
+    const [sql, params] = mocks.query.mock.calls[1];
+    expect(sql).toContain('FROM commerce_order_events');
+    expect(sql).toContain('event_type = $2');
+    expect(params).toEqual(['order-1', 'jit.schedule_missed']);
+  });
+
+  it('says it in the past once it is with the printer', async () => {
+    const output = await payAndSend('fulfilled', { arrive_by: '2026-10-16', mail_on: '2026-10-06' });
+    expect(output.message).toBe(
+      'The physical mail item was accepted by the print provider. ' +
+        'Its payment was confirmed too late for it to go to the printer in time to arrive by Fri, Oct 16, so it went to the printer as soon as it could instead, and may arrive after that date.'
+    );
+  });
+
+  it.each(['refund_pending', 'refunded', 'held', 'disputed'])('says nothing of it once the order is %s', async status => {
+    const output = await payAndSend(status, { arrive_by: '2026-10-16', mail_on: '2026-10-06' });
+    expect(output.message).not.toContain('confirmed too late');
+  });
+
+  describe('an unpaid order whose mail date has passed (#726)', () => {
+    const pending = (draft: Record<string, unknown> | null, status = 'checkout_pending', extra: Record<string, unknown> = {}) => {
+      mocks.query
+        .mockResolvedValueOnce({
+          rows: [orderRow({ order_type: 'jit_mail', letter_id: null, draft_id: 'draft-1', credits: null, product_snapshot: { name: 'Pay & Send One Physical Letter', mailType: 'letter' }, status, checkout_url: 'https://checkout.stripe.test/cs-1', checkout_expires_at: new Date('2026-10-08T14:30:00Z'), ...extra })]
+        })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: draft ? [draft] : [] });
+      return getPurchaseStatus('user-1', 'order-1');
+    };
+
+    it('says so before payment, and gives the card the dates', async () => {
+      // Thursday Oct 8: Tue Oct 6 has passed.
+      const output = await pending({ arrive_by: '2026-10-16', mail_on: '2026-10-06' });
+      expect(output.scheduleMissed).toEqual({ arriveBy: '2026-10-16', mailOn: '2026-10-06' });
+      expect(output.message).toContain(
+        'Its day to go to the printer, Tue, Oct 6, has passed: if it is paid now, it goes to the printer as soon as it can and may arrive after Fri, Oct 16. Tell the person before they pay; to choose a new date instead, leave it unpaid until it closes, then set the arrival date again.'
+      );
+      expect(issues(getPurchaseStatusOutputZ.safeParse(output))).toBe('ok');
+      const [sql, params] = mocks.query.mock.calls[2];
+      expect(sql).toBe('SELECT arrive_by, mail_on FROM letter_drafts WHERE draft_id = $1');
+      expect(params).toEqual(['draft-1']);
+    });
+
+    it('says nothing for a date still ahead, a draft without dates or with dates it cannot read, or one gone', async () => {
+      for (const draft of [{ arrive_by: '2026-10-23', mail_on: '2026-10-13' }, { arrive_by: null, mail_on: null }, { arrive_by: null, mail_on: '2026-10-06' }, null]) {
+        const output = await pending(draft);
+        expect(output, JSON.stringify(draft)).not.toHaveProperty('scheduleMissed');
+        expect(output.message).not.toContain('has passed');
+      }
+    });
+
+    it('says nothing for an order that cannot be paid now: no session, or its window over', async () => {
+      for (const extra of [{ stripe_checkout_session_id: null, checkout_url: null }, { checkout_expires_at: new Date('2026-10-08T13:00:00Z') }]) {
+        mocks.query.mockReset();
+        const output = await pending({ arrive_by: '2026-10-16', mail_on: '2026-10-06' }, 'checkout_pending', extra);
+        expect(output, JSON.stringify(extra)).not.toHaveProperty('scheduleMissed');
+        expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes('FROM letter_drafts'))).toBe(false);
+      }
+    });
+
+    it('never asks once the order is paid or closed', async () => {
+      for (const status of ['paid', 'fulfillment_pending', 'cancelled', 'refunded']) {
+        mocks.query.mockReset();
+        const output = await pending({ arrive_by: '2026-10-16', mail_on: '2026-10-06' }, status);
+        expect(output, status).not.toHaveProperty('scheduleMissed');
+        expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes('FROM letter_drafts')), status).toBe(false);
+      }
+    });
+  });
+
+  it('says nothing of it without the event, or with dates it cannot read', async () => {
+    expect((await payAndSend('fulfillment_pending', null)).message).toBe('Payment is confirmed and the mail item is being prepared.');
+    expect((await payAndSend('fulfillment_pending', { arrive_by: null, mail_on: '2026-10-06' })).message).toBe(
+      'Payment is confirmed and the mail item is being prepared.'
+    );
+  });
+
+  it('never asks about it for a letter pack', async () => {
+    mocks.query
+      .mockResolvedValueOnce({ rows: [orderRow({ order_type: 'letter_pack', credits: 8, status: 'fulfilled' })] })
+      .mockResolvedValueOnce({ rows: [{ remaining_credits: 8 }] });
+    await getPurchaseStatus('user-1', 'order-1');
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes('commerce_order_events'))).toBe(false);
+  });
+});
+
+describe('ourCheckoutUrl (#730)', () => {
+  beforeEach(() => {
+    mocks.query.mockReset();
+  });
+
+  it('reads the checkout address our order recorded for the session, by its indexed id', async () => {
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ checkout_url: 'https://checkout.stripe.com/c/pay/cs_test_ours' }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [{ checkout_url: null }], rowCount: 1 });
+    await expect(ourCheckoutUrl('cs_test_ours')).resolves.toBe('https://checkout.stripe.com/c/pay/cs_test_ours');
+    await expect(ourCheckoutUrl('cs_test_theirs')).resolves.toBeNull();
+    await expect(ourCheckoutUrl('cs_test_unrecorded')).resolves.toBeNull();
+    expect(mocks.query.mock.calls[0]).toEqual([
+      'SELECT checkout_url FROM orders WHERE stripe_checkout_session_id = $1 LIMIT 1',
+      ['cs_test_ours']
+    ]);
   });
 });

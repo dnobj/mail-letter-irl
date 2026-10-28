@@ -106,7 +106,7 @@ annotations: {
 }
 ```
 
-### Destructive Tools (clear_return_address, as decided in December 2025; six tools since September 2026, see the addendum)
+### Destructive Tools (clear_return_address, as decided in December 2025; six tools since September 2026, and `cancel_scheduled_mail` while arrival dates are on; see the addendum)
 
 ```typescript
 annotations: {
@@ -166,7 +166,7 @@ often tools ask for permission; OpenAI describes the "important actions" level a
 judgement that already covers sending and purchases, so the annotation is the signal OpenAI asks for
 and one input to that judgement, not a switch that guarantees a prompt.
 
-Under that reading `buildAnnotations()` now marks six tools destructive:
+Under that reading `buildAnnotations()` now marks six tools destructive, and a seventh, `cancel_scheduled_mail`, while arrival dates are on (#535):
 
 | Tool | Why |
 |------|-----|
@@ -175,12 +175,24 @@ Under that reading `buildAnnotations()` now marks six tools destructive:
 | `create_mail_checkout` | Starts a payment the customer cannot undo alone, and a successful payment authorises the mail itself. |
 | `create_pack_checkout` | Starts a payment the customer cannot undo alone (refunds are discretionary). |
 | `clear_return_address` | Deletes the saved address (unchanged). |
+| `cancel_scheduled_mail` | Listed only while arrival dates are on (#535). A cancelled order cannot be restored; it must be sent again. It returns the letter, and needs `confirm: true`. |
 
 Still non-destructive, with the reasoning: `redeem_promo_code` spends a code but only adds letters
 for the customer; `generate_image_for_mail` consumes one generation and produces an image;
 `confirm_uploaded_image` overwrites only a pointer to the customer's latest upload;
 `submit_feature_request` and `upload_image` create records. The quote and preview tools create
-drafts that expire on their own.
+drafts that expire on their own, and `set_arrival_date` (#535, listed only while arrival dates are
+on) changes only such a draft's dates; it sends nothing, and the same date twice changes nothing
+more, so it is also idempotent.
+
+`set_stationery` (#563), `set_letter_words` (#586) and `set_mail_service` (#625, how a letter travels:
+ordinary or certified) are non-destructive and idempotent on the same
+grounds: each changes only a draft, which sends nothing and expires on its own. `set_letter_words`
+replaces the person's words in place, which reads like `set_return_address`, but only words its
+caller has seen: a change names the version of the words it replaces (`wordsVersion`) and is refused,
+with the words as they are now, if they changed since, on the letter card or in the chat. So the
+caller can always set the words it replaced back, unlike a saved address overwritten unseen (#593
+review round 1).
 
 The `confirm: true` requirement on the send tools and the transactional idempotency (a consumed
 draft cannot be sent twice) remain the safeguards to describe in the justification. They are not a

@@ -301,7 +301,7 @@ describe('checkout pricing guards (#275)', () => {
     stripeMocks.refundList.mockResolvedValue({ data: [] });
 
     await createPaymentRefund('pi_1', 'order-1', 2);
-    await findPaymentRefund('pi_1', 'order-1');
+    await findPaymentRefund('pi_1', 'order-1', 1999);
 
     expect(stripeMocks.refundCreate.mock.calls[0][1]).toMatchObject({
       timeout: 60_000,

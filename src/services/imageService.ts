@@ -24,12 +24,22 @@
  * - US-LAYOUT-04: Letter Layout Image Processing
  */
 
-import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import sharp, { type Metadata, type Sharp } from 'sharp';
+import sharp, { type Metadata, type OverlayOptions, type Sharp } from 'sharp';
 import type { ImageFileParam, ProcessedImage, PostcardSize, LetterImageType } from './types.js';
-import { getImage as getTempImage } from './tempImageStore.js';
+import {
+  getImage as getTempImage,
+  getUploadedPhoto,
+  UPLOADED_PHOTO_REFERENCE,
+} from './tempImageStore.js';
 import { ConcurrencyGateError, createConcurrencyGate, type ConcurrencyGate } from '../utils/concurrencyGate.js';
+import { COLLAGE_MAX_PHOTOS, COLLAGE_MIN_PHOTOS, collageCells } from './collageArrangement.js';
+import {
+  isUnsafeIpAddress,
+  remoteImageTransport,
+  resolvePublicAddress,
+  type PinnedAddress
+} from './imageDownload.js';
 
 // ============================================================================
 // Configuration
@@ -81,13 +91,16 @@ const UNSUPPORTED_FORMAT_MESSAGE = 'Unsupported image format. Please use PNG, JP
 
 /**
  * Images that libvips must hold whole rather than stream (interlaced PNG,
- * progressive JPEG) are bounded by their decoded size as well as by pixels.
- * Measured through this pipeline at one libvips thread (pinned below): a
- * 49 MP baseline JPEG or plain 8-bit PNG peaks near 60 MB resident and a
- * plain 16-bit RGBA PNG near 130 MB, all streamed; an interlaced or
- * progressive image at this budget peaks near 140 to 165 MB. Without the
- * budget, a 49 MP interlaced 16-bit PNG, a 4 MB file that passes every
- * other check, measured near 500 MB.
+ * progressive JPEG) are bounded by their decoded size as well as by pixels,
+ * and a progressive JPEG by its coefficients too (fullDecodeBytesPerPixel,
+ * #622). Measured through this pipeline at one libvips thread (pinned
+ * below): a 49 MP baseline JPEG or plain 8-bit PNG peaks near 60 MB resident
+ * and a plain 16-bit RGBA PNG near 130 MB, all streamed; an interlaced or
+ * progressive image at this budget peaks near 140 to 167 MB, a 4:2:2 or
+ * 4:4:4 progressive JPEG at its limit (25 or 16 MP) near 153 MB. Without the budget, a
+ * 49 MP interlaced 16-bit PNG, a 4 MB file that passes every other check,
+ * measured near 500 MB, and before #622 a 33 MP 4:4:4 progressive JPEG near
+ * 269 MB.
  */
 const MAX_FULL_DECODE_BYTES = 100_000_000;
 
@@ -95,11 +108,105 @@ const BYTES_PER_SAMPLE: Record<string, number> = {
   char: 1, uchar: 1, short: 2, ushort: 2, int: 4, uint: 4, float: 4, complex: 8, double: 8, dpcomplex: 16,
 };
 
+/** The JPEG start-of-frame markers, whose segment names each component's sampling factors. */
+const JPEG_SOF_MARKERS = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+
+/**
+ * The segments libjpeg passes over by their length before the frame header:
+ * APPn, COM, DQT, DHT, DRI, DAC and DNL. Anything else ends the walk unread,
+ * so the reader never takes a path through the bytes that libjpeg does not
+ * (#622 review: libjpeg discards a stray pair it does not know, and a walk that
+ * jumped by its "length" could land on a frame header libjpeg never reads).
+ */
+const JPEG_LENGTH_SKIPPED = new Set([0xfe, 0xdb, 0xc4, 0xdd, 0xcc, 0xdc]);
+
+function jpegSkipsByLength(marker: number): boolean {
+  return (marker >= 0xe0 && marker <= 0xef) || JPEG_LENGTH_SKIPPED.has(marker);
+}
+
+/**
+ * Samples per pixel of a JPEG's components, from the sampling factors in its
+ * frame header: each component holds (h / max h) x (v / max v) of a sample a
+ * pixel. 1.5 at 4:2:0, 2 at 4:2:2 and 4:4:0, 2.5 when two components are full
+ * and one is halved, 3 at 4:4:4. Read from the bytes because libvips reports
+ * only `4:4:4` or `4:2:0` (#622 review: 4:2:2 and mixed factors read as
+ * 4:2:0). Null when no frame header is found before the first scan.
+ */
+function jpegSamplesPerPixel(buffer: Buffer): number | null {
+  let offset = 2; // past SOI
+  while (offset + 4 <= buffer.length) {
+    if (buffer[offset] !== 0xff) return null;
+    const marker = buffer[offset + 1];
+    // Fill bytes before a marker.
+    if (marker === 0xff) {
+      offset += 1;
+      continue;
+    }
+    // Markers without a segment.
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) {
+      offset += 2;
+      continue;
+    }
+    // Anything but a frame header or a segment libjpeg skips by length (the first scan, the end,
+    // or a marker it does not know): no frame header was found.
+    if (!JPEG_SOF_MARKERS.has(marker) && !jpegSkipsByLength(marker)) return null;
+    // A segment's length under 2 lands inside the length field, on a byte that is not a marker: the
+    // walk ends there. A frame header's own length is libjpeg's to check: it refuses a wrong one
+    // before the metadata this budget follows is read.
+    const length = buffer.readUInt16BE(offset + 2);
+    if (JPEG_SOF_MARKERS.has(marker)) {
+      const components = buffer[offset + 9];
+      // A frame header cut short reads past the end as undefined, a factor of 0: refused below.
+      if (!components) return null;
+      const factors: Array<{ h: number; v: number }> = [];
+      for (let index = 0; index < components; index += 1) {
+        const sampling = buffer[offset + 11 + 3 * index];
+        factors.push({ h: sampling >> 4, v: sampling & 0x0f });
+      }
+      const maxH = Math.max(...factors.map((factor) => factor.h));
+      const maxV = Math.max(...factors.map((factor) => factor.v));
+      if (!(maxH > 0) || !(maxV > 0) || factors.some((factor) => !(factor.h > 0) || !(factor.v > 0))) return null;
+      return factors.reduce((sum, factor) => sum + (factor.h / maxH) * (factor.v / maxV), 0);
+    }
+    offset += 2 + length;
+  }
+  return null;
+}
+
+/**
+ * The bytes a whole decode holds per pixel, which the full-decode budget
+ * counts: the decoded image's (channels by bytes per sample) and, for a
+ * JPEG held whole, its DCT coefficients too, which libjpeg holds for every
+ * scan before it makes a pixel: two bytes a sample of each component at its
+ * own resolution (#622). At 4:2:0 that is 3 bytes a pixel, as the image's
+ * own; at 4:2:2 it is 4, and at 4:4:4 it is 6, which is why a 4:4:4 photo
+ * peaked near 265 MB where 4:2:0 at the same size peaked near 165 MB. The
+ * larger of the two is counted. A JPEG whose frame header cannot be read
+ * counts every component at full resolution: the most it can be.
+ */
+function fullDecodeBytesPerPixel(
+  metadata: Pick<Metadata, 'format' | 'channels' | 'depth'>,
+  buffer: Buffer
+): number {
+  const decoded = (metadata.channels ?? 4) * (BYTES_PER_SAMPLE[metadata.depth ?? ''] ?? 2);
+  if (metadata.format !== 'jpeg') return decoded;
+  const samples = jpegSamplesPerPixel(buffer) ?? Math.max(metadata.channels ?? 3, 1);
+  return Math.max(decoded, 2 * samples);
+}
+
 /** Names the size that would fit, for this image's channels and depth. */
 function tooLargeToDecodeMessage(bytesPerPixel: number): string {
   const megapixels = Math.floor(MAX_FULL_DECODE_BYTES / bytesPerPixel / 1_000_000);
   return `Image is too large to process. Please use an image under ${megapixels} megapixels, or save it without interlacing or progressive encoding.`;
 }
+
+/**
+ * The time a collage's photos have to download between them (#616 review),
+ * from the moment it holds its slot: each transfer starts with what is left
+ * of it, if that is less than its own deadline, and one that finds it spent
+ * fails as a download that did not finish.
+ */
+const COLLAGE_DOWNLOAD_BUDGET_MS = 30_000;
 
 const REMOTE_IMAGE_FETCH_CONFIG = {
   /** One deadline for the whole transfer: redirects, headers and body. */
@@ -118,14 +225,31 @@ const REMOTE_IMAGE_FETCH_CONFIG = {
  * queue is full or the wait is up, and one account may hold at most two
  * callers in each gate, so a single account cannot fill a gate for everyone
  * else.
+ *
+ * A signature's pixel work runs on a worker thread of its own inside this
+ * gate (#730): at most three at once, each about 10 MB of thread and up to
+ * about 25 MB of arrays at 1600 px a side, inside the decode slot it holds.
+ *
+ * A collage (#616) holds up to four input buffers at once, and then their
+ * tiles, so it is bounded by a gate of its own around the whole of it, its
+ * downloads included: two at a time and one per account, and one that waits
+ * has fetched nothing. The two add at most six held input buffers and two
+ * sets of tiles (about 24 MB each at worst) to the figure above: about
+ * 835 MB. (Before #622 counted a progressive JPEG's coefficients, a 4:4:4
+ * one decoded at about 265 MB, and the figure was about 1.13 GB.) Its photos
+ * share one budget for their downloads
+ * (COLLAGE_DOWNLOAD_BUDGET_MS), the queue waits and the transfers together,
+ * so a collage cannot hold its slot four times as long as one photo.
  */
 const GATE_CONFIG = {
   decode: { limit: 3, maxQueue: 12, queueTimeoutMs: 15_000, perKeyLimit: 2 },
   download: { limit: 8, maxQueue: 24, queueTimeoutMs: 15_000, perKeyLimit: 2 },
+  collage: { limit: 2, maxQueue: 4, queueTimeoutMs: 15_000, perKeyLimit: 1 },
 } as const;
 
 const decodeGate = createConcurrencyGate({ name: 'image-decode', ...GATE_CONFIG.decode });
 const downloadGate = createConcurrencyGate({ name: 'image-download', ...GATE_CONFIG.download });
+const collageGate = createConcurrencyGate({ name: 'image-collage', ...GATE_CONFIG.collage });
 
 const SERVICE_BUSY_MESSAGE = 'The image service is busy right now. Please try again in a moment.';
 const ACCOUNT_BUSY_MESSAGE = 'You have other images still processing. Please wait for them to finish and try again.';
@@ -183,12 +307,37 @@ export class ImageProcessingError extends Error {
 sharp.concurrency(1);
 
 /**
+ * No operation cache. sharp keeps recent sources and results for reuse (50 MB,
+ * 20 files and 100 items by default), and a cached source keeps its decoder
+ * alive, whose memory the cache does not count: a progressive JPEG held its
+ * whole coefficient buffer after its tile was made, so four photos decoded one
+ * after another in one slot measured up to three times one photo's peak, and a
+ * request's decoders were still held after it had returned (#616 review). Every
+ * image here is opened from bytes seen once, so the cache never hits.
+ */
+sharp.cache(false);
+
+/**
  * The one way this module (and generateImageForMail) opens image bytes: the
  * pixel ceiling travels with every call, including metadata reads, so no site
  * can forget it.
  */
 export function openImage(input: Buffer): Sharp {
   return sharp(input, { limitInputPixels: MAX_INPUT_PIXELS });
+}
+
+/**
+ * Opens a photo to be printed, under the same ceiling and turned upright by
+ * its EXIF orientation (#617). A phone stores a portrait photo's pixels as
+ * the sensor read them and records the turn in an Orientation tag. Every
+ * print path re-encodes without EXIF, so left alone the tag is lost and the
+ * picture prints turned by 90 degrees; the renderer relies on the images it
+ * is given being upright (src/render/pdf.ts). sharp turns the picture after
+ * it has been resized, which measured no higher a peak at 49 megapixels
+ * (docs/image-support.md). A picture without the tag is unchanged.
+ */
+function openUprightImage(input: Buffer): Sharp {
+  return openImage(input).rotate();
 }
 
 /** Per-call options shared by every processing entry point. */
@@ -198,6 +347,11 @@ export interface ImageProcessingOptions {
    * each gate (perKeyLimit), so one account cannot fill a gate for everyone.
    */
   actorId?: string;
+  /**
+   * A moment (Date.now()) by which a remote download must be over, if sooner
+   * than its own deadline: the photos of a collage share one (#616 review).
+   */
+  deadlineAt?: number;
 }
 
 async function runGated<T>(gate: ConcurrencyGate, work: () => Promise<T>, key?: string): Promise<T> {
@@ -220,7 +374,12 @@ export function runImageDecode<T>(work: () => Promise<T>, actorId?: string): Pro
   return runGated(decodeGate, work, actorId);
 }
 
-async function validateRemoteImageUrl(url: string): Promise<URL> {
+/**
+ * The URL, checked, and the address to connect to: https only, and a host
+ * whose every address is public (#730: resolved under the download's
+ * deadline, off the thread pool, src/services/imageDownload.ts).
+ */
+async function validateRemoteImageUrl(url: string, signal: AbortSignal): Promise<{ parsed: URL; pinned: PinnedAddress[] }> {
   let parsed: URL;
 
   try {
@@ -234,72 +393,19 @@ async function validateRemoteImageUrl(url: string): Promise<URL> {
   }
 
   const host = parsed.hostname.replace(/^\[|\]$/g, '');
-  if (isUnsafeIpAddress(host)) {
-    throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
-  }
-
-  if (!isIP(host)) {
-    const addresses = await lookup(host, { all: true, verbatim: true });
-    if (addresses.length === 0 || addresses.some(({ address }) => isUnsafeIpAddress(address))) {
+  const literal = isIP(host);
+  if (literal) {
+    if (isUnsafeIpAddress(host)) {
       throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
     }
+    return { parsed, pinned: [{ address: host, family: literal === 6 ? 6 : 4 }] };
   }
 
-  return parsed;
-}
-
-function isUnsafeIpAddress(address: string): boolean {
-  const ipv4Mapped = address.toLowerCase().match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (ipv4Mapped) {
-    return isUnsafeIpv4Address(ipv4Mapped[1]);
+  const pinned = await resolvePublicAddress(host, signal);
+  if (!pinned) {
+    throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
   }
-
-  const ipVersion = isIP(address);
-  if (ipVersion === 4) {
-    return isUnsafeIpv4Address(address);
-  }
-  if (ipVersion === 6) {
-    return isUnsafeIpv6Address(address);
-  }
-  return false;
-}
-
-function isUnsafeIpv4Address(address: string): boolean {
-  const parts = address.split('.').map((part) => Number.parseInt(part, 10));
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
-    return true;
-  }
-
-  const [a, b, c] = parts;
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    a >= 224 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 192 && b === 0 && c === 0) ||
-    (a === 192 && b === 0 && c === 2) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    (a === 198 && b === 51 && c === 100) ||
-    (a === 203 && b === 0 && c === 113)
-  );
-}
-
-function isUnsafeIpv6Address(address: string): boolean {
-  const normalized = address.toLowerCase();
-  return (
-    normalized === '::' ||
-    normalized === '::1' ||
-    normalized.startsWith('::ffff:') ||
-    normalized.startsWith('fc') ||
-    normalized.startsWith('fd') ||
-    /^fe[89ab]/.test(normalized) ||
-    normalized.startsWith('ff') ||
-    normalized.startsWith('2001:db8')
-  );
+  return { parsed, pinned };
 }
 
 /**
@@ -312,14 +418,13 @@ async function fetchRemoteImage(
   signal: AbortSignal,
   redirectsRemaining = REMOTE_IMAGE_FETCH_CONFIG.maxRedirects
 ): Promise<Response> {
-  const parsed = await validateRemoteImageUrl(url);
-  const response = await fetch(parsed.toString(), {
-    redirect: 'manual',
-    signal,
-  });
+  const { parsed, pinned } = await validateRemoteImageUrl(url, signal);
+  const response = await remoteImageTransport.fetch(parsed.toString(), { signal, pinned });
 
   if (response.status >= 300 && response.status < 400) {
     const location = response.headers.get('location');
+    // The redirect's own body is not read; let its connection go.
+    await response.body?.cancel?.().catch(() => undefined);
     if (!location || redirectsRemaining <= 0) {
       throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
     }
@@ -411,8 +516,16 @@ async function downloadRemoteImage(
   options: ImageProcessingOptions
 ): Promise<Buffer> {
   return runGated(downloadGate, async () => {
+    // What a collage's budget has left, when that is less than a download's own deadline.
+    const allowedMs =
+      options.deadlineAt === undefined
+        ? REMOTE_IMAGE_FETCH_CONFIG.deadlineMs
+        : Math.min(REMOTE_IMAGE_FETCH_CONFIG.deadlineMs, options.deadlineAt - Date.now());
+    if (allowedMs <= 0) {
+      throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
+    }
     const controller = new AbortController();
-    const deadline = setTimeout(() => controller.abort(), REMOTE_IMAGE_FETCH_CONFIG.deadlineMs);
+    const deadline = setTimeout(() => controller.abort(), allowedMs);
 
     try {
       const response = await fetchRemoteImage(url, controller.signal);
@@ -450,6 +563,10 @@ async function downloadRemoteImage(
       );
     } finally {
       clearTimeout(deadline);
+      // Ends a response refused before its body was read (#730): with no
+      // pooled agent, nothing else would close its socket while the peer
+      // keeps it open. Nothing to end after a body read to its end.
+      controller.abort();
     }
   }, options.actorId);
 }
@@ -489,7 +606,7 @@ export async function downloadAndProcessImage(
     validateDimensions(metadata.width, metadata.height);
 
     // 3. Resize and convert to JPEG
-    const processed = await openImage(buffer)
+    const processed = await openUprightImage(buffer)
       .resize(targetDimensions.width, targetDimensions.height, {
         fit: 'cover',
         position: 'center',
@@ -556,18 +673,72 @@ export async function downloadAndProcessPostcardImageWithPreview(
   options: ImageProcessingOptions = {}
 ): Promise<ProcessedPostcardImage> {
   const download_url = 'download_url' in input ? input.download_url : input.url;
-  const targetDimensions = CONFIG.sizes[size];
 
   // 1. Download image
   const buffer = await downloadImage(download_url, options);
+  return processPostcardBuffer(buffer, size, options);
+}
 
+/**
+ * A postcard's picture cropped again at another size (#594, set_postcard_style),
+ * by the same steps as a preview's: from its source while that still opens and
+ * still holds the same picture (#730, checked below), which keeps the whole
+ * picture to crop from, or else from the copy the draft prints from, which was
+ * cropped to its old size. `from` says which. Once a crop comes from the
+ * stored copy, the link can no longer match it, so later crops do too: a
+ * picture that may have changed is never trusted back.
+ */
+export async function reprocessPostcardImage(
+  source: { url: string | null; stored: string; storedSize: PostcardSize },
+  size: PostcardSize,
+  options: ImageProcessingOptions = {}
+): Promise<ProcessedPostcardImage & { from: 'source' | 'stored' }> {
+  if (source.url) {
+    try {
+      const downloaded = await downloadImage(source.url, options);
+      // The link may now hold another picture (#730). Made at the size the
+      // stored copy was made at, the same picture gives the same bytes, so the
+      // original's fuller crop is used only then; anything else, including a
+      // picture processed by another version of the library, falls back to
+      // the stored copy, the picture the person approved.
+      const asStored = await processPostcardBuffer(downloaded, source.storedSize, options);
+      if (asStored.base64DataUri === source.stored) {
+        return { ...(await processPostcardBuffer(downloaded, size, options)), from: 'source' };
+      }
+    } catch (error) {
+      // A link that no longer opens, or bytes that no longer make a picture:
+      // the stored copy, the picture the person approved, stands in. A busy
+      // service is said as such, as a preview says it, rather than cropping
+      // the smaller copy silently (#601 review round 1).
+      if (!(error instanceof ImageProcessingError) || error.code === 'SERVICE_BUSY') throw error;
+    }
+  }
+  return { ...(await processPostcardBuffer(storedImageBuffer(source.stored), size, options)), from: 'stored' };
+}
+
+/** The bytes of a stored `data:image/...;base64,` image. */
+function storedImageBuffer(dataUri: string): Buffer {
+  const comma = dataUri.indexOf(',');
+  if (!dataUri.startsWith('data:image/') || comma < 0 || !dataUri.slice(0, comma).endsWith(';base64')) {
+    throw new ImageProcessingError('PROCESSING_FAILED', "The postcard's stored picture cannot be read.");
+  }
+  return Buffer.from(dataUri.slice(comma + 1), 'base64');
+}
+
+/** A postcard's picture made from its bytes: the print's copy at the size, and the small copy shown. */
+async function processPostcardBuffer(
+  buffer: Buffer,
+  size: PostcardSize,
+  options: ImageProcessingOptions
+): Promise<ProcessedPostcardImage> {
+  const targetDimensions = CONFIG.sizes[size];
   return runGated(decodeGate, async () => {
     // 2. Get metadata and validate dimensions
     const metadata = await getImageMetadata(buffer);
     validateDimensions(metadata.width, metadata.height);
 
     // 3. Create full-quality image for PostGrid printing
-    const processed = await openImage(buffer)
+    const processed = await openUprightImage(buffer)
       .resize(targetDimensions.width, targetDimensions.height, {
         fit: 'cover',
         position: 'center',
@@ -575,31 +746,157 @@ export async function downloadAndProcessPostcardImageWithPreview(
       .jpeg({ quality: CONFIG.jpegQuality })
       .toBuffer();
 
-    // 4. Create small preview for ChatGPT widget from the processed image.
-    // Maintain aspect ratio of postcard (landscape)
-    const previewWidth = PREVIEW_CONFIG.maxWidth;
-    const previewHeight = Math.round(previewWidth * (targetDimensions.height / targetDimensions.width));
+    // 4. The small preview and both data URIs
+    return postcardPicture(processed, targetDimensions, metadata);
+  }, options.actorId);
+}
 
-    const preview = await openImage(processed)
-      .resize(previewWidth, previewHeight, {
-        fit: 'cover',
-        position: 'center',
-      })
-      .jpeg({ quality: PREVIEW_CONFIG.jpegQuality })
+/**
+ * A postcard front's JPEG as the tools take it: the print copy, and the small
+ * copy the card shows, derived from it, never from the original (the original
+ * is decoded once). `original` is the photo's own size, for the logs.
+ */
+async function postcardPicture(
+  processed: Buffer,
+  target: { width: number; height: number },
+  original: { width: number; height: number }
+): Promise<ProcessedPostcardImage> {
+  // Create small preview for ChatGPT widget from the processed image.
+  // Maintain aspect ratio of postcard (landscape)
+  const previewWidth = PREVIEW_CONFIG.maxWidth;
+  const previewHeight = Math.round(previewWidth * (target.height / target.width));
+
+  const preview = await openImage(processed)
+    .resize(previewWidth, previewHeight, {
+      fit: 'cover',
+      position: 'center',
+    })
+    .jpeg({ quality: PREVIEW_CONFIG.jpegQuality })
+    .toBuffer();
+
+  return {
+    base64DataUri: `data:image/jpeg;base64,${processed.toString('base64')}`,
+    previewDataUri: `data:image/jpeg;base64,${preview.toString('base64')}`,
+    originalWidth: original.width,
+    originalHeight: original.height,
+    processedWidth: target.width,
+    processedHeight: target.height,
+  };
+}
+
+// ============================================================================
+// Postcard Collages (#616)
+// ============================================================================
+
+const PHOTO_ORDINALS = ['first', 'second', 'third', 'fourth'] as const;
+
+/** A photo's refusal said by its place, so the person knows which to replace. A busy service is not any photo's. */
+function namedPhoto(error: unknown, index: number): unknown {
+  if (!(error instanceof ImageProcessingError) || error.code === 'SERVICE_BUSY') return error;
+  const place = PHOTO_ORDINALS[index] ?? `number ${index + 1}`;
+  return new ImageProcessingError(error.code, `The ${place} photo: ${error.userMessage}`, error);
+}
+
+/**
+ * Downloads two to four photos and draws them on one postcard front (#616),
+ * in the arrangement their number calls for (collageArrangement.ts), in the
+ * order given. The result is one JPEG at the postcard's print size, kept as a
+ * single photo's crop is: nothing downstream learns the front was a collage.
+ * The whole of it runs under the collage gate (two at a time, one per
+ * account), so a set waiting its turn has fetched nothing. The photos are
+ * downloaded one at a time, in order, each under the download gate, so the
+ * account holds one share of it, not four, and within one budget between them
+ * (COLLAGE_DOWNLOAD_BUDGET_MS): the first that will not download is named and
+ * the rest are not fetched. Then every photo is checked from its
+ * header before any is drawn, the first to fail being named; one whose pixels
+ * will not decode is named when its turn to be drawn comes.
+ *
+ * @param inputs - two to four OpenAI file parameters or plain links
+ * @throws ImageProcessingError naming the photo that could not be used ("The second photo: ...")
+ */
+export async function downloadAndProcessCollageWithPreview(
+  inputs: ImageInput[],
+  size: PostcardSize = '6x9',
+  options: ImageProcessingOptions = {}
+): Promise<ProcessedPostcardImage> {
+  if (inputs.length < COLLAGE_MIN_PHOTOS || inputs.length > COLLAGE_MAX_PHOTOS) {
+    throw new ImageProcessingError(
+      'PROCESSING_FAILED',
+      `A collage takes ${COLLAGE_MIN_PHOTOS} to ${COLLAGE_MAX_PHOTOS} photos.`
+    );
+  }
+
+  return runGated(collageGate, async () => {
+    const downloadOptions: ImageProcessingOptions = { ...options, deadlineAt: Date.now() + COLLAGE_DOWNLOAD_BUDGET_MS };
+    const buffers: Buffer[] = [];
+    for (const [index, input] of inputs.entries()) {
+      try {
+        buffers.push(await downloadImage('download_url' in input ? input.download_url : input.url, downloadOptions));
+      } catch (error) {
+        throw namedPhoto(error, index);
+      }
+    }
+    return composeCollageBuffers(buffers, size, options);
+  }, options.actorId);
+}
+
+/**
+ * The collage from its photos' bytes, under one decode slot. Every photo is
+ * checked first, with the checks a single photo gets (format from the bytes,
+ * the pixel ceiling, the progressive budget, the print minimum), before any is
+ * drawn; then each is turned upright and cropped to fill its cell, one at a
+ * time (the cache is off, so a finished photo's decoder is not kept), and the tiles are laid on a white
+ * canvas of the postcard's size, which a transparent picture shows through to.
+ */
+async function composeCollageBuffers(
+  buffers: Buffer[],
+  size: PostcardSize,
+  options: ImageProcessingOptions
+): Promise<ProcessedPostcardImage> {
+  const target = CONFIG.sizes[size];
+  const cells = collageCells(buffers.length, target);
+  return runGated(decodeGate, async () => {
+    const originals: Array<{ width: number; height: number }> = [];
+    for (const [index, buffer] of buffers.entries()) {
+      try {
+        const metadata = await getImageMetadata(buffer);
+        validateDimensions(metadata.width, metadata.height);
+        originals.push(metadata);
+      } catch (error) {
+        throw namedPhoto(error, index);
+      }
+    }
+
+    const tiles: OverlayOptions[] = [];
+    for (const [index, buffer] of buffers.entries()) {
+      const cell = cells[index];
+      try {
+        const tile = await openUprightImage(buffer)
+          .resize(cell.width, cell.height, { fit: 'cover', position: 'center' })
+          .toColourspace('srgb')
+          .png({ compressionLevel: 1 })
+          .toBuffer();
+        tiles.push({ input: tile, left: cell.left, top: cell.top });
+      } catch (error) {
+        throw namedPhoto(
+          new ImageProcessingError(
+            'PROCESSING_FAILED',
+            'Image could not be processed. Please try a different image.',
+            error instanceof Error ? error : undefined
+          ),
+          index
+        );
+      }
+    }
+
+    const processed = await sharp({
+      create: { width: target.width, height: target.height, channels: 3, background: '#ffffff' },
+    })
+      .composite(tiles)
+      .jpeg({ quality: CONFIG.jpegQuality })
       .toBuffer();
 
-    // 5. Convert both to base64 data URIs
-    const base64Full = processed.toString('base64');
-    const base64Preview = preview.toString('base64');
-
-    return {
-      base64DataUri: `data:image/jpeg;base64,${base64Full}`,
-      previewDataUri: `data:image/jpeg;base64,${base64Preview}`,
-      originalWidth: metadata.width,
-      originalHeight: metadata.height,
-      processedWidth: targetDimensions.width,
-      processedHeight: targetDimensions.height,
-    };
+    return postcardPicture(processed, target, originals[0]);
   }, options.actorId);
 }
 
@@ -633,7 +930,7 @@ export async function downloadAndProcessLetterImage(
 
     // 3. Resize to fit within dimensions while maintaining aspect ratio
     // Use 'inside' fit to ensure image doesn't exceed max dimensions
-    const processed = await openImage(buffer)
+    const processed = await openUprightImage(buffer)
       .resize(targetDimensions.width, targetDimensions.height, {
         fit: 'inside',       // Fit within bounds, don't crop
         withoutEnlargement: false, // Allow upscaling if needed
@@ -697,7 +994,7 @@ export async function downloadAndProcessLetterImageWithPreview(
     validateDimensions(metadata.width, metadata.height);
 
     // 3. Create full-quality image for PostGrid
-    const processed = await openImage(buffer)
+    const processed = await openUprightImage(buffer)
       .resize(targetDimensions.width, targetDimensions.height, {
         fit: 'inside',
         withoutEnlargement: false,
@@ -739,6 +1036,8 @@ async function downloadLetterImage(
   imageType: LetterImageType,
   options: ImageProcessingOptions
 ): Promise<Buffer> {
+  const ownPhoto = await tryGetUploadedPhoto(url, options);
+  if (ownPhoto) return ownPhoto;
   const localBuffer = await tryGetFromTempStore(url);
   if (localBuffer) return localBuffer;
 
@@ -773,10 +1072,74 @@ async function tryGetFromTempStore(url: string): Promise<Buffer | null> {
   return Buffer.from(base64Data, 'base64');
 }
 
+const UPLOADED_PHOTO_EXPIRED_MESSAGE =
+  'That uploaded photo has expired: uploads are kept for 15 minutes. Please upload it again.';
+
+/**
+ * The caller's own photo, sent through our upload card (#474, phase 3), when
+ * the request names UPLOADED_PHOTO_REFERENCE; otherwise null. Read for the
+ * account the image is processed for and no other, so the reference cannot
+ * reach anyone else's photo.
+ */
+async function tryGetUploadedPhoto(url: string, options: ImageProcessingOptions): Promise<Buffer | null> {
+  if (url !== UPLOADED_PHOTO_REFERENCE) return null;
+  const photo = options.actorId ? await getUploadedPhoto(options.actorId) : null;
+  if (!photo) {
+    throw new ImageProcessingError('DOWNLOAD_FAILED', UPLOADED_PHOTO_EXPIRED_MESSAGE);
+  }
+  return photo;
+}
+
+/**
+ * The bytes of a picture a signature is saved from (#608), fetched as a
+ * letter image is: the account's own upload through the card, a picture in
+ * our temp store, or a remote image of at most 5 MB. The picture is checked
+ * and cleaned by src/services/signatureImage.ts.
+ */
+export async function downloadSignatureSource(url: string, options: ImageProcessingOptions = {}): Promise<Buffer> {
+  const ownPhoto = await tryGetUploadedPhoto(url, options);
+  if (ownPhoto) return ownPhoto;
+  const localBuffer = await tryGetFromTempStore(url);
+  if (localBuffer) return localBuffer;
+  return downloadRemoteImage(url, {
+    maxFileSize: LETTER_IMAGE_CONFIG.maxFileSize,
+    allowedTypes: LETTER_IMAGE_CONFIG.allowedTypes,
+    tooLargeMessage: 'That picture is too large. Please use one under 5MB.',
+  }, options);
+}
+
+/**
+ * A picture's size and format from its header, behind the checks every image
+ * here passes (a PNG, JPEG or WebP by its own bytes, the pixel ceiling, the
+ * full-decode budget), with no print minimum: a signature has its own
+ * (signatureImage.ts). Decodes no pixel; call it under the decode gate.
+ */
+export function readImageHeader(buffer: Buffer): Promise<{ width: number; height: number; format: string }> {
+  return getImageMetadata(buffer);
+}
+
+/**
+ * Check a photo sent through our upload card before it is kept: a PNG, JPEG
+ * or WebP by its own bytes, within the pixel ceiling and the decode budget,
+ * and big enough to print. Reads the header only, under the decode gate.
+ */
+export async function inspectUploadedPhoto(
+  buffer: Buffer,
+  actorId: string
+): Promise<{ width: number; height: number; format: string }> {
+  return runGated(decodeGate, async () => {
+    const metadata = await getImageMetadata(buffer);
+    validateDimensions(metadata.width, metadata.height);
+    return metadata;
+  }, actorId);
+}
+
 /**
  * Download image from URL with validation
  */
 async function downloadImage(url: string, options: ImageProcessingOptions): Promise<Buffer> {
+  const ownPhoto = await tryGetUploadedPhoto(url, options);
+  if (ownPhoto) return ownPhoto;
   const localBuffer = await tryGetFromTempStore(url);
   if (localBuffer) return localBuffer;
 
@@ -845,7 +1208,7 @@ async function getImageMetadata(buffer: Buffer): Promise<{ width: number; height
   }
 
   if (metadata.isProgressive) {
-    const bytesPerPixel = (metadata.channels ?? 4) * (BYTES_PER_SAMPLE[metadata.depth ?? ''] ?? 2);
+    const bytesPerPixel = fullDecodeBytesPerPixel(metadata, buffer);
     if (metadata.width * metadata.height * bytesPerPixel > MAX_FULL_DECODE_BYTES) {
       throw new ImageProcessingError('IMAGE_TOO_LARGE', tooLargeToDecodeMessage(bytesPerPixel));
     }
@@ -898,10 +1261,14 @@ export const _testing = {
   LETTER_IMAGE_CONFIG,
   MAX_INPUT_PIXELS,
   MAX_FULL_DECODE_BYTES,
+  fullDecodeBytesPerPixel,
+  jpegSamplesPerPixel,
   GATE_CONFIG,
   REMOTE_IMAGE_FETCH_CONFIG,
   decodeGate,
   downloadGate,
+  collageGate,
+  COLLAGE_DOWNLOAD_BUDGET_MS,
   openImage,
   sniffFormat,
   downloadImage,
@@ -913,4 +1280,5 @@ export const _testing = {
   validateRemoteImageUrl,
   isUnsafeIpAddress,
   readResponseBufferWithLimit,
+  namedPhoto,
 };

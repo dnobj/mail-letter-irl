@@ -10,7 +10,7 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  *   sent letter content          -> anonymized at 90 days
  *   drafts on a PAID order       -> the same schedule
  *   drafts on an abandoned one   -> anonymized at 7 days (they cannot be deleted)
- *   unsent, no order at all      -> deleted at 7 days by cleanupOldDrafts
+ *   unsent, no order at all      -> deleted 4 days after expiry by cleanupOldDrafts
  *
  * These run against real PostgreSQL because every property that matters is a
  * property of the STATEMENT: the boundary, the allow-list holds, the
@@ -147,6 +147,43 @@ describePostgres('content retention sweep', () => {
     return orderId;
   }
 
+  it('home reads only the owner active drafts and retained mail, without content or street addresses', async () => {
+    const { readLetterHome } = await import('../../src/services/letterHomeService.js');
+    const owner = await seedUser();
+    const other = await seedUser();
+    const draft = await seedDraft(owner);
+    await pool.query(`UPDATE letter_drafts SET status = 'pending', expires_at = NOW() + INTERVAL '1 day',
+      recipient = $2::jsonb WHERE draft_id = $1`, [draft, JSON.stringify({ name: 'Ruth', city: 'Chicago', state: 'IL', addressLine1: SECRET_STREET })]);
+    await seedDraft(owner); // expired and consumed
+    const redactedDraft = await seedDraft(owner);
+    await pool.query(`UPDATE letter_drafts SET status = 'pending', expires_at = NOW() + INTERVAL '1 day', redacted_at = NOW() WHERE draft_id = $1`, [redactedDraft]);
+    const { letterId } = await seedSentLetter({ userId: owner, daysAgo: 0 });
+    const hidden = await seedSentLetter({ userId: owner, daysAgo: 0 });
+    await pool.query('UPDATE letters SET redacted_at = NOW() WHERE letter_id = $1', [hidden.letterId]);
+    await seedSentLetter({ userId: other, daysAgo: 0 });
+    const home = await readLetterHome(owner);
+    expect(home.drafts.map(item => item.draftId)).toEqual([draft]);
+    expect(home.orders.map(item => item.orderId)).toEqual([letterId]);
+    expect(home.drafts[0].recipient).toEqual({ name: 'Ruth', city: 'Chicago', state: 'IL' });
+    expect(JSON.stringify(home)).not.toContain(SECRET_BODY);
+    expect(JSON.stringify(home)).not.toContain(SECRET_STREET);
+    expect(await readLetterHome('absent-account')).toEqual({ drafts: [], orders: [], recipients: [], limit: 20, websiteOrigin: expect.any(String) });
+  });
+
+  it('home limits recent mail and active drafts independently to twenty', async () => {
+    const { readLetterHome } = await import('../../src/services/letterHomeService.js');
+    const owner = await seedUser();
+    for (let index = 0; index < 21; index++) {
+      await seedSentLetter({ userId: owner, daysAgo: 0 });
+      const draft = await seedDraft(owner);
+      await pool.query(`UPDATE letter_drafts SET status = 'pending', expires_at = NOW() + INTERVAL '1 day' WHERE draft_id = $1`, [draft]);
+    }
+    const home = await readLetterHome(owner);
+    expect(home.orders).toHaveLength(20);
+    expect(home.drafts).toHaveLength(20);
+    expect(home.recipients).toHaveLength(1);
+  });
+
   /**
    * A PREPAID letter and the pack order that funded it, linked only through
    * the ledger - which is the only link that exists for prepaid mail, because
@@ -187,6 +224,74 @@ describePostgres('content retention sweep', () => {
       [txn.rows[0].transaction_id, lot.rows[0].ledger_id]
     );
     return { letterId, orderId };
+  }
+
+  /**
+   * A letter paid from credits a failed or cancelled send gave back (#729): the first lot (a pack's, or a promo's),
+   * then `returns` returned lots, each linked to the one before as returnConsumedCreditsForLetter writes it ('adjustment',
+   * no order, related_ledger_id, source_metadata.reason 'send_failed'), and the letter's deduction drawn from the last.
+   * `link: 'none'` writes the last return without its link; `reason` writes it as another kind of adjustment.
+   */
+  async function seedLetterPaidFromReturnedCredits(options: {
+    daysAgo: number;
+    orderStatus?: string;
+    origin?: 'purchase' | 'promo';
+    returns?: number;
+    link?: 'none';
+    reason?: string;
+    userId?: string;
+  }): Promise<{ letterId: string; orderId: string | null; userId: string }> {
+    const userId = options.userId ?? (await seedUser());
+    const { letterId } = await seedSentLetter({ daysAgo: options.daysAgo, userId });
+    let orderId: string | null = null;
+    if ((options.origin ?? 'purchase') === 'purchase') {
+      orderId = `order_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (
+           order_id, user_id, credits, amount_cents, currency, status,
+           order_type, product_code, idempotency_key
+         ) VALUES ($1, $2, 10, 1000, 'USD', $3, 'letter_pack', 'credit-pack-10', $4)`,
+        [orderId, userId, options.orderStatus ?? 'fulfilled', `idem_${orderId}`]
+      );
+    }
+    let previous = await pool.query<{ ledger_id: string }>(
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, source_order_id, expiration_policy, status
+       ) VALUES ($1, 10, 8, $2, $3, $4, 'never', 'active')
+       RETURNING ledger_id`,
+      [userId, options.origin ?? 'purchase', orderId ?? `promo_${randomUUID()}`, orderId]
+    );
+    const returns = options.returns ?? 1;
+    for (let i = 0; i < returns; i++) {
+      const last = i === returns - 1;
+      previous = await pool.query<{ ledger_id: string }>(
+        `INSERT INTO credit_ledger (
+           user_id, initial_amount, remaining_amount, source_type,
+           source_reference_id, source_metadata, activated_at, expiration_policy, status, description, related_ledger_id
+         ) VALUES ($1, 2, 2, 'adjustment', $2, $3::jsonb, NOW(), 'never', 'active', 'Returned after cancelled send', $4)
+         RETURNING ledger_id`,
+        [
+          userId,
+          orderId,
+          JSON.stringify({ reason: last && options.reason ? options.reason : 'send_failed', letter_id: `letter_${randomUUID()}`, restores_ledger_id: previous.rows[0].ledger_id }),
+          last && options.link === 'none' ? null : previous.rows[0].ledger_id
+        ]
+      );
+    }
+    const txn = await pool.query<{ transaction_id: number }>(
+      `INSERT INTO credit_transactions (
+         user_id, amount, balance_after, type, reference_type, reference_id
+       ) VALUES ($1, -2, 8, 'deduction', 'letter', $2)
+       RETURNING transaction_id`,
+      [userId, letterId]
+    );
+    await pool.query(
+      `INSERT INTO credit_consumption (transaction_id, ledger_id, amount, ledger_remaining_after)
+       VALUES ($1, $2, 2, 0)`,
+      [txn.rows[0].transaction_id, previous.rows[0].ledger_id]
+    );
+    return { letterId, orderId, userId };
   }
 
   /**
@@ -305,17 +410,62 @@ describePostgres('content retention sweep', () => {
       expect((await readLetter(letterId)).content).toEqual({});
     });
 
-    it('sets the recovery window so the PUBLISHED total is met exactly', async () => {
+    it('ends the recovery window when the PUBLISHED period ends, counted from the letter', async () => {
+      // Swept on day 85: the copy goes on day 90 of the letter's own clock, not
+      // 7 days after the sweep ran (#153 review round 3).
+      const { letterId } = await seedSentLetter({ daysAgo: 85 });
+
+      await retention.purgeExpiredLetterContent(90);
+
+      const saved = await readQuarantine('letters', letterId);
+      const { rows } = await pool.query(`SELECT sent_at FROM letters WHERE letter_id = $1`, [letterId]);
+      const totalDays =
+        (new Date(saved.purge_after).getTime() - new Date(rows[0].sent_at).getTime()) / 86_400_000;
+      expect(Math.round(totalDays)).toBe(90);
+    });
+
+    it('gives a letter swept after its period a day to be restored, not a window in the past', async () => {
+      // Its own clock says day 90 was a month ago, which valid_quarantine_window
+      // would refuse for the whole batch.
       const { letterId } = await seedSentLetter({ daysAgo: 120 });
 
       await retention.purgeExpiredLetterContent(90);
 
       const saved = await readQuarantine('letters', letterId);
-      const windowDays =
-        (new Date(saved.purge_after).getTime() - new Date(saved.quarantined_at).getTime()) /
-        86_400_000;
-      // 83 live + 7 quarantine = the published 90. Not 97.
-      expect(Math.round(windowDays)).toBe(7);
+      const windowHours =
+        (new Date(saved.purge_after).getTime() - new Date(saved.quarantined_at).getTime()) / 3_600_000;
+      expect(Math.round(windowHours)).toBe(24);
+    });
+
+    it('never overwrites a saved copy with an emptied live row', async () => {
+      // The documented re-run - clear redacted_at, sweep again - used to replace
+      // the good copy with the '{}' left in the live row (#153 review round 3).
+      const { letterId } = await seedSentLetter({ daysAgo: 200 });
+      await retention.purgeExpiredLetterContent();
+      await pool.query(`UPDATE letters SET redacted_at = NULL WHERE letter_id = $1`, [letterId]);
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+
+      const saved = await readQuarantine('letters', letterId);
+      expect(saved.content.content.bodyText).toBe(SECRET_BODY);
+      expect(saved.content.recipient.addressLine1).toBe(SECRET_STREET);
+      expect(await retention.restoreQuarantinedContent('letters', letterId)).toBe(true);
+      expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
+    });
+
+    it('will not restore over content that is live, and keeps the copy', async () => {
+      const { letterId } = await seedSentLetter({ daysAgo: 120 });
+      await retention.purgeExpiredLetterContent();
+      // Someone put different content back by hand and cleared the marker.
+      await pool.query(
+        `UPDATE letters SET content = '{"bodyText":"newer"}'::jsonb, redacted_at = NULL WHERE letter_id = $1`,
+        [letterId]
+      );
+
+      expect(await retention.restoreQuarantinedContent('letters', letterId)).toBe(false);
+
+      expect((await readLetter(letterId)).content.bodyText).toBe('newer');
+      expect(await readQuarantine('letters', letterId)).toBeDefined();
     });
 
     it('restores a letter and re-opens it to a future sweep', async () => {
@@ -344,7 +494,9 @@ describePostgres('content retention sweep', () => {
       expect(await retention.restoreQuarantinedContent('letter_drafts', draftId)).toBe(true);
 
       const { rows } = await pool.query(
-        `SELECT sender, body_text, header_image_data, header_image_url, redacted_at
+        `SELECT sender, body_text, header_image_data, header_image_url, redacted_at,
+                stationery IS NULL AS no_stationery, postcard_front IS NULL AS no_front,
+                sender_validation IS NULL AS no_validation
            FROM letter_drafts WHERE draft_id = $1`,
         [draftId]
       );
@@ -353,6 +505,58 @@ describePostgres('content retention sweep', () => {
       expect(rows[0].header_image_url).toBe(SECRET_IMAGE_URL);
       expect(rows[0].header_image_data).toContain('base64');
       expect(rows[0].redacted_at).toBeNull();
+      // SQL NULL again, not JSON null: a Classic draft's stationery must be,
+      // for migration 044's pair check (#563).
+      expect(rows[0].no_stationery).toBe(true);
+      // And so must a full-bleed postcard's front, for migration 048's (#594).
+      expect(rows[0].no_front).toBe(true);
+      expect(rows[0].no_validation).toBe(true);
+    });
+
+    it.each([
+      [{ layout: 'border', caption: 'Cape Cod with Sam, August 2026' }, { layout: 'border' }],
+      [{ layout: 'greetings', place: 'Asheville' }, { layout: 'greetings' }]
+    ])("keeps a postcard's layout, drops its caption or place, and restores both (#594): %o", async (front, kept) => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 120, userId, layout: 'postcard' });
+      // Both at once: migration 048 holds a front and renderer pdf-3 together.
+      await pool.query(
+        "UPDATE letter_drafts SET renderer_version = 'pdf-3', postcard_front = $2::jsonb WHERE draft_id = $1",
+        [draftId, JSON.stringify(front)]
+      );
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+      expect(await retention.purgePaidDraftContent()).toBe(1);
+
+      const scrubbed = await pool.query('SELECT postcard_front, renderer_version FROM letter_drafts WHERE draft_id = $1', [draftId]);
+      expect(scrubbed.rows[0]).toEqual({ postcard_front: kept, renderer_version: 'pdf-3' });
+      expect((await readQuarantine('letter_drafts', draftId)).content.postcard_front).toEqual(front);
+
+      expect(await retention.restoreQuarantinedContent('letter_drafts', draftId)).toBe(true);
+      const restored = await pool.query('SELECT postcard_front FROM letter_drafts WHERE draft_id = $1', [draftId]);
+      expect(restored.rows[0].postcard_front).toEqual(front);
+    });
+
+    it("keeps a themed draft's theme, drops its slot text, and restores both (#563)", async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 120, userId });
+      const stationery = { theme: 'celebration', dateLine: 'October 1, 2026', headline: SECRET_BODY.slice(0, 20) };
+      // Both at once: migration 044 holds a theme and renderer pdf-2 together.
+      await pool.query(
+        "UPDATE letter_drafts SET renderer_version = 'pdf-2', stationery = $2::jsonb WHERE draft_id = $1",
+        [draftId, JSON.stringify(stationery)]
+      );
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+      expect(await retention.purgePaidDraftContent()).toBe(1);
+
+      const scrubbed = await pool.query('SELECT stationery, renderer_version FROM letter_drafts WHERE draft_id = $1', [draftId]);
+      expect(scrubbed.rows[0]).toEqual({ stationery: { theme: 'celebration' }, renderer_version: 'pdf-2' });
+      expect((await readQuarantine('letter_drafts', draftId)).content.stationery).toEqual(stationery);
+
+      expect(await retention.restoreQuarantinedContent('letter_drafts', draftId)).toBe(true);
+      const restored = await pool.query('SELECT stationery FROM letter_drafts WHERE draft_id = $1', [draftId]);
+      expect(restored.rows[0].stationery).toEqual(stationery);
     });
 
     it('purges only quarantine rows whose recovery window has expired', async () => {
@@ -383,6 +587,159 @@ describePostgres('content retention sweep', () => {
       await pool.query(`DELETE FROM redacted_content_quarantine WHERE source_id = $1`, [letterId]);
 
       expect(await retention.restoreQuarantinedContent('letters', letterId)).toBe(false);
+    });
+  });
+
+  describe('held mail its customer cancelled (#701)', () => {
+    /** A held letter, never printed, cancelled `cancelledDaysAgo` days ago by `source`. */
+    async function seedCancelledHeldLetter(options: {
+      cancelledDaysAgo: number;
+      source?: string;
+      sentDaysAgo?: number;
+    }): Promise<string> {
+      const userId = await seedUser();
+      const letterId = `letter_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO letters (
+           letter_id, user_id, content, recipient, credits_cost, status, preview_html, sent_at,
+           arrive_by, mail_on
+         ) VALUES ($1, $2, $3::jsonb, $4::jsonb, 2, 'cancelled', $5,
+                   CASE WHEN $6::int IS NULL THEN NULL ELSE NOW() - make_interval(days => $6::int) END,
+                   CURRENT_DATE + 30, CURRENT_DATE + 20)`,
+        [
+          letterId,
+          userId,
+          JSON.stringify({ bodyText: SECRET_BODY, signOff: 'Yours, Alex' }),
+          JSON.stringify({ name: 'Sam', addressLine1: SECRET_STREET, city: 'London' }),
+          `<p>${SECRET_BODY}</p>`,
+          options.sentDaysAgo ?? null
+        ]
+      );
+      await seedJob(letterId, 'cancelled');
+      // Held mail is known by its job's hold, which the cancel leaves (055).
+      await pool.query("UPDATE letter_jobs SET mail_hold_until = NOW() + INTERVAL '20 days' WHERE letter_id = $1", [letterId]);
+      await pool.query(
+        `INSERT INTO letter_status_history (letter_id, old_status, new_status, source, changed_at)
+         VALUES ($1, 'queued', 'cancelled', $2, NOW() - make_interval(days => $3::int))`,
+        [letterId, options.source ?? 'customer', options.cancelledDaysAgo]
+      );
+      return letterId;
+    }
+
+    it('anonymizes it 4 days after the cancel, with 3 more to recover it, and the restore puts it back', async () => {
+      const due = await seedCancelledHeldLetter({ cancelledDaysAgo: 5 });
+      const recent = await seedCancelledHeldLetter({ cancelledDaysAgo: 3 });
+
+      await expect(retention.previewCancelledHeldLetterContent()).resolves.toMatchObject({ pastWindow: 1, due: 1 });
+      expect(await retention.purgeCancelledHeldLetterContent()).toBe(1);
+
+      const row = await readLetter(due);
+      expect(row.content).toEqual({});
+      expect(row.recipient).toEqual({});
+      expect(row.preview_html).toBeNull();
+      expect(row.redacted_at).not.toBeNull();
+      expect(JSON.stringify(row)).not.toContain(SECRET_STREET);
+      expect((await readLetter(recent)).redacted_at).toBeNull();
+      // The copy goes 7 days after the cancel: in about 2 days.
+      const copy = await pool.query(
+        `SELECT source_table, EXTRACT(EPOCH FROM (purge_after - NOW())) / 86400 AS days_left
+           FROM redacted_content_quarantine WHERE source_id = $1`,
+        [due]
+      );
+      expect(copy.rows[0].source_table).toBe('letters');
+      expect(Number(copy.rows[0].days_left)).toBeGreaterThan(1.9);
+      expect(Number(copy.rows[0].days_left)).toBeLessThan(2.1);
+
+      await retention.restoreQuarantinedContent('letters', due);
+      const restored = await readLetter(due);
+      expect(restored.redacted_at).toBeNull();
+      expect(JSON.stringify(restored.recipient)).toContain(SECRET_STREET);
+    });
+
+    it("leaves an operator's cancel, printed mail and mail with no date on the letter schedule", async () => {
+      const byOperator = await seedCancelledHeldLetter({ cancelledDaysAgo: 30, source: 'operator' });
+      const printed = await seedCancelledHeldLetter({ cancelledDaysAgo: 30, sentDaysAgo: 31 });
+      const undated = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
+      await pool.query('UPDATE letters SET arrive_by = NULL, mail_on = NULL WHERE letter_id = $1', [undated]);
+      await pool.query('UPDATE letter_jobs SET mail_hold_until = NULL WHERE letter_id = $1', [undated]);
+      // The control, seeded the same way: the seed itself selects (review round 3).
+      const control = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
+
+      expect(await retention.purgeCancelledHeldLetterContent()).toBe(1);
+      expect((await readLetter(control)).redacted_at).not.toBeNull();
+      for (const letterId of [byOperator, printed, undated]) {
+        expect((await readLetter(letterId)).redacted_at, letterId).toBeNull();
+      }
+    });
+
+    it('keeps it on the letter schedule when the pack that paid for it was refunded or is disputed (review round 1)', async () => {
+      for (const orderStatus of ['disputed', 'refunded']) {
+        const { letterId, orderId } = await seedPrepaidLetterFundedByPack({ daysAgo: 1, orderStatus: 'fulfilled' });
+        await pool.query(
+          `UPDATE letters SET status = 'cancelled', sent_at = NULL, arrive_by = CURRENT_DATE + 30, mail_on = CURRENT_DATE + 20
+            WHERE letter_id = $1`,
+          [letterId]
+        );
+        await seedJob(letterId, 'cancelled');
+        await pool.query("UPDATE letter_jobs SET mail_hold_until = NOW() + INTERVAL '20 days' WHERE letter_id = $1", [letterId]);
+        await pool.query(
+          `INSERT INTO letter_status_history (letter_id, old_status, new_status, source, changed_at)
+           VALUES ($1, 'queued', 'cancelled', 'customer', NOW() - INTERVAL '30 days')`,
+          [letterId]
+        );
+        if (orderStatus === 'refunded') {
+          // A pack refunded in full revokes its lots.
+          await pool.query("UPDATE credit_ledger SET status = 'revoked' WHERE source_order_id = $1", [orderId]);
+        }
+        await pool.query('UPDATE orders SET status = $2 WHERE order_id = $1', [orderId, orderStatus]);
+
+        await expect(retention.previewCancelledHeldLetterContent(), orderStatus).resolves.toMatchObject({ due: 0, heldBack: 1 });
+        expect(await retention.purgeCancelledHeldLetterContent(), orderStatus).toBe(0);
+        expect((await readLetter(letterId)).redacted_at, orderStatus).toBeNull();
+        await pool.query('TRUNCATE letter_jobs, letters, credit_consumption, credit_transactions, credit_ledger, orders RESTART IDENTITY CASCADE');
+      }
+    });
+
+    it('anonymizes one paid from credits an earlier cancel gave back, judged by the pack that first paid (#729)', async () => {
+      // The common case #729 names: a customer cancels to change a date, then sends again with the credits that came back.
+      const seedCancelledFromReturn = async (orderStatus: string) => {
+        const { letterId } = await seedLetterPaidFromReturnedCredits({ daysAgo: 1, orderStatus });
+        await pool.query(
+          `UPDATE letters SET status = 'cancelled', sent_at = NULL, arrive_by = CURRENT_DATE + 30, mail_on = CURRENT_DATE + 20
+            WHERE letter_id = $1`,
+          [letterId]
+        );
+        await seedJob(letterId, 'cancelled');
+        await pool.query("UPDATE letter_jobs SET mail_hold_until = NOW() + INTERVAL '20 days' WHERE letter_id = $1", [letterId]);
+        await pool.query(
+          `INSERT INTO letter_status_history (letter_id, old_status, new_status, source, changed_at)
+           VALUES ($1, 'queued', 'cancelled', 'customer', NOW() - INTERVAL '30 days')`,
+          [letterId]
+        );
+        return letterId;
+      };
+      const settled = await seedCancelledFromReturn('fulfilled');
+      const disputed = await seedCancelledFromReturn('disputed');
+
+      await expect(retention.previewCancelledHeldLetterContent()).resolves.toMatchObject({ due: 1, heldBack: 1 });
+      expect(await retention.purgeCancelledHeldLetterContent()).toBe(1);
+      expect((await readLetter(settled)).redacted_at).not.toBeNull();
+      expect((await readLetter(disputed)).redacted_at).toBeNull();
+    });
+
+    it('holds one whose job is not settled', async () => {
+      const letterId = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
+      await pool.query("UPDATE letter_jobs SET status = 'pending' WHERE letter_id = $1", [letterId]);
+      const control = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
+      expect(await retention.purgeCancelledHeldLetterContent()).toBe(1);
+      expect((await readLetter(control)).redacted_at).not.toBeNull();
+      expect((await readLetter(letterId)).redacted_at).toBeNull();
+    });
+
+    it('runs in the retention sweep on its own window, whatever the caller asks for letters', async () => {
+      await seedCancelledHeldLetter({ cancelledDaysAgo: 5 });
+      const summary = await retention.runRetentionSweep(365, 100);
+      expect(summary).toMatchObject({ cancelledHeldLettersRedacted: 1, lettersRedacted: 0, errors: [] });
     });
   });
 
@@ -508,6 +865,50 @@ describePostgres('content retention sweep', () => {
       expect((await readLetter(letterId)).content).toEqual({});
     });
 
+    it('judges a letter paid from returned credits by the pack that first paid, through returns of returns (#729)', async () => {
+      // Before #729 a returned lot was money with no order, so each of these was held back for good.
+      const once = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled' });
+      const twice = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled', returns: 2 });
+      const promo = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, origin: 'promo' });
+      // Held: the first pack is disputed, through one return and through two.
+      const disputed = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'disputed' });
+      const disputedTwice = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'disputed', returns: 2 });
+
+      await expect(retention.previewExpiredLetterContent()).resolves.toMatchObject({ due: 3, heldBack: 2 });
+      expect(await retention.purgeExpiredLetterContent()).toBe(3);
+      for (const seeded of [once, twice, promo]) {
+        expect((await readLetter(seeded.letterId)).content, seeded.letterId).toEqual({});
+      }
+      for (const seeded of [disputed, disputedTwice]) {
+        expect((await readLetter(seeded.letterId)).content.bodyText, seeded.letterId).toBe(SECRET_BODY);
+      }
+
+      // Their orders settle (the order-status arm alone: a refund or a lost dispute also revokes the returned lot, which holds): those go too.
+      await pool.query("UPDATE orders SET status = 'refunded' WHERE order_id = ANY($1)", [[disputed.orderId, disputedTwice.orderId]]);
+      expect(await retention.purgeExpiredLetterContent()).toBe(2);
+    });
+
+    it('holds a letter paid from a return it cannot follow, or from an operator adjustment, as before (#729)', async () => {
+      const unlinked = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled', link: 'none' });
+      const compensation = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled', reason: 'operator_compensation' });
+      const revoked = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled' });
+      await pool.query(
+        `UPDATE credit_ledger SET status = 'revoked'
+          WHERE ledger_id = (SELECT cc.ledger_id FROM credit_consumption cc
+                               JOIN credit_transactions t ON t.transaction_id = cc.transaction_id
+                              WHERE t.reference_id = $1)`,
+        [revoked.letterId]
+      );
+      // The control, seeded the same way: the seed itself selects.
+      const control = await seedLetterPaidFromReturnedCredits({ daysAgo: 400, orderStatus: 'fulfilled' });
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+      expect((await readLetter(control.letterId)).content).toEqual({});
+      for (const seeded of [unlinked, compensation, revoked]) {
+        expect((await readLetter(seeded.letterId)).content.bodyText, seeded.letterId).toBe(SECRET_BODY);
+      }
+    });
+
     it('releases the hold once a dispute resolves', async () => {
       const { letterId, orderId } = await seedPrepaidLetterFundedByPack({
         daysAgo: 400,
@@ -542,6 +943,52 @@ describePostgres('content retention sweep', () => {
       expect((await readLetter(letterId)).content).toEqual({});
     });
 
+    /**
+     * #730: a letter that failed, never sent (no sent_at), made 400 days ago,
+     * with one failed job in the given state.
+     */
+    async function seedFailedLetter(job: { outcome: 'definite_failure' | 'not_dispatched'; attempts: number }): Promise<{ userId: string; letterId: string }> {
+      const userId = await seedUser();
+      const letterId = `letter_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, created_at)
+         VALUES ($1, $2, $3::jsonb, $4::jsonb, 2, 'failed', NOW() - INTERVAL '400 days')`,
+        [letterId, userId, JSON.stringify({ bodyText: SECRET_BODY }), JSON.stringify({ addressLine1: SECRET_STREET })]
+      );
+      await pool.query(
+        `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at, provider_outcome, attempts, max_attempts)
+         VALUES ($1, $2, 'failed', $3, NOW(), $4, $5, 3)`,
+        [`job_${randomUUID()}`, letterId, `idem_${randomUUID()}`, job.outcome, job.attempts]
+      );
+      return { userId, letterId };
+    }
+
+    it.each([
+      ['refused by the provider, though the operator could retry it by hand', { outcome: 'definite_failure' as const, attempts: 1 }],
+      ['out of attempts before it reached the provider', { outcome: 'not_dispatched' as const, attempts: 3 }]
+    ])('redacts a letter that failed for good, %s, counted from its creation (#730)', async (_label, job) => {
+      const { letterId } = await seedFailedLetter(job);
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+      expect((await readLetter(letterId)).content).toEqual({});
+    });
+
+    it('HOLDS a failed letter whose job the outbox could still send (#730)', async () => {
+      const { letterId } = await seedFailedLetter({ outcome: 'not_dispatched', attempts: 1 });
+      expect(await retention.purgeExpiredLetterContent()).toBe(0);
+      expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
+    });
+
+    it('HOLDS a failed Pay & Send letter until its refund is settled (#730)', async () => {
+      const { userId, letterId } = await seedFailedLetter({ outcome: 'definite_failure', attempts: 1 });
+      const orderId = await seedJitOrder({ userId, status: 'refund_pending', letterId });
+      expect(await retention.purgeExpiredLetterContent()).toBe(0);
+      expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
+
+      await pool.query(`UPDATE orders SET status = 'refunded' WHERE order_id = $1`, [orderId]);
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+      expect((await readLetter(letterId)).content).toEqual({});
+    });
+
     it('respects the batch limit', async () => {
       await seedSentLetter({ daysAgo: 400 });
       await seedSentLetter({ daysAgo: 400 });
@@ -566,6 +1013,20 @@ describePostgres('content retention sweep', () => {
       expect(row.redacted_at).not.toBeNull();
       expect(row.required_credits).toBe(2);
       expect(JSON.stringify(row)).not.toContain(SECRET_STREET);
+    });
+
+    it("ends a paid draft's recovery window on day 90 of its own clock", async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 86, userId });
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+      expect(await retention.purgePaidDraftContent()).toBe(1);
+
+      const saved = await readQuarantine('letter_drafts', draftId);
+      const { rows } = await pool.query(`SELECT consumed_at FROM letter_drafts WHERE draft_id = $1`, [draftId]);
+      const totalDays =
+        (new Date(saved.purge_after).getTime() - new Date(rows[0].consumed_at).getTime()) / 86_400_000;
+      expect(Math.round(totalDays)).toBe(90);
     });
 
     it('HOLDS a paid draft whose order is still unsettled', async () => {
@@ -637,6 +1098,21 @@ describePostgres('content retention sweep', () => {
       expect(JSON.stringify(row)).not.toContain(SECRET_STREET);
     });
 
+    it('ends an abandoned draft\'s recovery window on day 7 of its own clock', async () => {
+      // 4 days live + 3 in quarantine: swept on day 5, the copy goes on day 7.
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 5, userId });
+      await seedJitOrder({ userId, status: 'cancelled', draftId });
+
+      expect(await retention.purgeAbandonedDraftContent()).toBe(1);
+
+      const saved = await readQuarantine('letter_drafts', draftId);
+      const { rows } = await pool.query(`SELECT created_at FROM letter_drafts WHERE draft_id = $1`, [draftId]);
+      const totalDays =
+        (new Date(saved.purge_after).getTime() - new Date(rows[0].created_at).getTime()) / 86_400_000;
+      expect(Math.round(totalDays)).toBe(7);
+    });
+
     it('leaves an abandoned draft inside the 7-day window alone', async () => {
       const userId = await seedUser();
       const draftId = await seedContentDraft({ daysAgo: 3, userId });
@@ -688,6 +1164,7 @@ describePostgres('content retention sweep', () => {
       expect(summary.errors).toEqual([]);
       expect(Object.keys(summary).sort()).toEqual([
         'abandonedDraftsRedacted',
+        'cancelledHeldLettersRedacted',
         'draftsRedacted',
         'errors',
         'lettersRedacted',
@@ -710,6 +1187,83 @@ describePostgres('content retention sweep', () => {
       expect(summary.errors.join(' ')).not.toMatch(/received/);
       // A failed sweep must not read as "caught up".
       expect(summary.moreWaiting).toBe(true);
+    });
+  });
+
+  describe("unsent drafts, by their own expiry (#730)", () => {
+    /**
+     * Sets a draft's columns with the updated_at trigger off, inside a
+     * transaction, so the times written are the times read (the trigger would
+     * set updated_at to now).
+     */
+    async function setDraft(draftId: string, sql: string, params: unknown[]): Promise<void> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('ALTER TABLE letter_drafts DISABLE TRIGGER update_letter_drafts_updated_at');
+        await client.query(sql, [draftId, ...params]);
+        await client.query('ALTER TABLE letter_drafts ENABLE TRIGGER update_letter_drafts_updated_at');
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+
+    /** An order-less draft, expired `expiredDaysAgo` days and an hour ago, and marked so `markedDaysAgo` days ago. */
+    async function expiredDraft(expiredDaysAgo: number, markedDaysAgo: number): Promise<string> {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: expiredDaysAgo + 1, userId });
+      await setDraft(
+        draftId,
+        `UPDATE letter_drafts SET status = 'expired', consumed_at = NULL,
+           expires_at = NOW() - make_interval(days => $2::int, hours => 1),
+           updated_at = NOW() - make_interval(days => $3::int)
+         WHERE draft_id = $1`,
+        [expiredDaysAgo, markedDaysAgo]
+      );
+      return draftId;
+    }
+
+    it("deletes an unsent draft 4 days after it expired, however late a run marked it", async () => {
+      const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
+      // Expired 4 days and an hour ago, marked expired only yesterday.
+      const late = await expiredDraft(4, 1);
+      // Expired 3 days and an hour ago, marked 8 days ago by its own clock: not yet.
+      const recent = await expiredDraft(3, 8);
+      expect(await cleanupOldDrafts(7)).toBe(1);
+      expect(await readDraft(late)).toBeUndefined();
+      expect((await readDraft(recent)).body_text).toBe(SECRET_BODY);
+    });
+
+    it("keeps a sent draft its 7 days from the send, as before", async () => {
+      const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
+      const userId = await seedUser();
+      const sixDays = await seedContentDraft({ daysAgo: 6, userId });
+      const eightDays = await seedContentDraft({ daysAgo: 8, userId });
+      await setDraft(sixDays, `UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '6 days 1 hour' WHERE draft_id = $1`, []);
+      await setDraft(eightDays, `UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '8 days' WHERE draft_id = $1`, []);
+      expect(await cleanupOldDrafts(7)).toBe(1);
+      expect((await readDraft(sixDays)).body_text).toBe(SECRET_BODY);
+      expect(await readDraft(eightDays)).toBeUndefined();
+    });
+
+    it("keeps a cancelled draft its 7 days from the cancel, however old its expiry", async () => {
+      const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
+      const userId = await seedUser();
+      // Expired 6 days ago, cancelled 6 days and an hour ago: only an expired draft goes by its expiry.
+      const cancelled = await seedContentDraft({ daysAgo: 6, userId });
+      await setDraft(
+        cancelled,
+        `UPDATE letter_drafts SET status = 'cancelled', consumed_at = NULL,
+           updated_at = NOW() - INTERVAL '6 days 1 hour'
+         WHERE draft_id = $1`,
+        []
+      );
+      expect(await cleanupOldDrafts(7)).toBe(0);
+      expect((await readDraft(cancelled)).body_text).toBe(SECRET_BODY);
     });
   });
 });

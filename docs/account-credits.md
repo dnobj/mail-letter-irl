@@ -44,5 +44,14 @@
   Stripe-hosted Checkout; a verified webhook grants the credits.
 - Promo codes: `redeem_promo_code`.
 - Operator adjustments: the admin panel, in full mode.
+
+## Gift Letters
+
+Gift letters are not credits. They are a separate entitlement (`gift_letters`) that a normal send
+never spends: a send uses one only when its preview chose it, and then it costs no credits and
+prints a card for the recipient. They come from packs, gift codes, seed campaigns and operator
+grants; `get_account_balance` reports them as `giftLettersRemaining`, apart from
+`lettersRemaining`, and the dashboard's balance endpoint as `giftLetters`. See
+[gift-letters.md](gift-letters.md).
 - An in-ChatGPT purchase through the Agentic Commerce Protocol is planned for when the platform allows
   it ([acp-implementation-guide.md](acp-implementation-guide.md)).

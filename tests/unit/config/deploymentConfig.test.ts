@@ -41,7 +41,15 @@ const VALID_PROD: NodeJS.ProcessEnv = {
   // unset LETTER_IRL_ALLOWED_HOSTS makes DNS-rebinding protection reject every
   // request to the public hostname while /readyz still answers 200.
   LETTER_IRL_ALLOWED_HOSTS: 'api.fixture.example',
-  LETTER_IRL_ALLOWED_ORIGINS: 'https://chatgpt.com'
+  LETTER_IRL_ALLOWED_ORIGINS: 'https://chatgpt.com',
+  // Required in production since #699: the operator's notices, the
+  // maintenance heartbeat and the retention mode.
+  LETTER_IRL_OPERATOR_ALERT_URL: 'https://hc-ping.example/fixture/fail',
+  MAINTENANCE_HEARTBEAT_URL: 'https://hc-ping.example/fixture',
+  CONTENT_RETENTION_MODE: 'enforce',
+  // Required on in production since #730, with the website's application.
+  LETTER_IRL_SEND_CONFIRMATION_ENABLED: 'true',
+  LETTER_IRL_WEBSITE_CLIENT_ID: 'website-client-fixture',
 };
 
 const VALID_DEV: NodeJS.ProcessEnv = {
@@ -188,6 +196,7 @@ describe('validateDeploymentConfig in production', () => {
     ['missing STRIPE_WEBHOOK_SECRET', { STRIPE_WEBHOOK_SECRET: undefined }, 'presence.stripe_webhook_secret'],
     ['test-mode Stripe key', { STRIPE_SECRET_KEY: 'sk_test_unit_fixture' }, 'stripe.live_key_required'],
     ['malformed webhook secret', { STRIPE_WEBHOOK_SECRET: 'not_a_webhook_secret' }, 'stripe.webhook_secret_malformed'],
+    ['checkout domain with a scheme (#373)', { STRIPE_CHECKOUT_DOMAIN: 'https://pay.letterirl.com' }, 'stripe.checkout_domain_invalid'],
     ['missing pack price', { STRIPE_PRICE_STARTER: undefined }, 'stripe.pack_price_incomplete'],
     ['pack price without price_ prefix', { STRIPE_PRICE_REGULAR: 'prod_something' }, 'stripe.pack_price_incomplete'],
     // NOT here: a padded price id. The catalog trims before resolving, so it
@@ -224,6 +233,13 @@ describe('validateDeploymentConfig in production', () => {
     expect(ruleIds(env(overrides), 'error')).toContain(expectedRule);
   });
 
+  it('accepts a bare custom checkout domain, and only warns about a bad one outside production (#373)', () => {
+    expect(ruleIds(env({ STRIPE_CHECKOUT_DOMAIN: 'pay.letterirl.com' }))).not.toContain('stripe.checkout_domain_invalid');
+    const dev = env({ STRIPE_CHECKOUT_DOMAIN: 'pay.letterirl.com/' }, VALID_DEV);
+    expect(ruleIds(dev, 'error')).not.toContain('stripe.checkout_domain_invalid');
+    expect(ruleIds(dev, 'warning')).toContain('stripe.checkout_domain_invalid');
+  });
+
   it('accepts bucket configuration through the alias chains', () => {
     const aliased = env({
       TEMP_IMAGE_BUCKET_NAME: undefined,
@@ -232,6 +248,115 @@ describe('validateDeploymentConfig in production', () => {
       AWS_ACCESS_KEY_ID: 'unit-fixture-access-key'
     });
     expect(validateDeploymentConfig(aliased, 'server').errors).toEqual([]);
+  });
+
+  it('warns, never fails, on a maintenance heartbeat URL that is not https outside production (#408)', () => {
+    const bad = env({ MAINTENANCE_HEARTBEAT_URL: 'http://hc-ping.com/abc' }, VALID_DEV);
+    expect(ruleIds(bad, 'error')).not.toContain('maintenance.heartbeat_url_invalid');
+    expect(ruleIds(bad, 'warning')).toContain('maintenance.heartbeat_url_invalid');
+    expect(ruleIds(env({ MAINTENANCE_HEARTBEAT_URL: 'https://hc-ping.com/abc' }))).not.toContain(
+      'maintenance.heartbeat_url_invalid'
+    );
+  });
+
+  describe('the send rule production requires (#730)', () => {
+    it('refuses the production API with the rule off, unset or misspelt', () => {
+      expect(ruleIds(VALID_PROD, 'error')).not.toContain('send_confirmation.required');
+      for (const value of [undefined, 'false', '0', 'ture', '']) {
+        expect(ruleIds(env({ LETTER_IRL_SEND_CONFIRMATION_ENABLED: value }), 'error'), String(value)).toContain('send_confirmation.required');
+      }
+      for (const value of ['true', ' TRUE ', '1', 'yes', 'on']) {
+        expect(ruleIds(env({ LETTER_IRL_SEND_CONFIRMATION_ENABLED: value }), 'error'), value).not.toContain('send_confirmation.required');
+      }
+    });
+
+    it('asks neither production maintenance nor development for it', () => {
+      const off = env({ LETTER_IRL_SEND_CONFIRMATION_ENABLED: undefined });
+      expect(validateDeploymentConfig(off, 'maintenance').findings.map(f => f.rule)).not.toContain('send_confirmation.required');
+      const dev = env({ LETTER_IRL_SEND_CONFIRMATION_ENABLED: undefined }, VALID_DEV);
+      expect(validateDeploymentConfig(dev, 'server').findings.map(f => f.rule)).not.toContain('send_confirmation.required');
+    });
+
+    it('then needs the website application in production, which is its own finding', () => {
+      const errors = ruleIds(env({ LETTER_IRL_WEBSITE_CLIENT_ID: undefined }), 'error');
+      expect(errors).toContain('send_confirmation.website_client_missing');
+      expect(errors).not.toContain('send_confirmation.required');
+    });
+
+    it('needs the website application on the production API whatever the rule says, for personal access tokens too', () => {
+      const neither = env({ LETTER_IRL_WEBSITE_CLIENT_ID: undefined, LETTER_IRL_SEND_CONFIRMATION_ENABLED: undefined });
+      expect(ruleIds(neither, 'error')).toContain('send_confirmation.website_client_missing');
+      const rules = (input: NodeJS.ProcessEnv) =>
+        validateDeploymentConfig(input, 'maintenance').findings.map(f => f.rule);
+      expect(rules(env({ LETTER_IRL_WEBSITE_CLIENT_ID: undefined }))).not.toContain('send_confirmation.website_client_missing');
+      const devOff = env({ LETTER_IRL_WEBSITE_CLIENT_ID: undefined, LETTER_IRL_SEND_CONFIRMATION_ENABLED: undefined }, VALID_DEV);
+      expect(validateDeploymentConfig(devOff, 'server').findings.map(f => f.rule)).not.toContain('send_confirmation.website_client_missing');
+    });
+  });
+
+  describe('the monitoring production requires (#699)', () => {
+    const maintenanceErrors = (input: NodeJS.ProcessEnv) =>
+      validateDeploymentConfig(input, 'maintenance').findings.filter(f => f.severity === 'error').map(f => f.rule);
+
+    it('refuses production maintenance without the heartbeat, the operator URL or the retention mode', () => {
+      expect(maintenanceErrors(VALID_PROD)).toEqual([]);
+      for (const [name, rule] of [
+        ['MAINTENANCE_HEARTBEAT_URL', 'presence.maintenance_heartbeat_url'],
+        ['LETTER_IRL_OPERATOR_ALERT_URL', 'presence.letter_irl_operator_alert_url'],
+        ['CONTENT_RETENTION_MODE', 'presence.content_retention_mode']
+      ] as const) {
+        expect(maintenanceErrors(env({ [name]: undefined })), name).toContain(rule);
+      }
+    });
+
+    it('refuses the production API without the operator URL, and asks it for neither of the others', () => {
+      expect(ruleIds(env({ LETTER_IRL_OPERATOR_ALERT_URL: undefined }), 'error')).toContain('presence.letter_irl_operator_alert_url');
+      const apiOnly = env({ MAINTENANCE_HEARTBEAT_URL: undefined, CONTENT_RETENTION_MODE: undefined });
+      expect(ruleIds(apiOnly, 'error')).toEqual([]);
+    });
+
+    it('refuses a URL production cannot use, and only warns of it elsewhere', () => {
+      for (const [name, rule] of [
+        ['MAINTENANCE_HEARTBEAT_URL', 'maintenance.heartbeat_url_invalid'],
+        ['LETTER_IRL_OPERATOR_ALERT_URL', 'limits.operator_alert_url_invalid']
+      ] as const) {
+        expect(maintenanceErrors(env({ [name]: 'http://hc-ping.example/x' })), name).toContain(rule);
+        const dev = validateDeploymentConfig(env({ [name]: 'http://hc-ping.example/x' }, VALID_DEV), 'maintenance');
+        expect(dev.findings.filter(f => f.severity === 'error').map(f => f.rule), name).not.toContain(rule);
+        expect(dev.findings.filter(f => f.severity === 'warning').map(f => f.rule), name).toContain(rule);
+      }
+    });
+
+    it('only warns the production API of a heartbeat URL it never calls (review round 3)', () => {
+      const bad = env({ MAINTENANCE_HEARTBEAT_URL: 'http://hc-ping.example/x' });
+      expect(ruleIds(bad, 'error')).not.toContain('maintenance.heartbeat_url_invalid');
+      expect(ruleIds(bad, 'warning')).toContain('maintenance.heartbeat_url_invalid');
+      expect(maintenanceErrors(bad)).toContain('maintenance.heartbeat_url_invalid');
+    });
+
+    it('asks development for none of them', () => {
+      expect(validateDeploymentConfig(VALID_DEV, 'maintenance').findings.filter(f => f.severity === 'error')).toEqual([]);
+    });
+
+    it('warns of a retention mode that is neither enforce nor report, which only reports', () => {
+      expect(ruleIds(env({ CONTENT_RETENTION_MODE: 'enforced' }), 'warning')).toContain('retention.mode_unknown');
+      expect(ruleIds(env({ CONTENT_RETENTION_MODE: 'enforced' }), 'error')).not.toContain('retention.mode_unknown');
+      for (const mode of ['enforce', 'report', ' ENFORCE ']) {
+        expect(ruleIds(env({ CONTENT_RETENTION_MODE: mode })), mode).not.toContain('retention.mode_unknown');
+      }
+    });
+  });
+
+  it('warns, never fails, while the outbox switch pauses dispatch (#451 review)', () => {
+    for (const value of ['false', '0', 'fasle']) {
+      const paused = env({ LETTER_IRL_OUTBOX_DISPATCH_ENABLED: value });
+      expect(ruleIds(paused, 'error')).not.toContain('outbox.dispatch_paused');
+      expect(ruleIds(paused, 'warning')).toContain('outbox.dispatch_paused');
+    }
+    // Unset, blank and on all dispatch, so none of them warns.
+    for (const value of [undefined, '', '  ', 'true', 'on']) {
+      expect(ruleIds(env({ LETTER_IRL_OUTBOX_DISPATCH_ENABLED: value }))).not.toContain('outbox.dispatch_paused');
+    }
   });
 
   it('warns on an unrecognized provider key prefix instead of failing', () => {
@@ -260,6 +385,107 @@ describe('validateDeploymentConfig in production', () => {
       .map(f => f.message)
       .join('\n');
     expect(jitMessages).toContain('POSTCARD');
+  });
+
+  describe("the mail options' prices (#578)", () => {
+    const JIT_ON = {
+      JIT_PURCHASE_ENABLED: 'true',
+      STRIPE_JIT_LETTER_PRICE_ID: 'price_jit_letter_unit_fixture',
+      STRIPE_JIT_POSTCARD_PRICE_ID: 'price_jit_postcard_unit_fixture'
+    };
+    const jitFindings = (input: NodeJS.ProcessEnv) =>
+      validateDeploymentConfig(input, 'server').findings.filter(f => f.rule === 'stripe.jit_config_incomplete');
+
+    it('requires nothing more while the options are off, as production keeps them', () => {
+      expect(jitFindings(env(JIT_ON))).toEqual([]);
+      // A flag alone, without Pay & Send, requires nothing either.
+      expect(jitFindings(env({ LETTER_IRL_ROOM_TO_WRITE_ENABLED: 'true' }))).toEqual([]);
+    });
+
+    it("requires each option's price while its flag is on, naming the flag", () => {
+      const roomOn = env({ ...JIT_ON, LETTER_IRL_ROOM_TO_WRITE_ENABLED: 'true' });
+      expect(jitFindings(roomOn).map(f => [f.severity, f.message])).toEqual([
+        ['error', 'STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID is required when JIT_PURCHASE_ENABLED=true and LETTER_IRL_ROOM_TO_WRITE_ENABLED is on'],
+        ['error', 'STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID is required when JIT_PURCHASE_ENABLED=true and LETTER_IRL_ROOM_TO_WRITE_ENABLED is on']
+      ]);
+      // The flag is read as every off-unless-set flag is.
+      const sizesOn = env({
+        ...JIT_ON,
+        LETTER_IRL_POSTCARD_SIZES_ENABLED: 'yes',
+        STRIPE_JIT_POSTCARD_4X6_PRICE_ID: 'not-a-price'
+      });
+      expect(jitFindings(sizesOn).map(f => f.message)).toEqual([
+        'STRIPE_JIT_POSTCARD_4X6_PRICE_ID must be a Stripe price id (price_...)',
+        'STRIPE_JIT_POSTCARD_11X6_PRICE_ID is required when JIT_PURCHASE_ENABLED=true and LETTER_IRL_POSTCARD_SIZES_ENABLED is on'
+      ]);
+      // Certified mail (#625) is one more option with two prices.
+      const certifiedOn = env({ ...JIT_ON, LETTER_IRL_CERTIFIED_MAIL_ENABLED: 'true' });
+      expect(jitFindings(certifiedOn).map(f => [f.severity, f.message])).toEqual([
+        ['error', 'STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID is required when JIT_PURCHASE_ENABLED=true and LETTER_IRL_CERTIFIED_MAIL_ENABLED is on'],
+        ['error', 'STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID is required when JIT_PURCHASE_ENABLED=true and LETTER_IRL_CERTIFIED_MAIL_ENABLED is on']
+      ]);
+    });
+
+    it('is satisfied once the prices are set, and only warns outside production', () => {
+      const priced = env({
+        ...JIT_ON,
+        LETTER_IRL_ROOM_TO_WRITE_ENABLED: 'true',
+        STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID: 'price_two_unit_fixture',
+        STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID: 'price_three_unit_fixture'
+      });
+      expect(jitFindings(priced)).toEqual([]);
+      const certifiedPriced = env({
+        ...JIT_ON,
+        LETTER_IRL_CERTIFIED_MAIL_ENABLED: 'true',
+        STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID: 'price_certified_unit_fixture',
+        STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID: 'price_receipt_unit_fixture'
+      });
+      expect(jitFindings(certifiedPriced)).toEqual([]);
+      const dev = env({ ...JIT_ON, LETTER_IRL_POSTCARD_SIZES_ENABLED: 'true' }, VALID_DEV);
+      expect(jitFindings(dev).map(f => f.severity)).toEqual(['warning', 'warning']);
+    });
+
+    it('lists the three flags for the preflight to show, on both services, never demanded', () => {
+      for (const name of [
+        'LETTER_IRL_ROOM_TO_WRITE_ENABLED',
+        'LETTER_IRL_POSTCARD_SIZES_ENABLED',
+        'LETTER_IRL_CERTIFIED_MAIL_ENABLED'
+      ]) {
+        expect(ENV_VAR_MANIFEST.find(entry => entry.name === name)).toEqual({
+          name,
+          requiredIn: 'production',
+          advisory: true,
+          secret: false,
+          services: ['api', 'maintenance']
+        });
+      }
+      // Absent in production, as it is until the owner approves, or set off:
+      // no finding names either flag, on either service.
+      const flagsOff = env({
+        LETTER_IRL_ROOM_TO_WRITE_ENABLED: 'false',
+        LETTER_IRL_POSTCARD_SIZES_ENABLED: 'false',
+        LETTER_IRL_CERTIFIED_MAIL_ENABLED: 'false'
+      });
+      for (const surface of ['server', 'maintenance'] as const) {
+        for (const input of [VALID_PROD, flagsOff]) {
+          const messages = validateDeploymentConfig(input, surface).findings.map(f => f.message).join('\n');
+          expect(messages).not.toMatch(/ROOM_TO_WRITE|POSTCARD_SIZES|CERTIFIED_MAIL/);
+        }
+      }
+    });
+
+    it('lists each price in the manifest behind Pay & Send and its flag', () => {
+      expect(
+        ENV_VAR_MANIFEST.filter(entry => entry.flag).map(entry => [entry.name, entry.condition, entry.flag, entry.checkedBy])
+      ).toEqual([
+        ['STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'stripe.jit_config_incomplete'],
+        ['STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'stripe.jit_config_incomplete'],
+        ['STRIPE_JIT_POSTCARD_4X6_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_POSTCARD_SIZES_ENABLED', 'stripe.jit_config_incomplete'],
+        ['STRIPE_JIT_POSTCARD_11X6_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_POSTCARD_SIZES_ENABLED', 'stripe.jit_config_incomplete'],
+        ['STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'stripe.jit_config_incomplete'],
+        ['STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'stripe.jit_config_incomplete']
+      ]);
+    });
   });
 
   it('refuses to boot production with authentication off', () => {
@@ -513,6 +739,80 @@ describe('ENV_VAR_MANIFEST', () => {
 
   it('approves exactly the providers production may run on', () => {
     expect(APPROVED_LIVE_PROVIDERS).toEqual(['postgrid']);
+  });
+
+  it('lists the arrive-by flag and its settings, API only (#535, #700)', () => {
+    for (const name of ['LETTER_IRL_ARRIVE_BY_ENABLED', 'LETTER_IRL_SCHEDULE_LEAD_DAYS', 'LETTER_IRL_SCHEDULE_HORIZON_DAYS', 'LETTER_IRL_SCHEDULE_DAILY_CAP']) {
+      expect(ENV_VAR_MANIFEST.find(entry => entry.name === name), name).toEqual({
+        name,
+        requiredIn: 'production',
+        advisory: true,
+        secret: false,
+        services: ['api']
+      });
+    }
+  });
+
+  it('lists the stationery flag, advisory and API only, so the preflight shows where it is set (#563)', () => {
+    expect(ENV_VAR_MANIFEST.find(entry => entry.name === 'LETTER_IRL_STATIONERY_ENABLED')).toEqual({
+      name: 'LETTER_IRL_STATIONERY_ENABLED',
+      requiredIn: 'production',
+      advisory: true,
+      secret: false,
+      services: ['api']
+    });
+  });
+
+  it('lists the postcard layouts flag, advisory and API only, so the preflight shows where it is set (#594)', () => {
+    expect(ENV_VAR_MANIFEST.find(entry => entry.name === 'LETTER_IRL_POSTCARD_LAYOUTS_ENABLED')).toEqual({
+      name: 'LETTER_IRL_POSTCARD_LAYOUTS_ENABLED',
+      requiredIn: 'production',
+      advisory: true,
+      secret: false,
+      services: ['api']
+    });
+  });
+
+  it('lists the postcard collages flag, advisory and API only, so the preflight shows where it is set (#616)', () => {
+    expect(ENV_VAR_MANIFEST.find(entry => entry.name === 'LETTER_IRL_POSTCARD_COLLAGES_ENABLED')).toEqual({
+      name: 'LETTER_IRL_POSTCARD_COLLAGES_ENABLED',
+      requiredIn: 'production',
+      advisory: true,
+      secret: false,
+      services: ['api']
+    });
+  });
+
+  it('lists the address requests flag, advisory and API only, so the preflight shows where it is set (#604)', () => {
+    expect(ENV_VAR_MANIFEST.find(entry => entry.name === 'LETTER_IRL_ADDRESS_REQUESTS_ENABLED')).toEqual({
+      name: 'LETTER_IRL_ADDRESS_REQUESTS_ENABLED',
+      requiredIn: 'production',
+      advisory: true,
+      secret: false,
+      services: ['api']
+    });
+  });
+
+  it('lists the signatures flag, advisory and API only, so the preflight shows where it is set (#608)', () => {
+    expect(ENV_VAR_MANIFEST.find(entry => entry.name === 'LETTER_IRL_SIGNATURES_ENABLED')).toEqual({
+      name: 'LETTER_IRL_SIGNATURES_ENABLED',
+      requiredIn: 'production',
+      advisory: true,
+      secret: false,
+      services: ['api']
+    });
+  });
+
+  it('lists the print renderer flag, so the preflight shows where it is set (#534)', () => {
+    // Advisory: absent is the intended production state until the owner
+    // switches it on. API only: maintenance prints with the recorded version.
+    expect(ENV_VAR_MANIFEST.find(entry => entry.name === 'LETTER_IRL_PRINT_RENDERER')).toEqual({
+      name: 'LETTER_IRL_PRINT_RENDERER',
+      requiredIn: 'production',
+      advisory: true,
+      secret: false,
+      services: ['api']
+    });
   });
 });
 

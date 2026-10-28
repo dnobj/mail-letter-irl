@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import {
   cleanupExpiredImages,
+  deleteUploadedPhoto,
   getImage,
   getStoreSize,
+  getUploadedPhoto,
   storeImage,
+  storeUploadedPhoto,
 } from '../../../src/services/tempImageStore.js';
 
 describe('tempImageStore memory fallback', () => {
@@ -48,5 +52,65 @@ describe('tempImageStore memory fallback', () => {
     const before = getStoreSize();
     await storeImage('newImage');
     expect(getStoreSize()).toBeGreaterThanOrEqual(before + 1);
+  });
+});
+
+// Photos people upload through our card (#474, phase 3): one per account,
+// replaced by the next, gone after fifteen minutes, never served by URL.
+describe('tempImageStore uploaded photos (memory)', () => {
+  beforeEach(() => {
+    process.env.NODE_ENV = 'test';
+    process.env.TEMP_IMAGE_STORE = 'memory';
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.TEMP_IMAGE_STORE;
+  });
+
+  it('keeps an account one photo, and a new one replaces it', async () => {
+    await storeUploadedPhoto('auth0|a', Buffer.from('first'), 'image/jpeg');
+    await storeUploadedPhoto('auth0|a', Buffer.from('second'), 'image/jpeg');
+    expect((await getUploadedPhoto('auth0|a'))?.toString()).toBe('second');
+  });
+
+  it('keeps each account to its own photo', async () => {
+    await storeUploadedPhoto('auth0|a', Buffer.from('mine'), 'image/jpeg');
+    await storeUploadedPhoto('auth0|b', Buffer.from('theirs'), 'image/png');
+    expect((await getUploadedPhoto('auth0|a'))?.toString()).toBe('mine');
+    expect((await getUploadedPhoto('auth0|b'))?.toString()).toBe('theirs');
+    await expect(getUploadedPhoto('auth0|nobody')).resolves.toBeNull();
+  });
+
+  it('forgets a photo after fifteen minutes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    await storeUploadedPhoto('auth0|a', Buffer.from('brief'), 'image/jpeg');
+    vi.setSystemTime(new Date('2026-01-01T00:14:59Z'));
+    expect((await getUploadedPhoto('auth0|a'))?.toString()).toBe('brief');
+    vi.setSystemTime(new Date('2026-01-01T00:15:01Z'));
+    await expect(getUploadedPhoto('auth0|a')).resolves.toBeNull();
+  });
+
+  it('sweeps an expired photo with the other temporary images', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    await storeUploadedPhoto('auth0|swept', Buffer.from('old'), 'image/jpeg');
+    vi.setSystemTime(new Date('2026-01-01T00:16:00Z'));
+    expect(await cleanupExpiredImages()).toBeGreaterThanOrEqual(1);
+    await expect(getUploadedPhoto('auth0|swept')).resolves.toBeNull();
+  });
+
+  it('deletes a photo on request', async () => {
+    await storeUploadedPhoto('auth0|a', Buffer.from('gone soon'), 'image/jpeg');
+    await deleteUploadedPhoto('auth0|a');
+    await expect(getUploadedPhoto('auth0|a')).resolves.toBeNull();
+    await expect(deleteUploadedPhoto('auth0|never')).resolves.toBeUndefined();
+  });
+
+  it('is never reachable through the capability URL route', async () => {
+    await storeUploadedPhoto('auth0|a', Buffer.from('private'), 'image/jpeg');
+    const digest = createHash('sha256').update('auth0|a').digest('hex').slice(0, 32);
+    await expect(getImage(digest)).resolves.toBeNull();
   });
 });

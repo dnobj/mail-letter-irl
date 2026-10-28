@@ -28,7 +28,7 @@ Railway project ID: `b31314d8-fd09-4582-9c0d-52a36f879228`
 - Development environment ID: `37c9dbe4-696f-422c-866e-470010ca8949`
 - API service: `letter-irl-api`
 - Website service: `mail-letter-irl-website`
-- Maintenance service: `letter-irl-maintenance`
+- Maintenance services: `letter-irl-maintenance` (production) and `letter-irl-maintenance-dev` (development), hourly cron
 - Admin panel services: `letter-irl-admin` (development) and `letter-irl-admin-prod` (production), both tailnet-only
 - Private temporary-image bucket: `letter-irl-images`
 
@@ -62,12 +62,18 @@ The stable provider `Idempotency-Key` is the Letter IRL `letter_id`. A process c
 An hourly, short-lived Railway cron process runs `npm run maintenance` (`src/cli/runMaintenance.ts`).
 In order, it:
 
+- puts back quarantined content the admin panel queued for restore (`retention-restores`, #153),
+  first, so a copy queued for restore is never purged by the same run;
 - runs the content retention pass once a day. By default this only **reports** what the letter and
   draft sweep would clear (`content-retention-report`); it clears content only when
-  `CONTENT_RETENTION_MODE=enforce`, which stays unset until the enforce-path defects in #153 are
-  fixed. `CONTENT_RETENTION_ENABLED=false` skips the pass entirely;
+  `CONTENT_RETENTION_MODE=enforce`, which is switched on in development first, then production
+  (#153). `CONTENT_RETENTION_ENABLED=false` skips the pass entirely;
 - deletes the link to a user's uploaded image 24 hours after their last upload (`recent-uploads-sweep`, #282);
 - deletes feature requests 12 months after they were submitted (`feature-requests-sweep`, #393);
+- deletes address requests, with any address a recipient gave, `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (7) days after they close, or after their link expires unanswered, whatever the feature's flag (`address-requests-sweep`, #604);
+- once a day, deletes operator audit records, then the admin command runs and their operations, two days before their two years are up (`audit-retention-sweep`, #398, #771);
+- carries out the account erasures queued from the admin panel (`account-erasures`, #289,
+  [account-erasure.md](account-erasure.md));
 - retries due or stale outbox rows;
 - reconciles commerce: fulfils paid Pay & Send orders that were not fulfilled, settles pending checkouts
   against Stripe (paid or expired), cancels orphaned checkouts, and retries `refund_pending` refunds;
@@ -79,9 +85,18 @@ In order, it:
   the last 7 days of Stripe payments, and recalculates user tiers;
 - closes S3 and PostgreSQL clients, then exits.
 
-The first three passes are wrapped so that a failure in one cannot skip mail dispatch.
+Every pass before the outbox is wrapped, so a failure in one cannot skip mail dispatch.
 
-Generated images are stored in a private Railway bucket for 15 minutes. Production must not fall back to process memory. Development may use memory only for local execution; deployed development uses the bucket so restart behavior matches production.
+While `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` pauses the outbox (#444,
+[operational-acceptance.md](operational-acceptance.md)), the outbox pass claims nothing and logs
+`outbox.dispatch_paused` with the number of letters waiting. Its two crash sweeps still run, so a send
+interrupted mid-dispatch, the redeploy that sets the switch included, is still settled: held for an
+operator if the provider may have it, or failed and refunded if it never reached the provider on its last
+attempt. While letters are waiting, the run withholds its heartbeat, so the external monitor alerts until
+the outbox is switched back on. It withholds it too while a letter with an arrival date is still waiting
+after 18:00 New York time on its mail day (#699).
+
+Generated images are stored in a private Railway bucket for 15 minutes, and so is a photo uploaded through the card in an app with no file store (#474, one per account under `uploaded-photos/`, never served at an address). The same bucket keeps the print PDF of mail held for its mail date (#697, `held-pdf/<letter_id>.pdf`, never served at an address) from the send until the provider accepts it, the mail is cancelled, or the hourly sweep finds its letter no longer waiting: up to the schedule's horizon. A lifecycle rule that expires objects early only costs the stored PDF, and the print then lays the mail out again under its fingerprint. Production must not fall back to process memory. Development may use memory only for local execution; deployed development uses the bucket so restart behavior matches production.
 
 ## Database Connectivity
 

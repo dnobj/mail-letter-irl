@@ -298,3 +298,40 @@ it generates in-turn), never restating the card. The card itself lost its
 redundant fallback hint row and both explains were tightened to one
 sentence plus the postcard chain hint.
 
+## Addendum 4: the off switch (2026-09-26)
+
+The owner decided to sunset Letter IRL's own image generation, reversibly.
+Two things made it an easy call:
+- **Production never generated.** Production has no `OPENAI_API_KEY`, so
+  every call short-circuited to the redirect card ("in-turn generation is not
+  configured here") before the mode was read. Development has the key, but its
+  mode was `off`.
+- **Purchases still granted generations nobody could use.** Packs granted 5
+  per letter and Pay & Send 2 per order, and `get_account_balance` reported
+  them.
+
+`LETTER_IRL_IMAGE_GEN_MODE` changed meaning (`src/config/imageGeneration.ts`):
+- `off` now removes the feature:
+  - no app is offered `generate_image_for_mail`, so no agent thinks it can
+    call it;
+  - no purchase grants image generations: pack fulfilment, pack repair,
+    Pay & Send fulfilment and its maintenance recovery;
+  - `get_account_balance` reports no counts, and the per-call account load
+    skips the quota query.
+- What `off` used to mean, a listed tool that only hands back the redirect
+  card, is now `redirect`.
+
+Under `off`, ChatGPT's instructions send it to its own image generation. They
+also say that in a message that mentions Letter IRL it may be withheld, so the
+person should ask in a message without the mention. That is the redirect
+card's advice, carried as text. Every other app is told that Letter IRL makes
+no images there. Claude never offered the tool in the first place (#490).
+
+To bring it back, set the mode to `on` or remove the variable, then redeploy.
+Generations granted before the switch are kept. Purchases made while it was
+off are not backfilled.
+
+**Residual risk.** If ChatGPT still withholds its own generation in a message
+that mentions Letter IRL, that person meets the dead end this tool was built to
+catch, with only the instruction text to guide them. The last on-device check
+was Aug 21.

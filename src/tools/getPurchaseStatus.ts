@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { getPurchaseStatusInputSchema, getPurchaseStatusOutputSchema } from '../schemas.js';
 import { getPurchaseStatus } from '../services/commerceService.js';
 
 interface GetPurchaseStatusInput {
@@ -23,11 +22,10 @@ export const getPurchaseStatusTool: McpToolDefinition<
   Awaited<ReturnType<typeof handler>>
 > = {
   name: 'get_purchase_status',
+  title: 'Check a purchase',
   description:
-    'Get the payment, fulfillment, or refund status of an owned Pay & Send or letter-pack purchase. Returns sanitized commerce state only and never exposes payment-card details.',
+    'Get the payment, fulfillment, or refund status of an owned Pay & Send or letter-pack purchase.',
   readOnly: true,
-  inputSchema: getPurchaseStatusInputSchema,
-  outputSchema: getPurchaseStatusOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Checking purchase status...',
     'openai/toolInvocation/invoked': 'Purchase status updated',

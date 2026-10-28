@@ -1,5 +1,11 @@
-import { query } from '../db/index.js';
+import { query, transaction } from '../db/index.js';
 import { classifyDiagnosticError } from '../utils/diagnosticLog.js';
+import {
+  processAdminOperations,
+  type OperationResult,
+  type OperationRunSummary,
+  type SqlClient
+} from './adminOperationsQueue.js';
 import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
 
 /**
@@ -7,11 +13,18 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  * docs/privacy-policy.md (#153).
  *
  * THE APPROVED SCHEDULE
- *   - Sent letter content: 90 days.
+ *   - Sent letter content: 90 days. A letter that failed for good counts from
+ *     its creation, and its failed job no longer holds it (#730).
  *   - Drafts attached to a PAID order: the same schedule.
- *   - Unsent drafts never paid for: 7 days. cleanupOldDrafts() DELETES the
+ *   - Unsent drafts never paid for: within 7 days (#730: deleted 4 days after
+ *     their expiry, for the daily sweep's drift). cleanupOldDrafts() DELETES the
  *     ones it can; purgeAbandonedDraftContent handles the ones the schema
- *     forbids deleting.
+ *     forbids deleting. cleanupOldDrafts() also deletes a sent draft with no
+ *     order 7 days after the send (its letter keeps the content), except a
+ *     held letter's, which it keeps until 7 days after the mail date (#564),
+ *     or, once that letter is cancelled, 4 days after the cancel (#701, #730).
+ *   - Held mail its customer cancelled, never printed: the unpaid 7 days,
+ *     from the cancel (purgeCancelledHeldLetterContent, #701).
  *
  * REDACTION MOVES CONTENT TO QUARANTINE; IT DOES NOT DESTROY IT
  * Two max-effort reviews of the direct-overwrite design each found ways it
@@ -23,21 +36,29 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  *
  * So the sweep MOVES content into redacted_content_quarantine, and the
  * quarantine is purged on a pure time rule with no joins and no state machine.
- * The guards below decide only WHEN content leaves the live tables. NOTE the
- * recoverability that was meant to buy is NOT yet real: restoreQuarantinedContent
- * has no operator entry point, so nothing deployed can invoke it (#153 review
- * round 3). That is one of the reasons this ships in report mode.
+ * The guards below decide only WHEN content leaves the live tables. An operator
+ * puts a copy back through the admin panel's retention.restore command, which
+ * the next hourly maintenance run carries out (processRetentionRestores).
  *
- * THE PUBLISHED NUMBER IS MEANT TO BE THE TOTAL EXPOSURE
+ * THE PUBLISHED NUMBER IS THE TOTAL EXPOSURE
  * splitRetentionWindow divides it so content leaves the live tables at
  * (total - quarantine) days: 90 becomes 83 live + 7 quarantine, 7 becomes 4 + 3.
- * CAVEAT, confirmed by review round 3: purge_after is stamped from NOW() at
- * redaction rather than from the row's own clock, so the real total is
- * (live window) + (however late the sweep ran) + (quarantine) - always more
- * than the published number, and unbounded under backlog. Deriving it from the
- * clock needs a GREATEST() floor, because a bare clock + total violates
- * valid_quarantine_window for any already-overdue row and would abort the whole
- * batch, oldest-first, on every run.
+ * The quarantine then ends on the row's OWN clock plus the published total, so
+ * content swept on time is gone when the period ends. A row the sweep reaches
+ * with less than RECOVERY_FLOOR of its period left - the backlog on the first
+ * enforcing run, or rows that waited while the sweep was stopped - gets the
+ * floor instead, and outlives its period by up to that much. Its own clock
+ * would leave no time to recover it, or put purge_after in the past, which
+ * valid_quarantine_window refuses and which would abort the batch (#153 review
+ * round 3, #450 review).
+ *
+ * THE FIRST COPY WINS
+ * A sweep saves a row's content only if no copy of it exists yet (ON CONFLICT
+ * DO NOTHING), and a copy is never updated. A re-run over the same row - its
+ * redacted_at cleared by hand - keeps the copy the first sweep saved, which is
+ * the one with the content in it. The flip side: content written into a row
+ * that still has a copy is not saved again, so a redacted row's content is
+ * never edited by hand while its copy exists; restore it instead.
  *
  * EVERY GUARD IS AN ALLOW-LIST
  * A deny-list fails OPEN: the day a migration adds a status, every row sitting
@@ -50,7 +71,7 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  * 'draft', 'queued', 'processing', 'held' - means work is still pending, and
  * letterJobService builds its provider params by reading letters.content.
  */
-const REDACTABLE_LETTER_STATUSES: LetterStatus[] = [
+export const REDACTABLE_LETTER_STATUSES: LetterStatus[] = [
   'sent',
   'accepted',
   'in_transit',
@@ -61,11 +82,13 @@ const REDACTABLE_LETTER_STATUSES: LetterStatus[] = [
 ];
 
 /**
- * Job states that are finished. 'failed' is NOT here: claimJob dispatches on
- * `status IN ('pending','failed')`, and the operator retry route re-enqueues
- * failed jobs at any age, so a failed job can still become a mailed letter.
+ * Job states that are finished. 'failed' is NOT here: claimJob takes a failed
+ * job that is not_dispatched with attempts left, and the operator's retry
+ * re-queues a definite failure, so a failed job can still become a mailed
+ * letter. A letter that failed for good is the exception (retiredFailedJob):
+ * its job holds nothing, and the retry refuses it once it is redacted.
  */
-const SETTLED_JOB_STATUSES: JobStatus[] = ['completed', 'cancelled'];
+export const SETTLED_JOB_STATUSES: JobStatus[] = ['completed', 'cancelled'];
 
 /**
  * Order states in which the money is settled and the content is no longer
@@ -73,7 +96,7 @@ const SETTLED_JOB_STATUSES: JobStatus[] = ['completed', 'cancelled'];
  * where the customer has been charged but the draft is still the only copy of
  * what they bought.
  */
-const SETTLED_ORDER_STATUSES: OrderStatus[] = [
+export const SETTLED_ORDER_STATUSES: OrderStatus[] = [
   'fulfilled',
   'refunded',
   'cancelled',
@@ -112,17 +135,85 @@ const NEVER_PAID_ORDER_STATUSES: OrderStatus[] = ['cancelled', 'payment_failed']
  */
 const MONEY_BACKED_SOURCE_TYPES = ['purchase', 'adjustment', 'refund'];
 
+/**
+ * The money hold on the lots a letter was paid from, shared by the letter schedule and the cancelled-held one. A lot
+ * holds when it was revoked (its pack refunded), when it is money-backed and its order cannot be found, or when its
+ * order is not settled.
+ *
+ * The lot is judged by the lot that first paid (#729). Credits a failed or cancelled send gave back are a new lot
+ * (source 'adjustment', no order) linked to the lot they restore (related_ledger_id, returnConsumedCreditsForLetter),
+ * so a letter paid from them was judged as money with no order and held back for good. The chain of such returns is
+ * followed to its first lot, and that lot's kind and order decide; a return of a return goes back to the first too.
+ * Only returns are followed (source_metadata reason 'send_failed'): an operator's compensation also links a lot, and
+ * stays money with no order, which holds, as before. A chain that cannot be followed ends at the return, which holds.
+ * Revoked is the lot's own: a refund revokes the returned credits with the pack's (they carry its reference).
+ *
+ * settled: the parameter holding the settled order statuses; money: the one holding the money-backed source types.
+ */
+function fundingHold(settled: string, money: string): string {
+  return `NOT EXISTS (
+                SELECT 1
+                  FROM credit_transactions txn
+                  JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
+                  JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
+                  CROSS JOIN LATERAL (
+                    WITH RECURSIVE chain AS (
+                      SELECT lot.source_type, lot.source_order_id, lot.related_ledger_id, lot.source_metadata, 0 AS depth
+                      UNION ALL
+                      SELECT up.source_type, up.source_order_id, up.related_ledger_id, up.source_metadata, chain.depth + 1
+                        FROM chain
+                        JOIN credit_ledger up ON up.ledger_id = chain.related_ledger_id
+                       WHERE chain.source_type::text = 'adjustment'
+                         AND chain.source_metadata->>'reason' = 'send_failed'
+                         AND chain.depth < 32
+                    )
+                    SELECT chain.source_type, chain.source_order_id FROM chain ORDER BY chain.depth DESC LIMIT 1
+                  ) origin
+                  LEFT JOIN orders o ON o.order_id = origin.source_order_id
+                 WHERE txn.reference_type = 'letter'
+                   AND txn.type = 'deduction'
+                   AND txn.reference_id = l.letter_id
+                   AND (
+                         lot.status = 'revoked'
+                      OR (o.order_id IS NULL AND origin.source_type::text = ANY(${money}::varchar[]))
+                      OR (o.order_id IS NOT NULL AND NOT (o.status = ANY(${settled}::varchar[])))
+                       )
+              )`;
+}
+
 /** The published window for an unsent, never-paid draft. */
 const UNPAID_DRAFT_RETENTION_DAYS = 7;
 
 /** Longest recovery window; shortened for short retention periods. */
 const MAX_QUARANTINE_DAYS = 7;
 
+/**
+ * The shortest recovery window any quarantined row gets (#153).
+ *
+ * A row's purge_after is its own clock plus the published period, so content
+ * swept on time leaves the quarantine when the published period ends and not a
+ * day later. A row swept LATE - the backlog on the first enforcing run, or
+ * after the sweep was stopped for a while - is already past that, and its
+ * clock would put purge_after in the past, which valid_quarantine_window
+ * refuses (purge_after > quarantined_at) and which would abort the whole batch.
+ * It gets this floor instead: long enough for an operator to notice a bad
+ * sweep and restore through the panel before the content is gone.
+ *
+ * One day and not the full quarantine, because every day of it is kept past
+ * the published period, and the owner kept the published schedule (#153). The
+ * rows it applies to are the backlog an enforcing run starts with, so each
+ * environment's first enforcing run is watched and its quarantine checked the
+ * same day (RETENTION-01 in docs/manual-tests.md).
+ */
+const RECOVERY_FLOOR = `NOW() + INTERVAL '1 day'`;
+
 const DEFAULT_BATCH_LIMIT = 500;
 const MAX_BATCH_LIMIT = 5000;
 
 export interface RetentionSweepResult {
   lettersRedacted: number;
+  /** Held mail its customer cancelled, on the unpaid schedule (#701). */
+  cancelledHeldLettersRedacted: number;
   draftsRedacted: number;
   abandonedDraftsRedacted: number;
   /** Quarantine rows whose recovery window expired and were purged. */
@@ -180,7 +271,13 @@ const DRAFT_CONTENT_COLUMNS = [
   'header_image_data',
   'header_image_url',
   'inline_image_data',
-  'inline_image_url'
+  'inline_image_url',
+  // A theme and the slot text it prints (#563, migration 044).
+  'stationery',
+  // A postcard's front and the caption or place it prints (#594, migration 048).
+  'postcard_front',
+  // The person's signature as the letter was previewed with it (#608, migration 051).
+  'signature_image'
 ] as const;
 
 const DRAFT_QUARANTINE_OBJECT = DRAFT_CONTENT_COLUMNS.map(
@@ -197,8 +294,16 @@ const DRAFT_QUARANTINE_OBJECT = DRAFT_CONTENT_COLUMNS.map(
  * 012/013) are all `layout != X OR col IS NOT NULL` with NO condition on the
  * row being spent, so a plain NULL violates the constraint and rolls back the
  * whole batch. The CASE preserves NULL where the column was already NULL.
+ *
+ * The stationery keeps its theme and loses its slot text (the date line, the
+ * initials, the headline), which is the content: migration 044 holds a themed
+ * draft to renderer 'pdf-2' and back, so a NULL would roll the batch back too.
+ * A postcard's front keeps its layout and loses its caption or place, for the
+ * same reason (#594, migration 048 and 'pdf-3'). The signature is emptied, as
+ * the images are: migration 051 holds a signed draft to 'pdf-4' by IS NOT NULL
+ * (#608).
  */
-const DRAFT_REDACTION_SET = `
+export const DRAFT_REDACTION_SET = `
         SET sender = '{}'::jsonb,
             recipient = '{}'::jsonb,
             body_text = '',
@@ -212,7 +317,27 @@ const DRAFT_REDACTION_SET = `
             header_image_url = NULL,
             inline_image_data = CASE WHEN inline_image_data IS NULL THEN NULL ELSE '' END,
             inline_image_url = NULL,
+            stationery = CASE WHEN stationery IS NULL THEN NULL ELSE jsonb_build_object('theme', stationery->'theme') END,
+            postcard_front = CASE WHEN postcard_front IS NULL THEN NULL ELSE jsonb_build_object('layout', postcard_front->'layout') END,
+            signature_image = CASE WHEN signature_image IS NULL THEN NULL ELSE '' END,
             redacted_at = NOW()`;
+
+/**
+ * A failed job that holds nothing back (#730): its letter failed for good. The
+ * job stays 'failed' rather than settled, so without this the letter's content
+ * was never redacted. "For good" is the account erasure's own test of a
+ * finished failed job: anything but one the outbox could still claim
+ * (`not_dispatched` with attempts left). That covers a provider's definite
+ * rejection, the operator's resolution of an ambiguous send as rejected, and a
+ * job that ran out of attempts before reaching the provider. Past the
+ * retention window such a letter is redacted; the operator's retry and the
+ * dispatch both refuse a redacted letter, so nothing empty is ever mailed.
+ */
+function retiredFailedJob(job: string): string {
+  return `(${job}.status = 'failed'
+                        AND NOT (${job}.provider_outcome = 'not_dispatched' AND ${job}.attempts < ${job}.max_attempts)
+                        AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = ${job}.letter_id AND fl.status = 'failed'))`;
+}
 
 /**
  * THE DUE PREDICATES, DEFINED ONCE.
@@ -232,27 +357,14 @@ const LETTER_DUE_PREDICATE = `        WHERE l.redacted_at IS NULL
                 SELECT 1 FROM letter_jobs j
                  WHERE j.letter_id = l.letter_id
                    AND NOT (j.status = ANY($3::varchar[]))
+                   AND NOT ${retiredFailedJob('j')}
               )
           AND NOT EXISTS (
                 SELECT 1 FROM orders o
                  WHERE o.letter_id = l.letter_id
                    AND NOT (o.status = ANY($4::varchar[]))
               )
-          AND NOT EXISTS (
-                SELECT 1
-                  FROM credit_transactions txn
-                  JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
-                  JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
-                  LEFT JOIN orders o ON o.order_id = lot.source_order_id
-                 WHERE txn.reference_type = 'letter'
-                   AND txn.type = 'deduction'
-                   AND txn.reference_id = l.letter_id
-                   AND (
-                         lot.status = 'revoked'
-                      OR (o.order_id IS NULL AND lot.source_type::text = ANY($5::varchar[]))
-                      OR (o.order_id IS NOT NULL AND NOT (o.status = ANY($4::varchar[])))
-                       )
-              )`;
+          AND ${fundingHold('$4', '$5')}`;
 
 const PAID_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
           AND COALESCE(d.consumed_at, d.created_at) < NOW() - make_interval(days => $1::int)
@@ -271,6 +383,7 @@ const PAID_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
                  WHERE d.consumed_letter_id IS NOT NULL
                    AND j.letter_id = d.consumed_letter_id
                    AND NOT (j.status = ANY($4::varchar[]))
+                   AND NOT ${retiredFailedJob('j')}
               )`;
 
 const ABANDONED_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
@@ -288,7 +401,56 @@ const ABANDONED_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
                  WHERE d.consumed_letter_id IS NOT NULL
                    AND j.letter_id = d.consumed_letter_id
                    AND NOT (j.status = ANY($3::varchar[]))
+                   AND NOT ${retiredFailedJob('j')}
               )`;
+
+/**
+ * Held mail its customer cancelled before it went to the printer (#701):
+ * never printed, so on the unpaid schedule (UNPAID_DRAFT_RETENTION_DAYS),
+ * counted from the cancel, not 90 days from its creation.
+ *
+ * Held mail is known by its job's hold (letter_jobs.mail_hold_until, 055),
+ * which the cancel leaves and the admin panel's reader role may read, as it
+ * may not letters.mail_on; the panel's /retention page runs the preview
+ * (#701 review round 1). A job written while 055 was deploying carries its
+ * hold only in metadata.heldUntil until 055's backfill is run again (its
+ * header says how): such a letter is missed here and stays on the letter
+ * schedule, which keeps it longer, never shorter (#701 review round 2).
+ *
+ * The cancel is the
+ * customer's (letter_status_history, source 'customer', which
+ * cancelScheduledMail writes and nothing rewrites): an operator's cancel of
+ * mail held for its funding (#696) may be evidence in a dispute, and keeps the
+ * letter schedule. Never accepted by the provider (sent_at). The job settled,
+ * and the same holds as the letter schedule's on its order and on the money
+ * that paid for it.
+ *
+ * $1 live days, $2 settled job statuses, $3 settled order statuses, $4 money-backed source types.
+ */
+const CANCELLED_HELD_LETTER_CANCELLED_AT = `(SELECT MAX(h.changed_at) FROM letter_status_history h
+                 WHERE h.letter_id = l.letter_id AND h.new_status = 'cancelled' AND h.source = 'customer')`;
+
+const CANCELLED_HELD_LETTER_HELD = `EXISTS (
+                SELECT 1 FROM letter_jobs hj
+                 WHERE hj.letter_id = l.letter_id AND hj.mail_hold_until IS NOT NULL
+              )`;
+
+const CANCELLED_HELD_LETTER_DUE_PREDICATE = `        WHERE l.redacted_at IS NULL
+          AND l.status = 'cancelled'
+          AND ${CANCELLED_HELD_LETTER_HELD}
+          AND l.sent_at IS NULL
+          AND ${CANCELLED_HELD_LETTER_CANCELLED_AT} < NOW() - make_interval(days => $1::int)
+          AND NOT EXISTS (
+                SELECT 1 FROM letter_jobs j
+                 WHERE j.letter_id = l.letter_id
+                   AND NOT (j.status = ANY($2::varchar[]))
+              )
+          AND NOT EXISTS (
+                SELECT 1 FROM orders o
+                 WHERE o.letter_id = l.letter_id
+                   AND NOT (o.status = ANY($3::varchar[]))
+              )
+          AND ${fundingHold('$3', '$4')}`;
 
 export interface RetentionPreview {
   /** Rows past the live window, ignoring every hold. */
@@ -452,7 +614,7 @@ export async function purgeExpiredLetterContent(
   batchLimit = DEFAULT_BATCH_LIMIT
 ): Promise<number> {
   assertRetentionArgs(retentionDays, batchLimit);
-  const { liveDays, quarantineDays } = splitRetentionWindow(retentionDays);
+  const { liveDays } = splitRetentionWindow(retentionDays);
   const result = await query(
     `WITH due AS (
        SELECT l.letter_id
@@ -471,18 +633,18 @@ ${LETTER_DUE_PREDICATE}
                 'recipient', l.recipient,
                 'preview_html', to_jsonb(l.preview_html)
               ),
-              NOW() + make_interval(days => $7::int)
+              GREATEST(COALESCE(l.sent_at, l.created_at) + make_interval(days => $7::int), ${RECOVERY_FLOOR})
          FROM letters l
         WHERE l.letter_id IN (SELECT letter_id FROM due)
-       ON CONFLICT (source_table, source_id) DO UPDATE
-          SET content = EXCLUDED.content,
-              quarantined_at = NOW(),
-              purge_after = EXCLUDED.purge_after
+       ON CONFLICT (source_table, source_id) DO NOTHING
      )
      UPDATE letters
         SET content = '{}'::jsonb,
             recipient = '{}'::jsonb,
             preview_html = NULL,
+            print_pdf_sha256 = NULL,
+            print_layout_fingerprint = NULL,
+            print_layout_engine = NULL,
             redacted_at = NOW()
       WHERE letter_id IN (SELECT letter_id FROM due)`,
     [
@@ -492,7 +654,7 @@ ${LETTER_DUE_PREDICATE}
       SETTLED_ORDER_STATUSES,
       MONEY_BACKED_SOURCE_TYPES,
       batchLimit,
-      quarantineDays
+      retentionDays
     ]
   );
   return result.rowCount ?? 0;
@@ -504,7 +666,7 @@ export async function purgePaidDraftContent(
   batchLimit = DEFAULT_BATCH_LIMIT
 ): Promise<number> {
   assertRetentionArgs(retentionDays, batchLimit);
-  const { liveDays, quarantineDays } = splitRetentionWindow(retentionDays);
+  const { liveDays } = splitRetentionWindow(retentionDays);
   const result = await query(
     `WITH due AS (
        SELECT d.draft_id
@@ -518,13 +680,10 @@ ${PAID_DRAFT_DUE_PREDICATE}
        INSERT INTO redacted_content_quarantine (source_table, source_id, content, purge_after)
        SELECT 'letter_drafts', d.draft_id::text,
               jsonb_build_object(${DRAFT_QUARANTINE_OBJECT}),
-              NOW() + make_interval(days => $6::int)
+              GREATEST(COALESCE(d.consumed_at, d.created_at) + make_interval(days => $6::int), ${RECOVERY_FLOOR})
          FROM letter_drafts d
         WHERE d.draft_id IN (SELECT draft_id FROM due)
-       ON CONFLICT (source_table, source_id) DO UPDATE
-          SET content = EXCLUDED.content,
-              quarantined_at = NOW(),
-              purge_after = EXCLUDED.purge_after
+       ON CONFLICT (source_table, source_id) DO NOTHING
      )
      UPDATE letter_drafts${DRAFT_REDACTION_SET}
       WHERE draft_id IN (SELECT draft_id FROM due)`,
@@ -534,7 +693,7 @@ ${PAID_DRAFT_DUE_PREDICATE}
       SETTLED_ORDER_STATUSES,
       SETTLED_JOB_STATUSES,
       batchLimit,
-      quarantineDays
+      retentionDays
     ]
   );
   return result.rowCount ?? 0;
@@ -561,7 +720,7 @@ export async function purgeAbandonedDraftContent(
   batchLimit = DEFAULT_BATCH_LIMIT
 ): Promise<number> {
   assertRetentionArgs(retentionDays, batchLimit);
-  const { liveDays, quarantineDays } = splitRetentionWindow(retentionDays);
+  const { liveDays } = splitRetentionWindow(retentionDays);
   const result = await query(
     `WITH due AS (
        SELECT d.draft_id
@@ -575,13 +734,10 @@ ${ABANDONED_DRAFT_DUE_PREDICATE}
        INSERT INTO redacted_content_quarantine (source_table, source_id, content, purge_after)
        SELECT 'letter_drafts', d.draft_id::text,
               jsonb_build_object(${DRAFT_QUARANTINE_OBJECT}),
-              NOW() + make_interval(days => $5::int)
+              GREATEST(d.created_at + make_interval(days => $5::int), ${RECOVERY_FLOOR})
          FROM letter_drafts d
         WHERE d.draft_id IN (SELECT draft_id FROM due)
-       ON CONFLICT (source_table, source_id) DO UPDATE
-          SET content = EXCLUDED.content,
-              quarantined_at = NOW(),
-              purge_after = EXCLUDED.purge_after
+       ON CONFLICT (source_table, source_id) DO NOTHING
      )
      UPDATE letter_drafts${DRAFT_REDACTION_SET}
       WHERE draft_id IN (SELECT draft_id FROM due)`,
@@ -590,8 +746,94 @@ ${ABANDONED_DRAFT_DUE_PREDICATE}
       NEVER_PAID_ORDER_STATUSES,
       SETTLED_JOB_STATUSES,
       batchLimit,
-      quarantineDays
+      retentionDays
     ]
+  );
+  return result.rowCount ?? 0;
+}
+
+/**
+ * REPORT MODE for held mail its customer cancelled (#701). Writes nothing.
+ * `db` is the pool unless given: a test runs it as the admin panel's reader role.
+ */
+export async function previewCancelledHeldLetterContent(
+  retentionDays = UNPAID_DRAFT_RETENTION_DAYS,
+  db: SqlClient = { query }
+): Promise<RetentionPreview> {
+  assertRetentionArgs(retentionDays, 1);
+  const { liveDays } = splitRetentionWindow(retentionDays);
+  const params = [liveDays, SETTLED_JOB_STATUSES, SETTLED_ORDER_STATUSES, MONEY_BACKED_SOURCE_TYPES];
+  const result = await db.query(
+    `SELECT
+       (SELECT COUNT(*) FROM letters l
+         WHERE l.redacted_at IS NULL
+           AND l.status = 'cancelled'
+           AND ${CANCELLED_HELD_LETTER_HELD}
+           AND l.sent_at IS NULL
+           AND ${CANCELLED_HELD_LETTER_CANCELLED_AT} < NOW() - make_interval(days => $1::int)
+       ) AS past_window,
+       (SELECT COUNT(*) FROM letters l
+${CANCELLED_HELD_LETTER_DUE_PREDICATE}
+       ) AS due,
+       (SELECT MAX(EXTRACT(EPOCH FROM (NOW() - ${CANCELLED_HELD_LETTER_CANCELLED_AT})) / 86400)
+          FROM letters l
+${CANCELLED_HELD_LETTER_DUE_PREDICATE}
+       ) AS oldest_due_days,
+       (SELECT MIN(EXTRACT(EPOCH FROM (NOW() - ${CANCELLED_HELD_LETTER_CANCELLED_AT})) / 86400)
+          FROM letters l
+${CANCELLED_HELD_LETTER_DUE_PREDICATE}
+       ) AS newest_due_days`,
+    params
+  );
+  return toPreview(result.rows[0] as Record<string, unknown> | undefined);
+}
+
+/**
+ * Removes the content of held mail its customer cancelled, on the unpaid
+ * schedule from the cancel (#701), as purgeExpiredLetterContent removes a
+ * letter's: the same three columns, into the same quarantine as 'letters', so
+ * the restore puts it back as it would any letter's. Its recovery window runs
+ * from the cancel too. ENFORCING.
+ */
+export async function purgeCancelledHeldLetterContent(
+  retentionDays = UNPAID_DRAFT_RETENTION_DAYS,
+  batchLimit = DEFAULT_BATCH_LIMIT
+): Promise<number> {
+  assertRetentionArgs(retentionDays, batchLimit);
+  const { liveDays } = splitRetentionWindow(retentionDays);
+  const result = await query(
+    `WITH due AS (
+       SELECT l.letter_id
+         FROM letters l
+${CANCELLED_HELD_LETTER_DUE_PREDICATE}
+        ORDER BY l.created_at
+        LIMIT $5::int
+        FOR UPDATE OF l SKIP LOCKED
+     ),
+     quarantined AS (
+       INSERT INTO redacted_content_quarantine (source_table, source_id, content, purge_after)
+       SELECT 'letters',
+              l.letter_id,
+              jsonb_build_object(
+                'content', l.content,
+                'recipient', l.recipient,
+                'preview_html', to_jsonb(l.preview_html)
+              ),
+              GREATEST(${CANCELLED_HELD_LETTER_CANCELLED_AT} + make_interval(days => $6::int), ${RECOVERY_FLOOR})
+         FROM letters l
+        WHERE l.letter_id IN (SELECT letter_id FROM due)
+       ON CONFLICT (source_table, source_id) DO NOTHING
+     )
+     UPDATE letters
+        SET content = '{}'::jsonb,
+            recipient = '{}'::jsonb,
+            preview_html = NULL,
+            print_pdf_sha256 = NULL,
+            print_layout_fingerprint = NULL,
+            print_layout_engine = NULL,
+            redacted_at = NOW()
+      WHERE letter_id IN (SELECT letter_id FROM due)`,
+    [liveDays, SETTLED_JOB_STATUSES, SETTLED_ORDER_STATUSES, MONEY_BACKED_SOURCE_TYPES, batchLimit, retentionDays]
   );
   return result.rowCount ?? 0;
 }
@@ -624,15 +866,50 @@ export async function purgeExpiredQuarantine(batchLimit = DEFAULT_BATCH_LIMIT): 
  * Put a quarantined row's content back and re-open it to a future sweep.
  *
  * The recovery path that makes every allow-list bet above survivable. Returns
- * false when the recovery window has already expired, so a caller can tell
- * "restored" from "too late" without reading the table.
+ * false when there is nothing to put back - the recovery window has closed, or
+ * the live row is not redacted - so a caller can tell "restored" from "too
+ * late" without reading the table.
+ *
+ * ONE TRANSACTION (#153 review round 3). The write-back and the delete of the
+ * saved copy used to be two auto-committed statements, and a sweep landing
+ * between them re-redacted the restored row onto the still-present copy, after
+ * which the delete removed the only one left.
  */
 export async function restoreQuarantinedContent(
   sourceTable: 'letters' | 'letter_drafts',
   sourceId: string
 ): Promise<boolean> {
+  const outcome = await transaction(client =>
+    restoreQuarantinedContentWithClient(client, sourceTable, sourceId)
+  );
+  return outcome === 'restored';
+}
+
+/** What a restore found: it put the content back, or why it could not. */
+export type RestoreOutcome = 'restored' | 'no_copy' | 'not_redacted';
+
+/**
+ * The restore, inside the caller's transaction. The saved copy is locked first,
+ * so the purge and a second restore wait for this one; the write-back touches
+ * only a row that is still redacted, so a restore can never overwrite content
+ * that is live, and the copy is deleted only when it went back.
+ */
+export async function restoreQuarantinedContentWithClient(
+  client: SqlClient,
+  sourceTable: 'letters' | 'letter_drafts',
+  sourceId: string
+): Promise<RestoreOutcome> {
+  const saved = await client.query(
+    `SELECT quarantine_id FROM redacted_content_quarantine
+      WHERE source_table = $1 AND source_id = $2
+      FOR UPDATE`,
+    [sourceTable, sourceId]
+  );
+  if (saved.rows.length === 0) return 'no_copy';
+
+  let restored: number;
   if (sourceTable === 'letters') {
-    const result = await query(
+    const result = await client.query(
       `WITH saved AS (
          SELECT content FROM redacted_content_quarantine
           WHERE source_table = 'letters' AND source_id = $1
@@ -642,20 +919,24 @@ export async function restoreQuarantinedContent(
               recipient = (SELECT content->'recipient' FROM saved),
               preview_html = (SELECT content->>'preview_html' FROM saved),
               redacted_at = NULL
-        WHERE l.letter_id = $1 AND EXISTS (SELECT 1 FROM saved)`,
+        WHERE l.letter_id = $1 AND l.redacted_at IS NOT NULL`,
       [sourceId]
     );
-    if ((result.rowCount ?? 0) === 0) return false;
+    restored = result.rowCount ?? 0;
   } else {
     const assignments = DRAFT_CONTENT_COLUMNS.map(column =>
-      column === 'sender' ||
-      column === 'recipient' ||
-      column === 'sender_validation' ||
-      column === 'recipient_validation'
-        ? `${column} = (SELECT content->'${column}' FROM saved)`
-        : `${column} = (SELECT content->>'${column}' FROM saved)`
+      // The copy holds a NULL column as JSON null, which is not SQL NULL, so a
+      // nullable JSON column comes back through NULLIF. For stationery it
+      // matters: migration 044 holds it to renderer pdf-2 by IS NOT NULL, so a
+      // Classic draft's must be SQL NULL again (#563). So does a full-bleed
+      // postcard's front, which migration 048 holds to pdf-3 (#594).
+      column === 'stationery' || column === 'postcard_front' || column === 'sender_validation' || column === 'recipient_validation'
+        ? `${column} = NULLIF((SELECT content->'${column}' FROM saved), 'null'::jsonb)`
+        : column === 'sender' || column === 'recipient'
+          ? `${column} = (SELECT content->'${column}' FROM saved)`
+          : `${column} = (SELECT content->>'${column}' FROM saved)`
     ).join(',\n              ');
-    const result = await query(
+    const result = await client.query(
       `WITH saved AS (
          SELECT content FROM redacted_content_quarantine
           WHERE source_table = 'letter_drafts' AND source_id = $1
@@ -663,20 +944,99 @@ export async function restoreQuarantinedContent(
        UPDATE letter_drafts d
           SET ${assignments},
               redacted_at = NULL
-        WHERE d.draft_id = $1::uuid AND EXISTS (SELECT 1 FROM saved)`,
+        WHERE d.draft_id = $1::uuid AND d.redacted_at IS NOT NULL`,
       [sourceId]
     );
-    if ((result.rowCount ?? 0) === 0) return false;
+    restored = result.rowCount ?? 0;
   }
-  await query(
+  if (restored === 0) return 'not_redacted';
+  await client.query(
     `DELETE FROM redacted_content_quarantine WHERE source_table = $1 AND source_id = $2`,
     [sourceTable, sourceId]
   );
-  return true;
+  return 'restored';
+}
+
+/** admin_operations.operation_type for a restore the panel queued (#153). */
+export const RETENTION_RESTORE_OPERATION = 'retention.restore';
+
+const QUARANTINE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Put back the content of restores the admin panel queued: the maintenance
+ * half of the retention.restore command. The panel's role cannot write letter
+ * content, so the command only queues; this runs as the database owner through
+ * the shared runner (src/services/adminOperationsQueue.ts), and ahead of the
+ * day's sweep and purge (src/cli/runMaintenance.ts), so a restore queued in
+ * time is never beaten to its copy by the purge in the same run.
+ */
+export async function processRetentionRestores(batchLimit = 20): Promise<OperationRunSummary> {
+  return processAdminOperations(
+    {
+      operationType: RETENTION_RESTORE_OPERATION,
+      errorCode: 'RETENTION_RESTORE_ERROR',
+      event: 'retention_restore',
+      handle: handleRetentionRestore
+    },
+    batchLimit
+  );
+}
+
+function restoreRefused(reason: 'no_such_copy' | 'window_closed' | 'not_redacted'): OperationResult {
+  return { outcome: 'refused', code: 'RETENTION_RESTORE_UNAVAILABLE', result: { reason } };
+}
+
+/**
+ * One queued restore, by the quarantine row the operator previewed. Refused,
+ * not retried, when there is nothing to put back: the window has closed, or
+ * the live row is no longer redacted.
+ *
+ * The copy is locked where it is looked up (#450 review). Looked up unlocked,
+ * it could go between the lookup and the restore's own lock - to a second
+ * restore of the same copy, or to the purge - and the outcome was recorded
+ * under the wrong reason. The panel can queue two restores of one copy, since
+ * its check and its enqueue are separate transactions, so a copy that is gone
+ * because an earlier restore put it back counts as done.
+ */
+export async function handleRetentionRestore(client: SqlClient, payload: unknown): Promise<OperationResult> {
+  const quarantineId = (payload as { quarantineId?: unknown } | null)?.quarantineId;
+  if (typeof quarantineId !== 'string' || !QUARANTINE_ID_PATTERN.test(quarantineId)) {
+    return restoreRefused('no_such_copy');
+  }
+  const saved = await client.query(
+    `SELECT source_table, source_id FROM redacted_content_quarantine
+      WHERE quarantine_id = $1::uuid
+      FOR UPDATE`,
+    [quarantineId]
+  );
+  const row = saved.rows[0] as { source_table: 'letters' | 'letter_drafts'; source_id: string } | undefined;
+  if (!row) {
+    const earlier = await client.query(
+      `SELECT 1 FROM admin_operations
+        WHERE operation_type = $1::varchar
+          AND status = 'succeeded'
+          AND lower(payload_json->>'quarantineId') = lower($2::text)
+        LIMIT 1`,
+      [RETENTION_RESTORE_OPERATION, quarantineId]
+    );
+    return earlier.rows.length > 0
+      ? { outcome: 'done', result: { alreadyRestored: true }, diagnostic: { alreadyRestored: true } }
+      : restoreRefused('window_closed');
+  }
+  const outcome = await restoreQuarantinedContentWithClient(client, row.source_table, row.source_id);
+  if (outcome === 'restored') {
+    return {
+      outcome: 'done',
+      result: { sourceTable: row.source_table },
+      diagnostic: { sourceTable: row.source_table, alreadyRestored: false }
+    };
+  }
+  return restoreRefused(outcome === 'no_copy' ? 'window_closed' : 'not_redacted');
 }
 
 export interface RetentionPreviewResult {
   letters: RetentionPreview;
+  cancelledHeldLetters: RetentionPreview;
   paidDrafts: RetentionPreview;
   abandonedDrafts: RetentionPreview;
   errors: string[];
@@ -705,6 +1065,10 @@ export async function runRetentionPreview(
 
   return {
     letters: await run('letters', () => previewExpiredLetterContent(retentionDays)),
+    // Its own published number, not the caller's (#701).
+    cancelledHeldLetters: await run('cancelled_held_letters', () =>
+      previewCancelledHeldLetterContent(UNPAID_DRAFT_RETENTION_DAYS)
+    ),
     paidDrafts: await run('paid_drafts', () => previewPaidDraftContent(retentionDays)),
     abandonedDrafts: await run('abandoned_drafts', () =>
       previewAbandonedDraftContent(UNPAID_DRAFT_RETENTION_DAYS)
@@ -716,22 +1080,14 @@ export async function runRetentionPreview(
 /**
  * One retention pass. ENFORCING - this removes customer content.
  *
- * DO NOT ENABLE CONTENT_RETENTION_MODE=enforce YET. Review round 3 confirmed
- * four defects in this path that are not fixed:
- *   - the quarantine ON CONFLICT branch overwrites a good saved copy with an
- *     already-emptied live row, so the documented "clear redacted_at and
- *     re-run" procedure destroys the content it was meant to protect;
- *   - restoreQuarantinedContent runs its write-back and its delete as two
- *     auto-committed statements, so a sweep landing between them loses both
- *     copies and still reports success;
- *   - purge_after is stamped from NOW() rather than the row's own clock, so
- *     total exposure always exceeds the published period and is unbounded
- *     under backlog;
- *   - restoreQuarantinedContent has no operator entry point at all, so the
- *     recovery this design is built around cannot actually be invoked.
- * Report mode (the default) is unaffected: it shares the predicates and writes
- * nothing. Fix these before flipping the mode.
- *
+ * Runs only with CONTENT_RETENTION_MODE=enforce on the maintenance service,
+ * switched on in development first (#153). The four defects review round 3
+ * found in this path are fixed:
+ *   - a saved copy is never replaced (ON CONFLICT DO NOTHING), so re-sweeping a
+ *     row whose marker was cleared keeps the good copy;
+ *   - a restore is one transaction that locks the copy first;
+ *   - purge_after runs on the row's own clock, with a floor;
+ *   - the restore has an entry point, the admin panel's retention.restore.
  *
  * The sweeps are isolated from each other: they cover independent published
  * obligations, so a failure in one must not stop the others. Errors carry a
@@ -742,7 +1098,7 @@ export async function runRetentionSweep(
   batchLimit = DEFAULT_BATCH_LIMIT
 ): Promise<RetentionSweepResult> {
   const errors: string[] = [];
-  const counts = { letters: 0, drafts: 0, abandoned: 0, quarantine: 0 };
+  const counts = { letters: 0, cancelledHeld: 0, drafts: 0, abandoned: 0, quarantine: 0 };
 
   const run = async (label: string, task: () => Promise<number>): Promise<number> => {
     try {
@@ -756,6 +1112,10 @@ export async function runRetentionSweep(
   counts.letters = await run('letters', () =>
     purgeExpiredLetterContent(retentionDays, batchLimit)
   );
+  // The unpaid window, as the abandoned drafts' (#701).
+  counts.cancelledHeld = await run('cancelled_held_letters', () =>
+    purgeCancelledHeldLetterContent(UNPAID_DRAFT_RETENTION_DAYS, batchLimit)
+  );
   counts.drafts = await run('paid_drafts', () =>
     purgePaidDraftContent(retentionDays, batchLimit)
   );
@@ -767,11 +1127,13 @@ export async function runRetentionSweep(
 
   return {
     lettersRedacted: counts.letters,
+    cancelledHeldLettersRedacted: counts.cancelledHeld,
     draftsRedacted: counts.drafts,
     abandonedDraftsRedacted: counts.abandoned,
     quarantinePurged: counts.quarantine,
     moreWaiting:
       counts.letters >= batchLimit ||
+      counts.cancelledHeld >= batchLimit ||
       counts.drafts >= batchLimit ||
       counts.abandoned >= batchLimit ||
       counts.quarantine >= batchLimit ||

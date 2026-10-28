@@ -32,8 +32,8 @@ Letter IRL uses **two separate Auth0 tenants** for complete isolation between pr
 
 | Environment | Tenant Domain | Account Email |
 |-------------|---------------|---------------|
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com |
-| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | the production account |
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | the organization account |
 
 Each tenant has the same applications configured:
 
@@ -46,6 +46,30 @@ Each tenant has the same applications configured:
 
 Social login user IDs (Google, GitHub, etc.) are **identical across tenants** because the ID comes from the provider. Only Username-Password users (`auth0|xxx`) have tenant-specific IDs and require sync/import.
 
+A Letter IRL account is still keyed on the Auth0 subject (`users.user_id`), but
+the subject is no longer the identity. Auth0 mints one per sign-in method, and
+a post-login Action links the methods that share a **confirmed** email address
+into a single Auth0 user, whose primary subject is the one Letter IRL sees. The
+identity is therefore the address, which `users.email` holds UNIQUE whatever its case
+(migration 058). The Action's lookup is narrower: Auth0 stores a password user's
+address in lower case but a social provider's as the provider sent it, and its
+users-by-email search matches case. Two confirmed Auth0 users whose addresses
+differ only in case are therefore not linked. Whichever of the two opens a
+Letter IRL account first keeps it, and the other is refused with the
+"already belongs to a Letter IRL account" sentence (a 409 on the REST API, an
+error result in a chat), for support to join the two.
+
+Two consequences worth knowing before touching anything here:
+
+- **A subject list is a list of one method.** `LETTER_IRL_BETA_ALLOWED_SUBJECTS`
+  and `LETTER_IRL_ADMIN_USER_IDS` name subjects, so after a link only the
+  surviving primary subject counts. Check them after linking anyone.
+- **No confirmed address, no account.** A token that carries none is refused
+  with a sentence rather than given an account with an invented address; see
+  [auth0-tenant-configuration.md](auth0-tenant-configuration.md) for the
+  Actions that make this true, and `src/auth/verifiedEmail.ts` for what the
+  server does with what reaches it.
+
 ---
 
 ## Tenant Setup
@@ -53,7 +77,7 @@ Social login user IDs (Google, GitHub, etc.) are **identical across tenants** be
 ### 1. Create Auth0 Account
 
 1. Go to [auth0.com](https://auth0.com)
-2. Sign up with your email (e.g., `dnicholl@letterirl.com`)
+2. Sign up with the account that will own the tenant
 3. Create a new tenant
 
 ### 2. Tenant Configuration
@@ -327,7 +351,7 @@ AUTH0_SCOPE=openid profile email offline_access mail:read mail:draft mail:send
 ## Checklist
 
 ### Production Tenant (dev-njmdyqf8n25rqgy7)
-- [x] Account created (dnicholl@letterirl.com)
+- [x] Account created (the production account)
 - [x] Environment tag set to Production
 - [x] Website application created (Regular Web App)
 - [x] MCP API created (`https://api.letterirl.com/mcp`)
@@ -345,7 +369,7 @@ AUTH0_SCOPE=openid profile email offline_access mail:read mail:draft mail:send
 - [x] Environment variables configured in Railway
 
 ### Development Tenant (dev-ky21dxn3qmi71hjl)
-- [x] Account exists (dnicholl@objective.works)
+- [x] Account exists (the organization account)
 - [x] Website application configured and authorized for the MCP API (2026-09-14)
 - [x] Dedicated DEV `/mcp` API created and the ChatGPT CIMD client imported
 - [x] Default audience repointed to the MCP API, then `https://letter-irl/api` deleted (2026-09-14)

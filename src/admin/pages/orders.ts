@@ -1,6 +1,6 @@
 import type { OrderDetail } from "../queries/orders.js";
 import { html, type SafeHtml } from "../ui/html.js";
-import { creditsToLetters, formatMoney, statusBadge, yesNo } from "../ui/format.js";
+import { formatMoney, statusBadge, yesNo } from "../ui/format.js";
 import {
   accountLink,
   alertLink,
@@ -14,6 +14,16 @@ import {
   when,
 } from "./common.js";
 
+/**
+ * Why an order is held as REFUND_NOT_COMPLETED (#730). The same words for
+ * every such order: what is still owed depends on its refunds and any
+ * disputes as Stripe has them now (one pending, a chargeback open, lost in
+ * part or in full), which this page cannot know for certain, so it says what
+ * to look at rather than what to do. Three review rounds found a branch on
+ * the stored dispute status giving a wrong instruction each time.
+ */
+const HELD_REFUND_NOTE = html` — its refund failed or was cancelled at Stripe, and the sweep will not make another. Before refunding again, check in Stripe its refunds (a new one may still be pending, and a failed one may say why) and any dispute on the payment. While a chargeback is open, wait: Stripe may refuse a refund, and nothing goes back another way. Money a lost chargeback returned is not owed again. Refund only what is still owed; if the card was closed, lost or stolen and cannot take a refund, the money must go back another way and the order be settled by hand. Resolve its <code>refund_not_completed</code> alert only once Stripe shows the money went back, or it was settled by hand (docs/deployment.md).`;
+
 export function renderOrder(input: { detail: OrderDetail; actions: SafeHtml }): SafeHtml {
   const { detail } = input;
   const { order, pack } = detail;
@@ -25,7 +35,7 @@ ${
 }
 ${
   order.lastErrorCode
-    ? html`<div class="flash flash-warn" role="status">Last error code <code>${order.lastErrorCode}</code>${order.lastErrorCode === "PAYMENT_AMOUNT_MISMATCH" ? html` — this order is quarantined from the automatic refund sweep until an operator releases it.` : ""}</div>`
+    ? html`<div class="flash flash-warn" role="status">Last error code <code>${order.lastErrorCode}</code>${order.lastErrorCode === "PAYMENT_AMOUNT_MISMATCH" ? html` — this order is quarantined from the automatic refund sweep until an operator releases it.` : ""}${order.lastErrorCode === "REFUND_NOT_COMPLETED" ? HELD_REFUND_NOTE : ""}</div>`
     : ""
 }
 ${definitionList([

@@ -30,7 +30,7 @@ let publicKey: Awaited<ReturnType<typeof generateKeyPair>>["publicKey"];
 
 async function token(
   claims: Record<string, unknown> = {},
-  options: { algorithm?: string; expiresIn?: string; notBefore?: string } = {}
+  options: { algorithm?: string; expiresIn?: string; notBefore?: string; issuer?: string } = {}
 ) {
   const algorithm = options.algorithm ?? "RS256";
   let builder = new SignJWT({
@@ -39,7 +39,7 @@ async function token(
     ...claims
   })
     .setProtectedHeader({ alg: algorithm })
-    .setIssuer(issuer)
+    .setIssuer(options.issuer ?? issuer)
     .setAudience(audience)
     .setIssuedAt()
     .setExpirationTime(options.expiresIn ?? "5m");
@@ -77,6 +77,26 @@ describe("production JWT validator", () => {
   it("rejects a wrong issuer", async () => {
     vi.stubEnv("LETTER_IRL_OAUTH_ISSUER", "https://wrong.auth0.com/");
     await expect(validateJWTToken(await token(), keySet)).rejects.toThrow();
+  });
+
+  it("accepts a token from an additional issuer, and still none from an issuer not named", async () => {
+    // A tenant moving to a custom domain: the published issuer is the new address, and apps that connected
+    // before keep refreshing at the old one. Both stamp tokens the API must accept; nothing else may pass.
+    const customDomain = "https://auth.example.com/";
+    vi.stubEnv("LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS", customDomain);
+    await expect(validateJWTToken(await token({}, { issuer: customDomain }), keySet)).resolves.toMatchObject({
+      userId: "auth0|user-1"
+    });
+    await expect(validateJWTToken(await token(), keySet)).resolves.toMatchObject({ userId: "auth0|user-1" });
+    await expect(
+      validateJWTToken(await token({}, { issuer: "https://other.example.com/" }), keySet)
+    ).rejects.toThrow();
+  });
+
+  it("refuses a token from the custom domain until it is configured", async () => {
+    await expect(
+      validateJWTToken(await token({}, { issuer: "https://auth.example.com/" }), keySet)
+    ).rejects.toThrow();
   });
 
   it("rejects a wrong audience", async () => {
@@ -140,17 +160,27 @@ describe("production JWT validator", () => {
 describe("PAT separation", () => {
   afterEach(() => vi.clearAllMocks());
 
-  it("routes PATs to the PAT validator and treats tool scopes separately", async () => {
+  it("routes PATs to the PAT validator and holds them to their own scopes (#470)", async () => {
     vi.mocked(validateToken).mockResolvedValue({
       valid: true,
       userId: "pat-user",
-      tokenId: "token-1"
-    });
+      tokenId: "token-1",
+      scopes: ["mail:read", "mail:draft"]
+    } as any);
     const result = await validateAuthorizationHeader("Bearer lirl_pat_secret");
     expect(result.authType).toBe("pat");
-    expect(result.scopes).toEqual([]);
-    expect(() => requireScopes(result, ["mail:send"])).not.toThrow();
+    expect(result.scopes).toEqual(["mail:read", "mail:draft"]);
+    expect(() => requireScopes(result, ["mail:draft"])).not.toThrow();
+    // It used to pass every check, send included.
+    expect(() => requireScopes(result, ["mail:send"])).toThrow("insufficient_scope");
     expect(updateLastUsed).toHaveBeenCalledWith("token-1");
+  });
+
+  it("gives a PAT whose row carries no scopes nothing at all", async () => {
+    vi.mocked(validateToken).mockResolvedValue({ valid: true, userId: "pat-user", tokenId: "token-2" } as any);
+    const result = await validateAuthorizationHeader("Bearer lirl_pat_secret");
+    expect(result.scopes).toEqual([]);
+    expect(() => requireScopes(result, ["mail:read"])).toThrow("insufficient_scope");
   });
 
   it("rejects malformed authorization headers without leaking the credential", async () => {

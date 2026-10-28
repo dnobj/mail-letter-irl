@@ -8,6 +8,7 @@ import {
   loadAdminEnvironmentConfig,
   validateAdminCredentialEnvironment,
 } from "../src/admin/config.js";
+import { verifyReaderSeparation } from "../src/admin/db.js";
 import { AdminFoundationError } from "../src/admin/errors.js";
 import {
   ADMIN_FOUNDATION_MIGRATION,
@@ -166,6 +167,10 @@ export async function provisionAdminDatabaseAccess(
     for (const statement of buildAdminGrantStatements(config)) {
       await client.query(statement);
     }
+    // After the grants, inside the transaction: a reader that could read past
+    // them (a superuser, a member of pg_read_all_data, neon_superuser or the
+    // owner) is refused and nothing is committed (#730).
+    await verifyReaderSeparation(client, config.database.readerRole);
 
     await client.query("COMMIT");
   } catch (error) {

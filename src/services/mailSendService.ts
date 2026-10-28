@@ -1,13 +1,27 @@
 /** Atomic draft consumption, funding, letter creation, and outbox insertion. */
 
+import { contentVersionMatches } from './contentVersion.js';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { transaction } from '../db/index.js';
+import { lockAccountForBalanceChange } from './accountLock.js';
 import { deductCreditsFromLedgerWithClient } from './creditLedgerService.js';
 import { isBetaAccessAllowed, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
-import { assertMailWithinDailyCaps } from './betaSpendLimits.js';
+import { assertGiftSendWithinDailyCap, assertMailWithinDailyCaps } from './betaSpendLimits.js';
 import { createLetterJobWithClient } from './letterJobService.js';
-import type { Letter, LetterDraft, LetterJob, Order, PostcardDraft } from './types.js';
+import { recordHeldPrintWithClient, storeHeldPrint } from './heldPrintService.js';
+import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
+import { consumeGiftLetterForSendWithClient } from './giftLetterService.js';
+import { isGiftLettersEnabled } from '../config/giftLetters.js';
+import { jitProductMatching } from '../config/products.js';
+import { draftMailOption, isPackPayable } from './mailOptions.js';
+import { LIVE_PAY_AND_SEND_STATUSES } from './draftService.js';
+import type { GiftCardContent } from './giftCardRenderer.js';
+import { dispatchAt, earliestMailOn } from './deliverySchedule.js';
+import { draftScheduleOf } from './draftSchedule.js';
+import { fullMailDate } from './mailDateCapacity.js';
+import { writeDiagnostic } from '../utils/diagnosticLog.js';
+import type { DraftSchedule, Letter, LetterDraft, LetterJob, Order, PostcardDraft } from './types.js';
 
 export type SendMailType = 'letter' | 'postcard';
 
@@ -19,7 +33,9 @@ interface MailDraftRow extends LetterDraft {
   mail_type: SendMailType;
   front_image_data?: string;
   front_image_url?: string;
-  postcard_size?: string;
+  postcard_size: string | null;
+  /** A postcard's front other than full bleed (#594, migration 048); null for full bleed. */
+  postcard_front?: unknown;
 }
 
 export interface CreateMailOrderParams {
@@ -27,6 +43,18 @@ export interface CreateMailOrderParams {
   userId: string;
   mailType: SendMailType;
   funding?: MailFunding;
+  /**
+   * The person asked for another copy of mail sent or paid for in the last
+   * 24 hours (#412). Prepaid sends only; Pay & Send is checked when its
+   * checkout is created.
+   */
+  allowDuplicate?: boolean;
+  /**
+   * The version of the draft the person was shown (#695, contentVersion.ts):
+   * the send mails that, or nothing. Pay & Send compares it when its checkout
+   * is created, and the paid fulfilment passes none.
+   */
+  contentVersion?: string;
 }
 
 export interface CreateMailOrderResult {
@@ -35,6 +63,14 @@ export interface CreateMailOrderResult {
   job?: LetterJob;
   creditsRemaining: number;
   alreadyConsumed: boolean;
+  /** What paid for this mail. 'gift_letter' mail also prints giftCard. */
+  fundingType: Letter['funding_type'];
+  giftCard?: GiftCardContent;
+  /**
+   * The draft's dates when a Pay & Send letter's mail date had passed by the
+   * time it was paid (#700): it goes to the printer as soon as it can.
+   */
+  scheduleMissed?: DraftSchedule;
 }
 
 /**
@@ -56,7 +92,18 @@ function buildLetterContent(draft: MailDraftRow): Record<string, unknown> {
     headerImageData: draft.header_image_data,
     headerImageUrl: draft.header_image_url,
     inlineImageData: draft.inline_image_data,
-    inlineImageUrl: draft.inline_image_url
+    inlineImageUrl: draft.inline_image_url,
+    // The letter prints with the renderer its preview was drawn with (#534).
+    // Absent for the legacy HTML path, so those letters' content is unchanged.
+    ...(draft.renderer_version ? { rendererVersion: draft.renderer_version } : {}),
+    // And in the stationery it was drawn in (#563); absent for Classic.
+    ...(draft.stationery ? { stationery: draft.stationery } : {}),
+    // And on the pages it was laid out on, when more than one (#586); absent
+    // for a one-page letter, so its content is unchanged.
+    ...(Number(draft.pages ?? 1) > 1 ? { pages: Number(draft.pages) } : {}),
+    // And with the signature it was previewed with (#608), the draft's own
+    // copy; absent for a letter without one.
+    ...(draft.signature_image ? { signatureImage: draft.signature_image } : {})
   };
 }
 
@@ -66,8 +113,34 @@ function buildPostcardContent(draft: MailDraftRow): Record<string, unknown> {
     sender: draft.sender,
     frontImageData: draft.front_image_data,
     frontImageUrl: draft.front_image_url,
-    postcardSize: draft.postcard_size || '6x9'
+    postcardSize: draft.postcard_size || '6x9',
+    // As for letters: absent for the legacy HTML path (#534).
+    ...(draft.renderer_version ? { rendererVersion: draft.renderer_version } : {}),
+    // And the front it was drawn with (#594); absent for full bleed.
+    ...(draft.postcard_front ? { postcardFront: draft.postcard_front } : {})
   };
+}
+
+/**
+ * The arrive-by dates a send keeps (#535), or null to mail as soon as it can.
+ * The draft's mail date must not have passed: today counts until noon New
+ * York time (earliestMailOn), so a draft previewed before the cutoff and sent
+ * after it has missed its date. A prepaid or gift send then refuses, so the
+ * person can choose a new date. A Pay & Send order has already been charged,
+ * so its mail goes as soon as it can instead (refusing would strand the
+ * money, as for the caps below): 'missed', which the paid fulfilment records
+ * on the order and get_purchase_status tells the person (#700).
+ * createJitCheckout refuses a passed date before any charge.
+ */
+function sendSchedule(draft: MailDraftRow, funding: MailFunding, draftId: string): DraftSchedule | 'missed' | null {
+  const schedule = draftScheduleOf(draft);
+  if (!schedule) return null;
+  if (schedule.mailOn >= earliestMailOn(new Date())) return schedule;
+  if (funding.type === 'jit_order') {
+    writeDiagnostic('warn', 'send.schedule_missed', { funding: funding.type, mailOn: schedule.mailOn });
+    return 'missed';
+  }
+  throw draftError('SCHEDULE_PASSED', `Draft ${draftId} was to go to the printer on ${schedule.mailOn}, which has passed`);
 }
 
 async function loadCreditsRemaining(
@@ -88,7 +161,7 @@ export async function createMailOrderFromDraftWithClient(
 ): Promise<CreateMailOrderResult> {
   const funding = params.funding || { type: 'prepaid_balance' as const };
   const draftResult = await client.query<MailDraftRow>(
-    'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE',
+    'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE',
     [params.draftId]
   );
   const draft = draftResult.rows[0];
@@ -163,7 +236,9 @@ export async function createMailOrderFromDraftWithClient(
       letter: existingLetter,
       draft,
       creditsRemaining: await loadCreditsRemaining(client, params.userId),
-      alreadyConsumed: true
+      alreadyConsumed: true,
+      fundingType: existingLetter.funding_type,
+      giftCard: (existingLetter.content as { giftCard?: GiftCardContent } | null)?.giftCard
     };
   }
 
@@ -212,23 +287,83 @@ export async function createMailOrderFromDraftWithClient(
     throw draftError('DRAFT_INVALID_STATE', `Draft ${params.draftId} is ${draft.status}`);
   }
 
+  // What the person saw (#695), compared under the draft's lock: an edit that
+  // came after it refuses the send, which never mails a letter they did not see.
+  // A prepaid send that names no version is let through for one release, and
+  // logged; the paid fulfilment of Pay & Send was compared at its checkout.
+  if (funding.type === 'prepaid_balance') {
+    const shown = contentVersionMatches(params.contentVersion, draft);
+    if (shown === 'differs') {
+      throw draftError('DRAFT_CHANGED_SINCE_SHOWN', `Draft ${params.draftId} changed since it was shown`);
+    }
+    if (shown === 'missing') writeDiagnostic('info', 'send.content_version_missing', { mailType: actualMailType });
+  }
+
+  // Held mail (#535): when it goes to the printer, decided before any value moves.
+  const scheduled = sendSchedule(draft, funding, params.draftId);
+  const schedule = scheduled === 'missed' ? null : scheduled;
+  const missed = scheduled === 'missed' ? draftScheduleOf(draft) : null;
+  const releaseAt = schedule ? dispatchAt(schedule.mailOn) : undefined;
+  // A gift draft is funded by a gift letter instead of the balance. Pay & Send
+  // ignores the flag: that path runs after Stripe has charged, and
+  // createJitCheckout refuses a gift draft before any charge exists.
+  const useGift = funding.type !== 'jit_order' && draft.is_gift_send === true;
+  if (useGift && !isGiftLettersEnabled()) {
+    throw draftError('GIFT_LETTERS_DISABLED', `Draft ${params.draftId} is a gift send and gift letters are off`);
+  }
+  // Packs and gift letters pay only for a one-page letter or a 6x9 postcard
+  // (#579). Any other option is paid per send through Pay & Send, which funds
+  // it as a jit_order. Refused here, before any value moves, so every surface
+  // that sends (the tools, the card, the confirmation page) keeps the rule.
+  if (funding.type === 'prepaid_balance' && !isPackPayable(draftMailOption(draft))) {
+    // Certified mail (#625) says so, so a refusal does not tell a one-page letter that packs pay for one-page letters.
+    throw Object.assign(
+      draftError('PACK_CANNOT_PAY', `Draft ${params.draftId} is paid with Pay & Send, not a pack or gift letter`),
+      { certified: draftMailOption(draft).mailService !== undefined }
+    );
+  }
+
   let jitOrder: Order | undefined;
   if (funding.type === 'prepaid_balance') {
+    // Any live Pay & Send order on the draft refuses a send from the balance, by the statuses the edit lock and
+    // idx_orders_active_jit_draft_unique count (#679): a dispute can arrive before Stripe's completion, leaving the
+    // order 'disputed' while its draft still waits, and a pack letter would pay again for mail a Stripe payment was
+    // taken for. ('held' is listed with them, though only a consumed draft's order reaches it.) The refusal's words
+    // still speak of an open checkout; words for a payment already taken are #804.
     const activeCheckout = await client.query<{ order_id: string }>(
       `SELECT order_id FROM orders
        WHERE draft_id = $1
          AND order_type = 'jit_mail'
-         AND status IN ('checkout_pending', 'paid', 'fulfillment_pending', 'refund_pending')
+         AND status = ANY($2::varchar[])
+         -- Unlike the edit lock, a checkout past its window counts as closed here even while its Stripe session is
+         -- open; making the two agree is #721.
          AND (status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW())
        LIMIT 1
        FOR UPDATE`,
-      [params.draftId]
+      [params.draftId, [...LIVE_PAY_AND_SEND_STATUSES]]
     );
     if (activeCheckout.rows[0]) {
       throw draftError(
         'DRAFT_CHECKOUT_PENDING',
         `Draft ${params.draftId} has an active Pay & Send checkout`
       );
+    }
+    // Room on its mail date (#700), for a prepaid or gift send, after the open
+    // checkout's refusal, which says what can be done. Counted under a lock on
+    // the date, so two sends cannot both take its last place. The lock comes
+    // after the draft's and its orders', and before the account's, taken just
+    // before the letter's insert below; the paid fulfilment takes the other
+    // branch and takes none. Pay & Send is not refused for a full date: it
+    // has been charged, and its checkout refused one before the charge, so a
+    // date filled since takes it over the cap.
+    if (schedule) {
+      const full = await fullMailDate(client, schedule, new Date(), { lock: true });
+      if (full) {
+        throw Object.assign(
+          draftError('SCHEDULE_FULL', `Draft ${params.draftId} was to go to the printer on ${schedule.mailOn}, which is full`),
+          { openArrivals: full.openArrivals }
+        );
+      }
     }
   } else {
     const orderResult = await client.query<Order>(
@@ -249,18 +384,41 @@ export async function createMailOrderFromDraftWithClient(
     if (jitOrder.status !== 'paid') {
       throw draftError('JIT_ORDER_NOT_PAID', `Order ${funding.orderId} is ${jitOrder.status}`);
     }
+    // The order pays for the mail the draft is now (#586). A draft whose pages
+    // changed after its checkout opened is not what was paid for: refused, so
+    // fulfilment refunds the order rather than send a two-page letter at the
+    // one-page price, or the reverse.
+    const paidFor = jitProductMatching(draftMailOption(draft));
+    if (!paidFor || paidFor.productCode !== jitOrder.product_code) {
+      throw draftError(
+        'JIT_PRODUCT_MISMATCH',
+        `Order ${funding.orderId} paid for ${jitOrder.product_code}, not draft ${params.draftId}'s mail`
+      );
+    }
   }
+
+  // The account before the letter (#730 review): the letter's insert checks
+  // its foreign key to the account with a share lock on the account row, and
+  // the deduction or the gift then takes that row FOR UPDATE. Two sends of
+  // different drafts from one account, each holding the share lock its insert
+  // took, would each wait for the other's to take the row. Held first, the
+  // second send waits here holding nothing the first needs. A payment's
+  // fulfilment from its webhook already holds it (transitionPaidCheckout);
+  // the hourly recovery (fulfillPaidOrder) takes it here, after the draft and
+  // the order, as the canonical order has it.
+  await lockAccountForBalanceChange(client, params.userId);
 
   const letterId = randomUUID();
   const content =
     params.mailType === 'postcard' ? buildPostcardContent(draft) : buildLetterContent(draft);
-  const fundingType = funding.type === 'jit_order' ? 'jit_order' : 'prepaid_balance';
+  const fundingType: Letter['funding_type'] =
+    funding.type === 'jit_order' ? 'jit_order' : useGift ? 'gift_letter' : 'prepaid_balance';
 
   const letterResult = await client.query<Letter>(
     `INSERT INTO letters (
        letter_id, user_id, content, recipient, credits_cost, status,
-       preview_html, mail_type, funding_type, funding_order_id
-     ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9)
+       preview_html, mail_type, funding_type, funding_order_id, arrive_by, mail_on, mail_service
+     ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10::date, $11::date, $12::text)
      RETURNING *`,
     [
       letterId,
@@ -271,13 +429,51 @@ export async function createMailOrderFromDraftWithClient(
       draft.preview_html || null,
       params.mailType,
       fundingType,
-      funding.type === 'jit_order' ? funding.orderId : null
+      funding.type === 'jit_order' ? funding.orderId : null,
+      schedule?.arriveBy ?? null,
+      schedule?.mailOn ?? null,
+      // How it travels (#625): the draft's, for a letter. The checks of 052 and
+      // 053 hold a postcard and a gift letter to standard.
+      params.mailType === 'letter' ? (draft.mail_service ?? 'standard') : 'standard'
     ]
   );
-  const letter = letterResult.rows[0];
+  let letter = letterResult.rows[0];
 
   let creditsRemaining: number;
-  if (funding.type === 'prepaid_balance') {
+  let giftCard: GiftCardContent | undefined;
+  if (useGift) {
+    // Under the account lock taken before the letter's insert, so the caps
+    // and the duplicate check below are serialised per account exactly as on
+    // the prepaid path.
+    const consumed = await consumeGiftLetterForSendWithClient(client, {
+      userId: params.userId,
+      letterId,
+      // Held mail's card is decided as of the day it goes to the printer.
+      mailsAt: releaseAt
+    });
+    if (!consumed) {
+      throw draftError('GIFT_LETTER_UNAVAILABLE', `No gift letter available for draft ${params.draftId}`);
+    }
+    await assertMailWithinDailyCaps(client, params.userId, 0);
+    await assertGiftSendWithinDailyCap(client);
+    if (!params.allowDuplicate) {
+      await assertNoRecentDuplicateMail(client, {
+        userId: params.userId,
+        draftId: params.draftId,
+        excludeLetterId: letterId
+      });
+    }
+    // Written into the letter so whichever process prints it, the API now or
+    // the maintenance run on a retry, prints the same code and link. The
+    // duplicate check reads named content keys and never this one.
+    giftCard = consumed.card;
+    const updated = await client.query<Letter>(
+      `UPDATE letters SET content = content || $2::jsonb WHERE letter_id = $1 RETURNING *`,
+      [letterId, JSON.stringify({ giftCard })]
+    );
+    letter = updated.rows[0] ?? letter;
+    creditsRemaining = await loadCreditsRemaining(client, params.userId);
+  } else if (funding.type === 'prepaid_balance') {
     const requiredCredits = funding.requiredCredits ?? draft.required_credits;
     if (requiredCredits !== draft.required_credits) {
       throw draftError('FUNDING_AMOUNT_MISMATCH', 'Prepaid funding does not match the draft');
@@ -294,9 +490,9 @@ export async function createMailOrderFromDraftWithClient(
     });
     creditsRemaining = deduction.user.credits;
 
-    // AFTER the deduction, on purpose: deductCreditsFromLedgerWithClient has
-    // already taken users FOR UPDATE, so the per-account count is serialised
-    // for free and needs no second lock.
+    // After the deduction, under the account row held since before the
+    // letter's insert (above), so the per-account count is serialised; the
+    // caps take their own advisory locks as well (#730).
     //
     // An earlier revision of this comment justified the placement by claiming
     // that taking the lock sooner would invert into users -> orders against the
@@ -320,6 +516,21 @@ export async function createMailOrderFromDraftWithClient(
     // and refusing here would strand their money. Pay & Send is capped in
     // createJitCheckout instead, before any charge exists.
     await assertMailWithinDailyCaps(client, params.userId, 0);
+
+    // #412: the same mail sent, paid for or awaiting payment in the last 24
+    // hours refuses this send unless the person asked for another copy. Here
+    // for the reason the caps are: the account row is already locked, so two
+    // sends from one account cannot both pass. The letters row above is this
+    // send, so it is excluded; a throw rolls everything back. Prepaid only,
+    // like the caps: jit_order funding runs after the customer has paid, and
+    // Pay & Send is checked in createJitCheckout instead.
+    if (!params.allowDuplicate) {
+      await assertNoRecentDuplicateMail(client, {
+        userId: params.userId,
+        draftId: params.draftId,
+        excludeLetterId: letterId
+      });
+    }
   } else {
     creditsRemaining = await loadCreditsRemaining(client, params.userId);
   }
@@ -330,7 +541,10 @@ export async function createMailOrderFromDraftWithClient(
      WHERE draft_id = $2`,
     [letterId, params.draftId]
   );
-  const job = await createLetterJobWithClient(client as pg.PoolClient, letter);
+  const job = await createLetterJobWithClient(client as pg.PoolClient, letter, { notBefore: releaseAt });
+  // Held mail prints as previewed (#697): what the print will lay out, recorded
+  // with the send. Never refuses it: mail it cannot record prints as before.
+  await recordHeldPrintWithClient(client as pg.PoolClient, letter, releaseAt);
 
   if (jitOrder) {
     await client.query(
@@ -348,14 +562,23 @@ export async function createMailOrderFromDraftWithClient(
     draft: { ...draft, status: 'consumed', consumed_letter_id: letterId },
     job,
     creditsRemaining,
-    alreadyConsumed: false
+    alreadyConsumed: false,
+    fundingType,
+    giftCard,
+    ...(missed ? { scheduleMissed: missed } : {})
   };
 }
 
 export async function createMailOrderFromDraft(
   params: CreateMailOrderParams
 ): Promise<CreateMailOrderResult> {
-  return transaction(client => createMailOrderFromDraftWithClient(client, params));
+  const result = await transaction(client => createMailOrderFromDraftWithClient(client, params));
+  // Held mail's PDF (#697), drawn and stored once the send has committed. It
+  // never throws: the maintenance run stores any this could not.
+  if (!result.alreadyConsumed && result.job?.mail_hold_until) {
+    await storeHeldPrint(result.letter.letter_id);
+  }
+  return result;
 }
 
 export function asPostcardDraft(draft: MailDraftRow): PostcardDraft {

@@ -10,12 +10,13 @@ export function renderPromos(input: { campaigns: CampaignView[]; mode: string })
 <p><a href="/promos/new">Create a campaign…</a></p>
 ${table(
   "Campaigns",
-  ["Code", "Name", "Status", "Credits", "Redeemed", "Cap", "Starts", "Ends", "Updated"],
+  ["Code", "Name", "Status", "Credits", "Gift", "Redeemed", "Cap", "Starts", "Ends", "Updated"],
   input.campaigns.map((campaign) => [
     html`<a class="mono" href="/promos/${campaign.campaignId}">${campaign.code}</a>`,
     html`${campaign.name}`,
     statusBadge(campaign.status),
     html`${campaign.creditsAmount}`,
+    html`${campaign.giftGenerationsRemaining === null ? "—" : `seed, budget ${campaign.giftGenerationsRemaining}`}`,
     html`${campaign.currentRedemptions}`,
     html`${campaign.maxTotalRedemptions ?? "∞"}`,
     when(campaign.startsAt),
@@ -41,6 +42,8 @@ export function renderPromoForm(): SafeHtml {
   <input type="number" id="expirationDays" name="expirationDays" min="1" max="3650" value="90" required>
   <label for="maxTotalRedemptions">Total redemptions cap (blank for unlimited)</label>
   <input type="number" id="maxTotalRedemptions" name="maxTotalRedemptions" min="1" max="100000" step="1">
+  <label for="giftGenerationsRemaining">Seed code: grant a gift letter with this budget (blank for an ordinary promo; 0 prints only the plain card). Credits may be 0 for a seed.</label>
+  <input type="number" id="giftGenerationsRemaining" name="giftGenerationsRemaining" min="0" max="20" step="1">
   <label for="maxPerUser">Redemptions per user</label>
   <input type="number" id="maxPerUser" name="maxPerUser" min="1" max="10" value="1" required>
   <label for="endsAt">End date (optional, UTC)</label>
@@ -67,6 +70,7 @@ ${definitionList([
   ["redemptions", `${campaign.currentRedemptions} of ${campaign.maxTotalRedemptions ?? "unlimited"}`],
   ["per user", campaign.maxPerUser],
   ["new users only", campaign.requiresNewUser ? "yes" : "no"],
+  ["gift letter", campaign.giftGenerationsRemaining === null ? "no (ordinary promo)" : `seed code: grants a gift letter with budget ${campaign.giftGenerationsRemaining}`],
   ["starts", when(campaign.startsAt)],
   ["ends", when(campaign.endsAt)],
   ["created by", campaign.createdBy],
@@ -101,7 +105,9 @@ ${table(
   input.redemptions.map((redemption) => [
     accountLink(redemption.userId),
     html`${redemption.emailMasked}`,
-    html`<span class="mono">${redemption.ledgerId.slice(0, 8)}…</span>`,
+    redemption.ledgerId
+      ? html`<span class="mono">${redemption.ledgerId.slice(0, 8)}…</span>`
+      : html`<span class="muted">gift only</span>`,
     when(redemption.redeemedAt),
   ]),
   "none yet.",

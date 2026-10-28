@@ -53,7 +53,12 @@ const FULL_PRODUCTION_NAMES = [
   'LETTER_IRL_OAUTH_AUDIENCE',
   'LETTER_IRL_MCP_RESOURCE',
   'LETTER_IRL_OAUTH_PROD_ISSUER',
-  'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT'
+  'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT',
+  // Required in production since #699.
+  'LETTER_IRL_OPERATOR_ALERT_URL',
+  // Required on in production since #730.
+  'LETTER_IRL_SEND_CONFIRMATION_ENABLED',
+  'LETTER_IRL_WEBSITE_CLIENT_ID'
 ];
 
 describe('diffManifest', () => {
@@ -140,6 +145,79 @@ describe('diffManifest', () => {
     }
     // The note must explain WHY a conditional variable is demanded.
     expect(withFlag.missing.map(gap => gap.note).join('\n')).toContain('JIT_PURCHASE_ENABLED is set');
+  });
+
+  it("requires a mail option's price only when its flag's name is present as well (#578)", () => {
+    const OPTION_PRICES = [
+      'STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID',
+      'STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID',
+      'STRIPE_JIT_POSTCARD_4X6_PRICE_ID',
+      'STRIPE_JIT_POSTCARD_11X6_PRICE_ID'
+    ];
+    const jitNames = [
+      ...FULL_PRODUCTION_NAMES,
+      'JIT_PURCHASE_ENABLED',
+      'STRIPE_JIT_LETTER_PRICE_ID',
+      'STRIPE_JIT_POSTCARD_PRICE_ID'
+    ];
+    // Production as the owner keeps it: Pay & Send on, the options' flags absent.
+    const flagsAbsent = diffManifest(jitNames, { environment: 'production', service: 'api' });
+    expect(flagsAbsent.missing.map(gap => gap.entry.name)).toEqual([]);
+
+    // A flag alone, without Pay & Send, demands nothing either.
+    const noJit = diffManifest([...FULL_PRODUCTION_NAMES, 'LETTER_IRL_ROOM_TO_WRITE_ENABLED'], {
+      environment: 'production',
+      service: 'api'
+    });
+    expect(noJit.missing.map(gap => gap.entry.name)).toEqual([]);
+
+    const roomOn = diffManifest([...jitNames, 'LETTER_IRL_ROOM_TO_WRITE_ENABLED'], {
+      environment: 'production',
+      service: 'api'
+    });
+    expect(roomOn.missing.map(gap => gap.note)).toEqual([
+      'STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID [required because JIT_PURCHASE_ENABLED and LETTER_IRL_ROOM_TO_WRITE_ENABLED are set]',
+      'STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID [required because JIT_PURCHASE_ENABLED and LETTER_IRL_ROOM_TO_WRITE_ENABLED are set]'
+    ]);
+
+    // The maintenance service's own production requirements (#699) are present here too.
+    const sizesOn = diffManifest([...jitNames, 'LETTER_IRL_POSTCARD_SIZES_ENABLED', 'MAINTENANCE_HEARTBEAT_URL', 'CONTENT_RETENTION_MODE'], {
+      environment: 'production',
+      service: 'maintenance'
+    });
+    expect(sizesOn.missing.map(gap => gap.entry.name)).toEqual([
+      'STRIPE_JIT_POSTCARD_4X6_PRICE_ID',
+      'STRIPE_JIT_POSTCARD_11X6_PRICE_ID'
+    ]);
+
+    // Certified mail (#625): its two prices, once its flag's name is present.
+    const certifiedOn = diffManifest([...jitNames, 'LETTER_IRL_CERTIFIED_MAIL_ENABLED'], {
+      environment: 'production',
+      service: 'api'
+    });
+    expect(certifiedOn.missing.map(gap => gap.note)).toEqual([
+      'STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID [required because JIT_PURCHASE_ENABLED and LETTER_IRL_CERTIFIED_MAIL_ENABLED are set]',
+      'STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID [required because JIT_PURCHASE_ENABLED and LETTER_IRL_CERTIFIED_MAIL_ENABLED are set]'
+    ]);
+    expect(
+      diffManifest([...FULL_PRODUCTION_NAMES, 'LETTER_IRL_CERTIFIED_MAIL_ENABLED'], { environment: 'production', service: 'api' })
+        .missing.map(gap => gap.entry.name)
+    ).toEqual([]);
+
+    // Set, they are satisfied.
+    const allSet = diffManifest(
+      [
+        ...jitNames,
+        'LETTER_IRL_ROOM_TO_WRITE_ENABLED',
+        'LETTER_IRL_POSTCARD_SIZES_ENABLED',
+        'LETTER_IRL_CERTIFIED_MAIL_ENABLED',
+        ...OPTION_PRICES,
+        'STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID',
+        'STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID'
+      ],
+      { environment: 'production', service: 'api' }
+    );
+    expect(allSet.missing).toEqual([]);
   });
 
   it('never requires unless-admin exemptions on deployed services', () => {
@@ -458,6 +536,9 @@ describe('OAuth coverage (issue #270)', () => {
       'LETTER_IRL_OAUTH_SCOPES',
       'LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS',
       'LETTER_IRL_MCP_PATH',
+      // Empty unless the tenant has moved to a custom domain; when set, the
+      // validator holds every entry to the environment's issuer allowlist.
+      'LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS',
       // Mode switches, not configuration: they select which rules apply.
       'LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY',
       'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT',

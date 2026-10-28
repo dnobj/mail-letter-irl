@@ -4,12 +4,13 @@ import http from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { AdminAuditWriter } from "./auditService.js";
-import { closeAdminPools, createAdminPools, verifyDatabaseIdentity, type AdminPools } from "./db.js";
+import { closeAdminPools, createAdminPools, verifyDatabaseIdentity, verifyReaderSeparation, type AdminPools } from "./db.js";
 import { AdminConfigurationError, AdminFoundationError } from "./errors.js";
 import { clientScriptPath, createAdminRequestListener, type RouteHandler } from "./http/app.js";
 import { AdminRouter } from "./http/router.js";
 import { registerAccountRoutes } from "./http/accountRoutes.js";
 import { registerCommandRoutes } from "./http/commandRoutes.js";
+import { registerLimitRoutes } from "./http/limitRoutes.js";
 import { registerOpsRoutes } from "./http/opsRoutes.js";
 import { registerStripeRoutes } from "./http/stripeRoutes.js";
 import { join } from "./ui/html.js";
@@ -120,6 +121,11 @@ export async function main(): Promise<void> {
     whois = { whois: async () => null };
     writeDiagnostic("warn", "admin.local_dev_mode", { environment: config.environment });
   }
+  if (config.legacyTotpSecretIgnored) {
+    // Delete the variable once the promotion has settled: until then the
+    // release before this one, which needs it, can still be rolled back to.
+    writeDiagnostic("warn", "admin.legacy_totp_secret_ignored", { environment: config.environment });
+  }
 
   const health = startHealthListener(config.healthPort, state, supervisor);
   const shutdown = async (code: number) => {
@@ -160,6 +166,7 @@ export async function main(): Promise<void> {
     role: config.readerRole,
     environment: config.environment,
   });
+  await verifyReaderSeparation(pools.reader, readerIdentity.roleName);
   if (pools.operator) {
     await verifyDatabaseIdentity(pools.operator, {
       role: config.operatorRole,
@@ -215,6 +222,7 @@ export async function main(): Promise<void> {
   const stripeExtensions = registerStripeRoutes(router);
   const accountExtensions = registerAccountRoutes(router);
   registerOpsRoutes(router);
+  registerLimitRoutes(router);
   registerReadRoutes(router, clientScript, {
     ...extensions,
     accountActions: accountExtensions.accountActions,

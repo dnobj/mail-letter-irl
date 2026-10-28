@@ -1,6 +1,9 @@
-/** Restart-safe temporary image storage backed by a private S3-compatible bucket. */
+/**
+ * Restart-safe temporary image storage backed by a private S3-compatible
+ * bucket, and the PDFs of mail held for its date (#697), in the same bucket.
+ */
 
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -11,6 +14,24 @@ import {
 
 const TTL_MS = 15 * 60 * 1000;
 const OBJECT_PREFIX = 'temp-images/';
+/**
+ * Photos people upload through our card (#474, phase 3). One per account,
+ * under a key made from the account, so a new upload replaces the last one.
+ * GET /api/temp-image/:token reads OBJECT_PREFIX only, so nothing here is
+ * ever served by URL; the preview tools read an account's own photo directly
+ * (src/services/imageService.ts). Kept as long as the temporary images: long
+ * enough to make the preview, which keeps its own copy.
+ */
+const UPLOADED_PHOTO_PREFIX = 'uploaded-photos/';
+export const UPLOADED_PHOTO_TTL_MS = TTL_MS;
+
+/**
+ * What an account's recent upload records for a photo it sent through our
+ * card: not an address anyone can fetch, but a reference the image service
+ * resolves to the CALLER's own photo (src/services/imageService.ts). A model
+ * that passes it as imageUrl reaches only its own person's photo.
+ */
+export const UPLOADED_PHOTO_REFERENCE = 'letterirl-upload:latest';
 
 interface StoredImage {
   base64Data: string;
@@ -71,12 +92,34 @@ function storageMode(): 'bucket' | 'memory' {
   return 'memory';
 }
 
+/**
+ * Time limits on every bucket request. The SDK's default is to wait for ever,
+ * so a request lost on the network would hold a generated image, or an
+ * account's photo upload (which then refuses the next one), indefinitely.
+ * requestTimeout bounds the wait for a response and only warns unless
+ * throwOnRequestTimeout is set; socketTimeout bounds a body that stalls once
+ * the response has begun. Each is per attempt, and the SDK retries a timeout
+ * up to three times, so a request that hangs every time is given up after
+ * about a minute and a half.
+ */
+export const BUCKET_REQUEST_LIMITS = {
+  connectionTimeout: 5_000,
+  requestTimeout: 30_000,
+  socketTimeout: 30_000,
+  throwOnRequestTimeout: true,
+} as const;
+
 function client(config: BucketConfig): S3Client {
   if (!s3Client) {
     s3Client = new S3Client({
       endpoint: config.endpoint,
       region: config.region,
       forcePathStyle: true,
+      requestHandler: { ...BUCKET_REQUEST_LIMITS },
+      // Send a body at once rather than first waiting for "100 Continue",
+      // which the SDK asks for from 2 MiB. A store that never sends it would
+      // hold every large PUT until requestTimeout, and then fail it.
+      expectContinueHeader: false,
       credentials: {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,
@@ -154,38 +197,242 @@ export async function cleanupExpiredImages(): Promise<number> {
   const now = Date.now();
   if (storageMode() === 'memory') {
     let deleted = 0;
-    for (const [token, entry] of memoryStore) {
-      if (entry.expiresAt <= now) {
-        memoryStore.delete(token);
-        deleted += 1;
+    for (const store of [memoryStore, uploadedPhotoMemory]) {
+      for (const [key, entry] of store) {
+        if (entry.expiresAt <= now) {
+          store.delete(key);
+          deleted += 1;
+        }
       }
     }
     return deleted;
   }
 
   const config = bucketConfig()!;
-  let continuationToken: string | undefined;
   let deleted = 0;
+  for (const prefix of [OBJECT_PREFIX, UPLOADED_PHOTO_PREFIX]) {
+    let continuationToken: string | undefined;
+    do {
+      const listed = await client(config).send(
+        new ListObjectsV2Command({
+          Bucket: config.bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+        })
+      );
+      for (const object of listed.Contents || []) {
+        if (!object.Key || !object.LastModified) continue;
+        if (object.LastModified.getTime() + TTL_MS > now) continue;
+        await client(config).send(
+          new DeleteObjectCommand({ Bucket: config.bucket, Key: object.Key })
+        );
+        deleted += 1;
+      }
+      continuationToken = listed.NextContinuationToken;
+    } while (continuationToken);
+  }
+
+  return deleted;
+}
+
+// ---------------------------------------------------------------------------
+// Uploaded photos (#474, phase 3): one per account, never served by URL.
+// ---------------------------------------------------------------------------
+
+const uploadedPhotoMemory = new Map<string, StoredImage>();
+
+function uploadedPhotoKey(userId: string): string {
+  // The account id is not a safe object key (auth0|..., google-oauth2|...),
+  // and the key should not name the account. A digest is both.
+  return `${UPLOADED_PHOTO_PREFIX}${createHash('sha256').update(userId).digest('hex').slice(0, 32)}`;
+}
+
+/** Keep an account's photo, replacing the one it held. */
+export async function storeUploadedPhoto(userId: string, bytes: Buffer, contentType: string): Promise<void> {
+  const expiresAt = Date.now() + UPLOADED_PHOTO_TTL_MS;
+  const key = uploadedPhotoKey(userId);
+
+  if (storageMode() === 'memory') {
+    uploadedPhotoMemory.set(key, { base64Data: bytes.toString('base64'), expiresAt });
+    return;
+  }
+
+  const config = bucketConfig()!;
+  await client(config).send(
+    new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: key,
+      Body: bytes,
+      ContentType: contentType,
+      CacheControl: 'private, no-store',
+      Metadata: { expiresat: String(expiresAt) },
+    })
+  );
+}
+
+/** An account's photo while it lasts, or null. */
+export async function getUploadedPhoto(userId: string): Promise<Buffer | null> {
+  const key = uploadedPhotoKey(userId);
+
+  if (storageMode() === 'memory') {
+    const entry = uploadedPhotoMemory.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt <= Date.now()) {
+      uploadedPhotoMemory.delete(key);
+      return null;
+    }
+    return Buffer.from(entry.base64Data, 'base64');
+  }
+
+  const config = bucketConfig()!;
+  try {
+    const response = await client(config).send(new GetObjectCommand({ Bucket: config.bucket, Key: key }));
+    const expiresAt = Number.parseInt(response.Metadata?.expiresat || '', 10);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      await client(config).send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+      return null;
+    }
+    if (!response.Body) return null;
+    return Buffer.from(await response.Body.transformToByteArray());
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
+}
+
+/** Forget an account's photo, if it holds one. */
+export async function deleteUploadedPhoto(userId: string): Promise<void> {
+  const key = uploadedPhotoKey(userId);
+  if (storageMode() === 'memory') {
+    uploadedPhotoMemory.delete(key);
+    return;
+  }
+  const config = bucketConfig()!;
+  try {
+    await client(config).send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Held mail's print (#697, decision D3): the PDF drawn at the send of mail
+// held for its date, kept until the provider accepts it, so the mail prints
+// as it was approved. Never served by URL, and outside the prefixes
+// cleanupExpiredImages sweeps: heldPrintService deletes these.
+// ---------------------------------------------------------------------------
+
+const HELD_PDF_PREFIX = 'held-pdf/';
+const HELD_PDF_KEY = /^held-pdf\/([A-Za-z0-9_-]{1,128})\.pdf$/;
+/**
+ * Each held-PDF request gives up after this, whatever the SDK's own retries:
+ * a send stores one after its commit, and a dispatch reads one before it
+ * prints, and neither may wait the minute and a half BUCKET_REQUEST_LIMITS
+ * allows. A request given up counts as no PDF.
+ */
+export const HELD_PDF_REQUEST_TIMEOUT_MS = 20_000;
+
+const heldPdfMemory = new Map<string, { pdf: Buffer; storedAt: Date }>();
+
+/** The object key of a letter's held PDF, or null for an id no key may carry. */
+export function heldPdfKey(letterId: string): string | null {
+  const key = `${HELD_PDF_PREFIX}${letterId}.pdf`;
+  return HELD_PDF_KEY.test(key) ? key : null;
+}
+
+function heldPdfSignal(): AbortSignal {
+  return AbortSignal.timeout(HELD_PDF_REQUEST_TIMEOUT_MS);
+}
+
+/** Keep a held letter's PDF, replacing any it had. False when its id can name no object. */
+export async function storeHeldPdf(letterId: string, pdf: Buffer): Promise<boolean> {
+  const key = heldPdfKey(letterId);
+  if (!key) return false;
+  if (storageMode() === 'memory') {
+    heldPdfMemory.set(key, { pdf: Buffer.from(pdf), storedAt: new Date() });
+    return true;
+  }
+  const config = bucketConfig()!;
+  await client(config).send(
+    new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: key,
+      Body: pdf,
+      ContentType: 'application/pdf',
+      CacheControl: 'private, no-store',
+    }),
+    { abortSignal: heldPdfSignal() }
+  );
+  return true;
+}
+
+/** A held letter's PDF, or null when there is none. */
+export async function getHeldPdf(letterId: string): Promise<Buffer | null> {
+  const key = heldPdfKey(letterId);
+  if (!key) return null;
+  if (storageMode() === 'memory') {
+    const entry = heldPdfMemory.get(key);
+    return entry ? Buffer.from(entry.pdf) : null;
+  }
+  const config = bucketConfig()!;
+  try {
+    const response = await client(config).send(
+      new GetObjectCommand({ Bucket: config.bucket, Key: key }),
+      { abortSignal: heldPdfSignal() }
+    );
+    if (!response.Body) return null;
+    return Buffer.from(await response.Body.transformToByteArray());
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
+}
+
+/** Forget a held letter's PDF, if there is one. */
+export async function deleteHeldPdf(letterId: string): Promise<void> {
+  const key = heldPdfKey(letterId);
+  if (!key) return;
+  if (storageMode() === 'memory') {
+    heldPdfMemory.delete(key);
+    return;
+  }
+  const config = bucketConfig()!;
+  try {
+    await client(config).send(
+      new DeleteObjectCommand({ Bucket: config.bucket, Key: key }),
+      { abortSignal: heldPdfSignal() }
+    );
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
+}
+
+/** Every held PDF in the store: the letter it is for, and when it was stored. */
+export async function listHeldPdfs(): Promise<Array<{ letterId: string; storedAt: Date }>> {
+  const held: Array<{ letterId: string; storedAt: Date }> = [];
+  if (storageMode() === 'memory') {
+    for (const [key, entry] of heldPdfMemory) {
+      const match = HELD_PDF_KEY.exec(key);
+      if (match) held.push({ letterId: match[1], storedAt: entry.storedAt });
+    }
+    return held;
+  }
+  const config = bucketConfig()!;
+  let continuationToken: string | undefined;
   do {
     const listed = await client(config).send(
-      new ListObjectsV2Command({
-        Bucket: config.bucket,
-        Prefix: OBJECT_PREFIX,
-        ContinuationToken: continuationToken,
-      })
+      new ListObjectsV2Command({ Bucket: config.bucket, Prefix: HELD_PDF_PREFIX, ContinuationToken: continuationToken }),
+      { abortSignal: heldPdfSignal() }
     );
     for (const object of listed.Contents || []) {
-      if (!object.Key || !object.LastModified) continue;
-      if (object.LastModified.getTime() + TTL_MS > now) continue;
-      await client(config).send(
-        new DeleteObjectCommand({ Bucket: config.bucket, Key: object.Key })
-      );
-      deleted += 1;
+      const match = object.Key ? HELD_PDF_KEY.exec(object.Key) : null;
+      // An object that is not one of ours, or has no date, is never read as a letter's.
+      if (!match || !object.LastModified) continue;
+      held.push({ letterId: match[1], storedAt: object.LastModified });
     }
     continuationToken = listed.NextContinuationToken;
   } while (continuationToken);
-
-  return deleted;
+  return held;
 }
 
 export function getStoreSize(): number {

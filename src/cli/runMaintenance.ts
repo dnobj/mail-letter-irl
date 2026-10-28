@@ -1,24 +1,36 @@
 import 'dotenv/config';
 import { pathToFileURL } from 'node:url';
 import { closePool } from '../db/index.js';
-import { processDueLetterJobs } from '../services/letterJobService.js';
+import { lettersWaitingBehindPause, processDueLetterJobs } from '../services/letterJobService.js';
 import { runMaintenanceTaskIfDue } from '../services/maintenanceTaskService.js';
 import { cleanupExpiredImages, closeTempImageStore } from '../services/tempImageStore.js';
 import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
 import { runStatusSync } from '../workers/statusSyncWorker.js';
 import { runCommerceMaintenance } from '../services/commerceService.js';
 import { reconcilePackRefunds } from '../services/packRefundService.js';
-import { runRetentionPreview, runRetentionSweep } from '../services/retentionService.js';
+import {
+  processRetentionRestores,
+  runRetentionPreview,
+  runRetentionSweep
+} from '../services/retentionService.js';
 import { purgeExpiredRecentUploads } from '../services/recentUploadStore.js';
 import { purgeExpiredFeatureRequests } from '../services/featureRequestService.js';
+import { purgeClosedAddressRequests } from '../services/addressRequestService.js';
+import { purgeExpiredAuditRecords } from '../services/auditRetentionService.js';
+import { addressRequestRetentionDays } from '../config/addressRequests.js';
+import { processAccountErasures } from '../services/accountErasureService.js';
+import { lettersPastMailDay, raiseMissedMailDayAlerts } from '../services/scheduledMailService.js';
+import { notifyOperator, OPERATOR_NOTICES, settleOperatorNotices } from '../services/operatorNotify.js';
 import { enabledUnlessDisabled, positiveIntegerSetting } from '../utils/envSettings.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
+import { backfillHeldPrints, sweepHeldPdfs } from '../services/heldPrintService.js';
 import {
   carriedDiagnosticClass,
   classifyDiagnosticError,
   writeDiagnostic
 } from '../utils/diagnosticLog.js';
 import { assertValidDeploymentConfig } from '../config/deploymentConfig.js';
+import { maintenanceHeartbeatUrl, sendMaintenanceHeartbeat } from '../services/maintenanceHeartbeat.js';
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -110,6 +122,7 @@ async function contentRetentionPass(): Promise<void> {
   if (result?.moreWaiting) {
     writeDiagnostic('warn', 'retention.backlog_remaining', {
       lettersRedacted: result.lettersRedacted,
+      cancelledHeldLettersRedacted: result.cancelledHeldLettersRedacted,
       draftsRedacted: result.draftsRedacted,
       abandonedDraftsRedacted: result.abandonedDraftsRedacted,
       quarantinePurged: result.quarantinePurged
@@ -150,6 +163,8 @@ async function contentRetentionReport(days: number): Promise<void> {
     lettersHeldBack: result.letters.heldBack,
     // -1 means nothing was due; the age is only meaningful when lettersDue > 0.
     lettersOldestDueDays: result.letters.oldestDueDays ?? -1,
+    cancelledHeldLettersDue: result.cancelledHeldLetters.due,
+    cancelledHeldLettersHeldBack: result.cancelledHeldLetters.heldBack,
     paidDraftsDue: result.paidDrafts.due,
     paidDraftsHeldBack: result.paidDrafts.heldBack,
     abandonedDraftsDue: result.abandonedDrafts.due,
@@ -168,8 +183,8 @@ const RECENT_UPLOADS_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
  * Delete upload references past their window (#282).
  *
  * Separate from content retention on purpose. That sweep acts only in enforce
- * mode and carries #153's open defects; this is a plain time rule on a table of
- * pointers, and nothing about it should wait on those.
+ * mode and judges holds across orders, jobs and the ledger; this is a plain
+ * time rule on a table of pointers, and nothing about it should wait on those.
  *
  * NEVER THROWS, for the same reason as runContentRetention: runMaintenanceTaskIfDue
  * rethrows, and a housekeeping failure must not skip mail dispatch.
@@ -248,12 +263,250 @@ async function runFeatureRequestsSweep(): Promise<void> {
   }
 }
 
+/**
+ * Delete operator audit records as the 2 years after the action they record
+ * run out (#398).
+ *
+ * Same shape as runFeatureRequestsSweep, for the same reasons. Once a day: the
+ * function deletes records two days before their two years are up, so a run a
+ * day late still deletes inside the privacy policy's "up to 2 years"; nothing
+ * is due before July 2028. A writer holding an audit table makes the function
+ * give up after 5 seconds, and the next run tries again.
+ */
+const AUDIT_RETENTION_SWEEP_INTERVAL_MS = 23 * 60 * 60 * 1000;
+
+async function runAuditRetentionSweep(): Promise<void> {
+  try {
+    const sweep = await runMaintenanceTaskIfDue(
+      'audit-retention-sweep',
+      AUDIT_RETENTION_SWEEP_INTERVAL_MS,
+      async () => {
+        try {
+          return await purgeExpiredAuditRecords();
+        } catch (error) {
+          const errorClass =
+            carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+          throw Object.assign(new Error(`audit retention sweep failed: ${errorClass}`), {
+            diagnosticClass: errorClass
+          });
+        }
+      }
+    );
+    console.log(`[Maintenance] Audit retention sweep ${sweep.ran ? 'completed' : 'not due'}`);
+    if (sweep.ran) {
+      // Counts only - never an actor, a target or a summary.
+      writeDiagnostic('info', 'audit_retention.swept', {
+        adminDeleted: sweep.result?.adminDeleted ?? 0,
+        commerceDeleted: sweep.result?.commerceDeleted ?? 0,
+        commandRunsDeleted: sweep.result?.commandRunsDeleted ?? 0,
+        operationsDeleted: sweep.result?.operationsDeleted ?? 0
+      });
+    }
+  } catch (error) {
+    writeDiagnostic('error', 'audit_retention.sweep_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
+/**
+ * Delete address requests, and any address a recipient gave with them, the
+ * configured number of days after they close (#604). Whatever the feature's
+ * flag says: a request made while it was on is a third party's address, and
+ * switching the feature off must not keep it.
+ *
+ * Same shape as runFeatureRequestsSweep, for the same reasons, every run.
+ */
+const ADDRESS_REQUESTS_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
+
+async function runAddressRequestsSweep(): Promise<void> {
+  try {
+    const sweep = await runMaintenanceTaskIfDue(
+      'address-requests-sweep',
+      ADDRESS_REQUESTS_SWEEP_INTERVAL_MS,
+      async () => {
+        try {
+          return await purgeClosedAddressRequests(addressRequestRetentionDays());
+        } catch (error) {
+          const errorClass =
+            carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+          throw Object.assign(new Error(`address requests sweep failed: ${errorClass}`), {
+            diagnosticClass: errorClass
+          });
+        }
+      }
+    );
+    console.log(`[Maintenance] Address requests sweep ${sweep.ran ? 'completed' : 'not due'}`);
+    if (sweep.ran) {
+      // A count only - never a name, an address or a token.
+      writeDiagnostic('info', 'address_requests.swept', { deleted: sweep.result ?? 0 });
+    }
+  } catch (error) {
+    writeDiagnostic('error', 'address_requests.sweep_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
+/**
+ * Carry out the erasures the admin panel has queued (#289). The panel's role
+ * cannot scrub an account and is not meant to; this run, as the database
+ * owner, does (src/services/accountErasureService.ts).
+ *
+ * Same wrapper as the sweeps above, for the same reasons: it never throws, so
+ * a failure here cannot skip mail dispatch, and inside the task a failure is
+ * rethrown as its class. Every run, so a queued erasure waits an hour at most.
+ */
+const ACCOUNT_ERASURE_INTERVAL_MS = 30 * 60 * 1000;
+
+async function runAccountErasures(): Promise<void> {
+  try {
+    const run = await runMaintenanceTaskIfDue(
+      'account-erasures',
+      ACCOUNT_ERASURE_INTERVAL_MS,
+      async () => {
+        try {
+          return await processAccountErasures();
+        } catch (error) {
+          const errorClass =
+            carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+          throw Object.assign(new Error(`account erasures failed: ${errorClass}`), {
+            diagnosticClass: errorClass
+          });
+        }
+      }
+    );
+    console.log(`[Maintenance] Account erasures ${run.ran ? 'completed' : 'not due'}`);
+    if (run.ran && run.result) {
+      // Counts only - never an account id.
+      writeDiagnostic('info', 'account_erasure.run', { ...run.result });
+    }
+  } catch (error) {
+    writeDiagnostic('error', 'account_erasure.task_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
+/**
+ * Put back the quarantined content the admin panel queued for restore (#153).
+ * Runs BEFORE the retention pass, so a restore queued before this run is never
+ * beaten to its copy by the purge in the same run. Same wrapper as the others:
+ * it never throws, and a failure inside it is rethrown as its class. Every run,
+ * so a queued restore waits an hour at most.
+ */
+const RETENTION_RESTORE_INTERVAL_MS = 30 * 60 * 1000;
+
+/**
+ * Held mail's stored PDFs (#697): draw one for each held letter the send could
+ * not, then delete those whose letter no longer waits to print. Every run, and
+ * after the outbox, so mail it just sent has given its PDF up. Wrapped, so a
+ * bucket that is down never stops the run; counts only, never a letter id.
+ */
+export async function runHeldPrintMaintenance(): Promise<void> {
+  try {
+    const backfill = await backfillHeldPrints();
+    console.log('[Maintenance] Held print backfill summary:', backfill);
+    writeDiagnostic(backfill.layoutChanged + backfill.unprintable > 0 ? 'error' : 'info', 'held_print.backfilled', backfill);
+  } catch (error) {
+    writeDiagnostic('error', 'held_print.backfill_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+  try {
+    const sweep = await sweepHeldPdfs();
+    console.log('[Maintenance] Held print sweep summary:', sweep);
+    writeDiagnostic('info', 'held_print.swept', sweep);
+  } catch (error) {
+    writeDiagnostic('error', 'held_print.sweep_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
+async function runRetentionRestores(): Promise<void> {
+  try {
+    const run = await runMaintenanceTaskIfDue(
+      'retention-restores',
+      RETENTION_RESTORE_INTERVAL_MS,
+      async () => {
+        try {
+          return await processRetentionRestores();
+        } catch (error) {
+          const errorClass =
+            carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+          throw Object.assign(new Error(`retention restores failed: ${errorClass}`), {
+            diagnosticClass: errorClass
+          });
+        }
+      }
+    );
+    console.log(`[Maintenance] Retention restores ${run.ran ? 'completed' : 'not due'}`);
+    if (run.ran && run.result) {
+      // Counts only - never a letter or draft id.
+      writeDiagnostic('info', 'retention_restore.run', { ...run.result });
+    }
+  } catch (error) {
+    writeDiagnostic('error', 'retention_restore.task_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
+export interface OutboxRunSummary {
+  batches: number;
+  processed: number;
+  completed: number;
+  retryScheduled: number;
+  failed: number;
+  paused?: true;
+  waiting?: number;
+}
+
+/**
+ * The outbox's share of a run (#700): batches of `batchLimit` while due mail
+ * is left, until one comes back short, which found no more, or `budgetMs`
+ * has passed; a batch in progress stops claiming then too. A mail date's held
+ * letters are all due at 09:00 New York time, more than one batch of 25, and
+ * one batch a run would send the rest an hour apart.
+ *
+ * Trouble ends the run's outbox as a single batch always did: a batch with a
+ * retry, or with no more letters sent than failed, or a run that has failed as
+ * many as a batch holds. A provider outage then holds or retries at most one
+ * batch a run, not every letter due, and a retried job is not claimed again
+ * in the same run once its backoff has passed; one letter the provider
+ * rejects, among letters it takes, does not stop the date's mail.
+ */
+export async function dispatchDueMail(
+  batchLimit: number,
+  budgetMs: number,
+  now: () => number = Date.now
+): Promise<OutboxRunSummary> {
+  const stopAt = now() + budgetMs;
+  const total: OutboxRunSummary = { batches: 0, processed: 0, completed: 0, retryScheduled: 0, failed: 0 };
+  for (;;) {
+    const batch = await processDueLetterJobs(batchLimit, { stopAt });
+    total.batches += 1;
+    total.processed += batch.processed;
+    total.completed += batch.completed;
+    total.retryScheduled += batch.retryScheduled;
+    total.failed += batch.failed;
+    if (batch.paused) return { ...total, paused: true, waiting: batch.waiting };
+    const trouble =
+      batch.retryScheduled > 0 || (batch.failed > 0 && batch.failed >= batch.completed) || total.failed >= batchLimit;
+    if (batch.processed < batchLimit || trouble || now() >= stopAt) return total;
+  }
+}
+
 export async function runMaintenance(): Promise<void> {
   // Was Math.max(1, Number.parseInt(...)), the shape envSettings exists to
   // replace: '1e3' parses to 1, so a request for 1000 dispatched ONE letter a
   // run, and a non-numeric value yielded NaN, which reached
   // processDueLetterJobs and stopped paid mail entirely (#153 review round 3).
   const batchLimit = positiveIntegerSetting('MAINTENANCE_OUTBOX_BATCH_SIZE', 25, 1);
+  // How long the outbox may keep claiming batches in one run (#700): well
+  // inside the hour, so the next run does not find this one still going.
+  const outboxBudgetSeconds = positiveIntegerSetting('MAINTENANCE_OUTBOX_TIME_BUDGET_SECONDS', 600, 1, 2700);
   console.log(`[Maintenance] Starting one-shot run at ${new Date().toISOString()}`);
 
   // FIRST, and wrapped. Retention has its own maintenance_tasks row because
@@ -261,14 +514,32 @@ export async function runMaintenance(): Promise<void> {
   // of the tasks below is wrapped and runMaintenanceTaskIfDue rethrows, so
   // anything scheduled after them is silently skipped whenever one fails.
   // runContentRetention never throws, so it cannot skip them either (#153).
+  // Restores come first of all: a copy queued for restore must not be purged
+  // by the same run (#153).
+  await runRetentionRestores();
   await runContentRetention();
   // Also wrapped, and also never throws, for the same reason (#282).
   await runRecentUploadsSweep();
   // Same wrapper, same reason; it runs after the uploads sweep (#393).
   await runFeatureRequestsSweep();
+  // Same wrapper; it deletes closed address requests (#604).
+  await runAddressRequestsSweep();
+  // Same wrapper; it deletes operator audit records past 2 years (#398).
+  await runAuditRetentionSweep();
+  // Also wrapped. Its gate holds back any account with mail still queued, so
+  // running before the outbox cannot race a send (#289).
+  await runAccountErasures();
 
-  const outbox = await processDueLetterJobs(batchLimit);
+  const outbox = await dispatchDueMail(batchLimit, outboxBudgetSeconds * 1000);
   console.log('[Maintenance] Outbox summary:', outbox);
+
+  // Held mail past 18:00 New York time on its mail date and still not at the
+  // printer (#535). After the outbox, so mail it just sent is not counted.
+  // Never throws, like the wrapped tasks above.
+  const missedMailDays = await raiseMissedMailDayAlerts();
+  console.log(`[Maintenance] Held mail past its mail day, newly alerted: ${missedMailDays}`);
+  // And the operator is told, once a run (#699).
+  if (missedMailDays > 0) await notifyOperator('missed_mail_day', OPERATOR_NOTICES.missedMailDay(missedMailDays));
 
   const commerce = await runCommerceMaintenance();
   console.log('[Maintenance] Commerce summary:', commerce);
@@ -282,6 +553,7 @@ export async function runMaintenance(): Promise<void> {
 
   const expiredImages = await cleanupExpiredImages();
   console.log(`[Maintenance] Removed ${expiredImages} expired temporary images`);
+  await runHeldPrintMaintenance();
 
   const status = await runMaintenanceTaskIfDue('provider-status-sync', SIX_HOURS_MS, runStatusSync);
   console.log(`[Maintenance] Provider status sync ${status.ran ? 'completed' : 'not due'}`);
@@ -306,8 +578,9 @@ export async function runMaintenance(): Promise<void> {
  * validation gate without executing a real maintenance pass.
  */
 export async function maintenanceEntry(): Promise<void> {
+  let validation: ReturnType<typeof assertValidDeploymentConfig>;
   try {
-    assertValidDeploymentConfig(process.env, 'maintenance');
+    validation = assertValidDeploymentConfig(process.env, 'maintenance');
   } catch (error) {
     // Print the validator's message here, where the failure is known to be
     // configuration and the message is value-free by construction.
@@ -318,10 +591,50 @@ export async function maintenanceEntry(): Promise<void> {
     console.error(error instanceof Error ? error.message : String(error));
     throw error;
   }
+  // The warnings the API prints at boot, printed here too: this service owns
+  // settings of its own, such as the heartbeat URL (#408).
+  if (validation.mode !== 'test') {
+    for (const warning of validation.warnings) {
+      console.warn(`[config] ${warning}`);
+    }
+  }
   try {
     await runMaintenance();
     console.log(`[Maintenance] Finished at ${new Date().toISOString()}`);
+    // Only after a run that finished: a monitor stops hearing from a run that
+    // never happens and from one that keeps failing alike (#408).
+    //
+    // Nor while the outbox is paused with letters waiting (#444). The run is
+    // fine but no mail is moving, and a pause left on after an incident would
+    // otherwise show in this log and nowhere the owner is told: the monitor
+    // alerts until the outbox is switched back on (#451 review). A count that
+    // failed withholds too: paused, it cannot say nothing waits.
+    //
+    // Nor while a letter with a date is still waiting after 18:00 on its mail
+    // day (#699): the run is fine, but mail promised for a day did not go. The
+    // monitor alerts until it goes or a person settles it.
+    const waiting = await lettersWaitingBehindPause();
+    const late = await lettersPastMailDay();
+    if (waiting !== 0 || late !== 0) {
+      const monitored = maintenanceHeartbeatUrl() !== null;
+      writeDiagnostic('warn', 'maintenance.heartbeat_withheld', { outboxWaiting: waiting, pastMailDay: late, monitored });
+      const reasons: string[] = [];
+      if (waiting === 'unknown') reasons.push('the outbox is paused and the letters waiting could not be counted');
+      else if (waiting !== 0) reasons.push(`the outbox is paused with ${waiting} waiting`);
+      if (late === 'unknown') reasons.push('the letters past their mail day could not be counted');
+      else if (late !== 0) reasons.push(`${late === 1 ? '1 letter is' : `${late} letters are`} still waiting after their mail day`);
+      console.log(
+        `[Maintenance] Heartbeat withheld: ${reasons.join('; ')}` +
+          (monitored ? '' : '. MAINTENANCE_HEARTBEAT_URL is not set, so no monitor will alert')
+      );
+    } else {
+      const heartbeat = await sendMaintenanceHeartbeat();
+      if (heartbeat !== 'skipped') console.log(`[Maintenance] Heartbeat ${heartbeat}`);
+    }
   } finally {
+    // Notices started without waiting, by an ambiguous dispatch (#699), are
+    // posted before the process ends.
+    await settleOperatorNotices();
     closeTempImageStore();
     await closePool();
   }

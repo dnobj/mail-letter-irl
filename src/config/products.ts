@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 /**
  * The product table: every sellable product, its identity, where its Stripe
  * price id comes from, and THE AMOUNT IT IS EXPECTED TO COST. A leaf module
- * (no src/ imports), so the config layer, the price catalog, the Stripe
- * service, and the reconciliation service can all read the SAME table.
+ * (no src/ imports beyond types and the leaf flag reader), so the config
+ * layer, the price catalog, the Stripe service, and the reconciliation service
+ * can all read the SAME table.
  *
  * Before this existed the table was copied by hand in three places -
  * PACK_PRODUCTS in stripeService, PACK_PRICE_VARS/JIT_VARS in deploymentConfig,
@@ -33,7 +34,74 @@ import { createHash } from 'node:crypto';
  * operational step - it adds a review.
  */
 
-import type { MailType } from '../services/types.js';
+import type { CertifiedMailService, MailService, MailType, PostcardSize } from '../services/types.js';
+import { offUnlessExplicitlyEnabled } from '../utils/envSettings.js';
+
+/**
+ * The flags that sell the mail options added after the one-page letter and the
+ * 6x9 postcard (#578). Each also switches its option on (room to write, the
+ * postcard sizes, certified mail), so an option is never sold without its
+ * price, nor priced without being sold. Off unless set: production waits for
+ * the owner's word.
+ */
+export const ROOM_TO_WRITE_FLAG = 'LETTER_IRL_ROOM_TO_WRITE_ENABLED';
+export const POSTCARD_SIZES_FLAG = 'LETTER_IRL_POSTCARD_SIZES_ENABLED';
+export const CERTIFIED_MAIL_FLAG = 'LETTER_IRL_CERTIFIED_MAIL_ENABLED';
+
+/**
+ * What a Pay & Send price depends on: the mail type, a letter's printed pages,
+ * a postcard's size and how a letter travels. Pages default to one, the size to
+ * 6x9 and the service to standard, the only mail sold before #578.
+ */
+export interface MailOption {
+  readonly mailType: MailType;
+  readonly pages?: number;
+  readonly postcardSize?: PostcardSize;
+  /**
+   * Absent is standard. Only a letter is ever certified (#625). The type names
+   * the services this code knows, but a value read from a row is carried as it
+   * is (mailServiceOf), so a reader that switches on it must treat any other
+   * text as a service it cannot sell; isExtraService narrows it.
+   */
+  readonly mailService?: MailService;
+}
+
+/**
+ * The service a stored value (a draft's mail_service) names, as a MailOption
+ * carries it: absent for standard, null and the empty string; the certified
+ * services as they are; and any OTHER text as itself, so that it fails closed
+ * everywhere downstream (no product matches it, no pack or gift pays for it)
+ * rather than being priced and mailed as standard. The column's CHECK keeps
+ * one from existing; this holds if the code is ever older than the data.
+ */
+export function mailServiceOf(value: string | null | undefined): MailService | undefined {
+  if (value === null || value === undefined || value === '' || value === 'standard') return undefined;
+  return value as MailService;
+}
+
+/** The extra services PostGrid sells a letter (#625), exactly the CertifiedMailService union. */
+export const EXTRA_SERVICES = ['certified', 'certified_return_receipt'] as const;
+
+// Compile-time: every listed value is an extra service, and every extra service is listed.
+type UnlistedExtraService = Exclude<CertifiedMailService, (typeof EXTRA_SERVICES)[number]>;
+const _everyExtraServiceIsListed: [UnlistedExtraService] extends [never] ? true : never = true;
+const _everyListedValueIsAnExtraService: readonly CertifiedMailService[] = EXTRA_SERVICES;
+void _everyExtraServiceIsListed;
+void _everyListedValueIsAnExtraService;
+
+/**
+ * Whether a value is one of the two extra services PostGrid sells a letter
+ * (#625). Standard is not one, and neither is text this code does not know.
+ *
+ * Do NOT use it to turn other text into "no service" (isExtraService(v) ? v :
+ * undefined): that mails what a row asks for in a service this code does not
+ * know as standard mail. A caller hands the provider mailServiceOf's value and
+ * refuses what is neither none nor one of these before it asks (the dispatch
+ * does, from part 3), and the providers refuse it too.
+ */
+export function isExtraService(value: unknown): value is CertifiedMailService {
+  return (EXTRA_SERVICES as readonly unknown[]).includes(value);
+}
 
 /**
  * Internal credits per customer-facing letter.
@@ -90,11 +158,44 @@ export interface PackProductDefinition {
   readonly expectedAmountCents: number;
   readonly name: string;
   readonly description: string;
+  /**
+   * Gift letters granted with the pack when gift letters are enabled, and the
+   * budget each carries: how many further funded cards may follow it. A
+   * budget of 1 means the pack's gift letter prints a code, and the letter
+   * that code grants prints the plain card. See docs/gift-letters.md for the
+   * cost bound this sets per pack.
+   */
+  readonly giftLetters: number;
+  readonly giftGenerationsRemaining: number;
 }
 
+export type JitProductCode =
+  | 'jit-letter'
+  | 'jit-postcard'
+  | 'jit-letter-2-pages'
+  | 'jit-letter-3-pages'
+  | 'jit-postcard-4x6'
+  | 'jit-postcard-11x6'
+  | 'jit-letter-certified'
+  | 'jit-letter-certified-receipt';
+
 export interface JitProductDefinition {
-  readonly productCode: 'jit-letter' | 'jit-postcard';
+  readonly productCode: JitProductCode;
   readonly mailType: MailType;
+  /** Letters: the pages printed, double-sided past the first. */
+  readonly pages?: number;
+  /** Postcards: the size, in PostGrid's terms ('6x4' is the 4x6, '6x11' the 11x6). */
+  readonly postcardSize?: PostcardSize;
+  /**
+   * Letters: the extra service it sells (#625). Its price is flat, whatever the
+   * pages (one to three, held by the preview), so it has no `pages`.
+   */
+  readonly mailService?: CertifiedMailService;
+  /**
+   * The flag that sells it (#578). The two products sold before have none and
+   * are sold whenever Pay & Send is.
+   */
+  readonly enabledBy?: string;
   readonly priceEnv: string;
   /** See PackProductDefinition.expectedAmountCents; units are the JIT currency's. */
   readonly expectedAmountCents: number;
@@ -110,7 +211,9 @@ export const PACK_PRODUCTS: readonly PackProductDefinition[] = [
     priceEnv: 'STRIPE_PRICE_STARTER',
     expectedAmountCents: 500,
     name: 'Starter Pack - 2 Letters',
-    description: 'Two prepaid physical letters or postcards'
+    description: 'Two prepaid physical letters or postcards',
+    giftLetters: 1,
+    giftGenerationsRemaining: 1
   },
   {
     productCode: 'credit-pack-10',
@@ -119,7 +222,9 @@ export const PACK_PRODUCTS: readonly PackProductDefinition[] = [
     priceEnv: 'STRIPE_PRICE_REGULAR',
     expectedAmountCents: 1000,
     name: 'Regular Pack - 5 Letters',
-    description: 'Five prepaid physical letters or postcards'
+    description: 'Five prepaid physical letters or postcards',
+    giftLetters: 1,
+    giftGenerationsRemaining: 1
   },
   {
     productCode: 'credit-pack-100',
@@ -128,7 +233,9 @@ export const PACK_PRODUCTS: readonly PackProductDefinition[] = [
     priceEnv: 'STRIPE_PRICE_POWER',
     expectedAmountCents: 9000,
     name: 'Power Pack - 50 Letters',
-    description: 'Fifty prepaid physical letters or postcards'
+    description: 'Fifty prepaid physical letters or postcards',
+    giftLetters: 1,
+    giftGenerationsRemaining: 1
   }
 ] as const;
 
@@ -136,6 +243,7 @@ export const JIT_PRODUCTS: readonly JitProductDefinition[] = [
   {
     productCode: 'jit-letter',
     mailType: 'letter',
+    pages: 1,
     priceEnv: 'STRIPE_JIT_LETTER_PRICE_ID',
     expectedAmountCents: 499,
     name: 'Pay & Send One Physical Letter',
@@ -147,24 +255,109 @@ export const JIT_PRODUCTS: readonly JitProductDefinition[] = [
     // amount check permits sharing exactly when the pinned amounts agree.
     productCode: 'jit-postcard',
     mailType: 'postcard',
+    postcardSize: '6x9',
     priceEnv: 'STRIPE_JIT_POSTCARD_PRICE_ID',
     expectedAmountCents: 499,
     name: 'Pay & Send One Physical Postcard',
     description: 'Payment authorizes Letter IRL to print and mail this exact postcard.'
+  },
+  // The options' prices are the proposal on epic #537 (#578), in development
+  // until the owner approves them. Packs and gift letters never pay for these
+  // options (#579), so each is sold only through Pay & Send, at its own price.
+  {
+    productCode: 'jit-letter-2-pages',
+    mailType: 'letter',
+    pages: 2,
+    enabledBy: ROOM_TO_WRITE_FLAG,
+    priceEnv: 'STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID',
+    expectedAmountCents: 599,
+    name: 'Pay & Send One Two-Page Letter',
+    description: 'Payment authorizes Letter IRL to print and mail this exact two-page letter.'
+  },
+  {
+    productCode: 'jit-letter-3-pages',
+    mailType: 'letter',
+    pages: 3,
+    enabledBy: ROOM_TO_WRITE_FLAG,
+    priceEnv: 'STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID',
+    expectedAmountCents: 699,
+    name: 'Pay & Send One Three-Page Letter',
+    description: 'Payment authorizes Letter IRL to print and mail this exact three-page letter.'
+  },
+  {
+    productCode: 'jit-postcard-4x6',
+    mailType: 'postcard',
+    postcardSize: '6x4',
+    enabledBy: POSTCARD_SIZES_FLAG,
+    priceEnv: 'STRIPE_JIT_POSTCARD_4X6_PRICE_ID',
+    expectedAmountCents: 399,
+    name: 'Pay & Send One 4x6 Postcard',
+    description: 'Payment authorizes Letter IRL to print and mail this exact 4x6 postcard.'
+  },
+  {
+    productCode: 'jit-postcard-11x6',
+    mailType: 'postcard',
+    postcardSize: '6x11',
+    enabledBy: POSTCARD_SIZES_FLAG,
+    priceEnv: 'STRIPE_JIT_POSTCARD_11X6_PRICE_ID',
+    expectedAmountCents: 599,
+    name: 'Pay & Send One 11x6 Postcard',
+    description: 'Payment authorizes Letter IRL to print and mail this exact 11x6 postcard.'
+  },
+  // Certified mail (#625): PostGrid's `extraService`, on a letter of one to
+  // three pages. The prices are the proposal on the issue (the owner's call):
+  // PostGrid's public prices are $6.94 and $9.85. If those include the letter
+  // these leave about $4.40 after Stripe's fee; if they are added to its cost
+  // (our 2025 notes of PostGrid's price list have it as an add-on) about $3.30. To be
+  // confirmed with PostGrid. In development until the owner approves them.
+  {
+    productCode: 'jit-letter-certified',
+    mailType: 'letter',
+    mailService: 'certified',
+    enabledBy: CERTIFIED_MAIL_FLAG,
+    priceEnv: 'STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID',
+    expectedAmountCents: 1199,
+    name: 'Pay & Send One Certified Mail Letter',
+    description: 'Payment authorizes Letter IRL to print and mail this exact letter as USPS Certified Mail.'
+  },
+  {
+    productCode: 'jit-letter-certified-receipt',
+    mailType: 'letter',
+    mailService: 'certified_return_receipt',
+    enabledBy: CERTIFIED_MAIL_FLAG,
+    priceEnv: 'STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID',
+    expectedAmountCents: 1499,
+    name: 'Pay & Send One Certified Mail Letter with Return Receipt',
+    description:
+      'Payment authorizes Letter IRL to print and mail this exact letter as USPS Certified Mail with an electronic return receipt.'
   }
 ] as const;
 
+/** Whether this deployment sells the Pay & Send product: its flag, if it has one, is on. */
+export function isJitProductSold(
+  product: Pick<JitProductDefinition, 'enabledBy'>,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  return !product.enabledBy || offUnlessExplicitlyEnabled(product.enabledBy, env);
+}
+
 /** Env-name lists for the deployment manifest and the cutover preflight. */
 export const PACK_PRICE_ENV_VARS: readonly string[] = PACK_PRODUCTS.map(p => p.priceEnv);
-export const JIT_PRICE_ENV_VARS: readonly string[] = JIT_PRODUCTS.map(p => p.priceEnv);
+/** The Pay & Send prices every deployment with Pay & Send needs. */
+export const JIT_PRICE_ENV_VARS: readonly string[] = JIT_PRODUCTS
+  .filter(p => !p.enabledBy)
+  .map(p => p.priceEnv);
+/** The options' prices, each needed only while its flag is on as well (#578). */
+export const JIT_OPTION_PRICE_ENV_VARS: ReadonlyArray<{ readonly priceEnv: string; readonly flag: string }> =
+  JIT_PRODUCTS.flatMap(p => (p.enabledBy ? [{ priceEnv: p.priceEnv, flag: p.enabledBy }] : []));
 
 /** Credits per pack product - the reconciliation service's map, derived. */
 export const PACK_CREDITS_BY_PRODUCT: Readonly<Record<string, number>> = Object.fromEntries(
   PACK_PRODUCTS.map(p => [p.productCode, p.credits])
 );
 
-export function isJitPurchaseEnabled(): boolean {
-  return process.env.JIT_PURCHASE_ENABLED === 'true';
+export function isJitPurchaseEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.JIT_PURCHASE_ENABLED === 'true';
 }
 
 export function normalizedCurrency(value: string | undefined, fallback: string): string {
@@ -246,9 +439,40 @@ function configuredRow(
   };
 }
 
-/** The Pay & Send product definition for a mail type, with its fallback. */
-export function jitProductDefinition(mailType: MailType): (typeof JIT_PRODUCTS)[number] {
-  return JIT_PRODUCTS.find(product => product.mailType === mailType) ?? JIT_PRODUCTS[0];
+/**
+ * The Pay & Send product that matches a mail option, sold here or not, or null
+ * when none does. An unknown mail type is priced as a letter, the fallback it
+ * always had.
+ */
+export function jitProductMatching(option: MailOption): JitProductDefinition | null {
+  const mailType = JIT_PRODUCTS.some(product => product.mailType === option.mailType)
+    ? option.mailType
+    : JIT_PRODUCTS[0].mailType;
+  const service = option.mailService ?? 'standard';
+  return JIT_PRODUCTS.find(candidate => {
+    if (candidate.mailType !== mailType) return false;
+    if (mailType === 'postcard') {
+      // A postcard is never certified: a certified postcard has no price, rather than a plain one's.
+      return service === 'standard' && candidate.postcardSize === (option.postcardSize ?? '6x9');
+    }
+    // A certified letter is priced by its service, whatever its pages; every other letter by its pages.
+    return service === 'standard'
+      ? candidate.mailService === undefined && candidate.pages === (option.pages ?? 1)
+      : candidate.mailService === service;
+  }) ?? null;
+}
+
+/**
+ * The Pay & Send product for a mail option, or null when this deployment sells
+ * none that matches it. Never a smaller option's product: a two-page letter
+ * whose flag is off has no price, rather than the one-page letter's (#578).
+ */
+export function jitProductFor(
+  option: MailOption,
+  env: NodeJS.ProcessEnv = process.env
+): JitProductDefinition | null {
+  const product = jitProductMatching(option);
+  return product && isJitProductSold(product, env) ? product : null;
 }
 
 export function getConfiguredProducts(env: NodeJS.ProcessEnv = process.env): ConfiguredProduct[] {
@@ -260,13 +484,10 @@ export function getConfiguredProducts(env: NodeJS.ProcessEnv = process.env): Con
   if (env.JIT_PURCHASE_ENABLED !== 'true') return packs;
 
   const jitCcy = jitCurrency(env);
-  const jit = JIT_PRODUCTS.map(product => configuredRow(product, 'jit', jitCcy, env));
+  const jit = JIT_PRODUCTS
+    .filter(product => isJitProductSold(product, env))
+    .map(product => configuredRow(product, 'jit', jitCcy, env));
   return [...packs, ...jit];
-}
-
-/** The Pay & Send product code for a mail type. */
-export function jitProductCode(mailType: MailType): string {
-  return jitProductDefinition(mailType).productCode;
 }
 
 /**
@@ -282,7 +503,7 @@ export function getConfiguredProduct(
   if (pack) return configuredRow(pack, 'pack', packCurrency(env), env);
   if (env.JIT_PURCHASE_ENABLED !== 'true') return null;
   const jit = JIT_PRODUCTS.find(product => product.productCode === productCode);
-  if (!jit) return null;
+  if (!jit || !isJitProductSold(jit, env)) return null;
   return configuredRow(jit, 'jit', jitCurrency(env), env);
 }
 
@@ -297,7 +518,9 @@ export function isConfiguredProductCode(
 ): boolean {
   if (PACK_PRODUCTS.some(product => product.productCode === productCode)) return true;
   if (env.JIT_PURCHASE_ENABLED !== 'true') return false;
-  return JIT_PRODUCTS.some(product => product.productCode === productCode);
+  return JIT_PRODUCTS.some(
+    product => product.productCode === productCode && isJitProductSold(product, env)
+  );
 }
 
 /**

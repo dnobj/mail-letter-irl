@@ -12,7 +12,9 @@ export { getPurchaseStatusTool } from "./getPurchaseStatus.js";
 // Account and order management tools
 export { getOrderStatusTool } from "./getOrderStatus.js";
 export { getAccountBalanceTool } from "./getAccountBalance.js";
+export { getProfileTool } from "./getProfile.js";
 export { listOrdersTool } from "./listOrders.js";
+export { openLetterHomeTool } from "./openLetterHome.js";
 export { setReturnAddressTool } from "./setReturnAddress.js";
 export { getReturnAddressTool } from "./getReturnAddress.js";
 export { clearReturnAddressTool } from "./clearReturnAddress.js";
@@ -20,6 +22,25 @@ export { clearReturnAddressTool } from "./clearReturnAddress.js";
 // Postcard tools (US-POSTCARD-01, US-POSTCARD-02)
 export { quoteAndPreviewPostcardTool } from "./quoteAndPreviewPostcard.js";
 export { sendPostcardTool } from "./sendPostcard.js";
+export { requestSendTool } from "./requestSend.js";
+export { getDraftStatusTool } from "./getDraftStatus.js";
+export { setArrivalDateTool } from "./setArrivalDate.js";
+export { setStationeryTool } from "./setStationery.js";
+export { setMailServiceTool } from "./setMailService.js";
+export { setLetterWordsTool } from "./setLetterWords.js";
+export { setPostcardStyleTool } from "./setPostcardStyle.js";
+export { cancelScheduledMailTool } from "./cancelScheduledMail.js";
+export { requestAddressTool } from "./requestAddress.js";
+export { getAddressRequestTool } from "./getAddressRequest.js";
+export { cancelAddressRequestTool } from "./cancelAddressRequest.js";
+export { setSignatureTool } from "./setSignature.js";
+export { getSignatureTool } from "./getSignature.js";
+export { clearSignatureTool } from "./clearSignature.js";
+export { setLetterSignatureTool } from "./setLetterSignature.js";
+export { saveStationeryDesignTool } from "./saveStationeryDesign.js";
+export { listStationeryDesignsTool } from "./listStationeryDesigns.js";
+export { deleteStationeryDesignTool } from "./deleteStationeryDesign.js";
+export { uploadPhotoChunkTool } from "./uploadPhotoChunk.js";
 
 // Feedback tools (US-FEEDBACK-01)
 export { submitFeatureRequestTool } from "./submitFeatureRequest.js";

@@ -2,9 +2,9 @@
  * Personal Access Token (PAT) API Request Handler
  *
  * Handles PAT management routes:
- * - POST /api/tokens   - Create new token (JWT only)
+ * - POST /api/tokens   - Create new token (the website's own JWT only, #730)
  * - GET /api/tokens    - List user's tokens
- * - DELETE /api/tokens/:id - Revoke token (JWT only)
+ * - DELETE /api/tokens/:id - Revoke token (the website's own JWT only, #730)
  *
  * User Stories:
  * - US-MCP-01: Generate Personal Access Token
@@ -21,12 +21,14 @@ import {
 import { InsufficientScopeError } from '../auth/oauthChallenge.js';
 import { OAUTH_NOT_CONFIGURED } from '../auth/oauthErrors.js';
 import { requiredRestScopes } from '../auth/restScopes.js';
-import { insufficientScope, sendRestAuthFailure } from './middleware/restAuth.js';
+import { insufficientScope, prepareRestAccount, sendRestAuthFailure } from './middleware/restAuth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
 import { createToken, listTokens, revokeToken, TokenExpiryError } from '../services/patService.js';
 import type { CreateTokenResult } from '../services/types.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import { websiteClientId } from '../config/sendConfirmation.js';
+import { clientIdOf } from '../auth/clientProfiles.js';
 
 /**
  * Send JSON response
@@ -101,9 +103,10 @@ export async function handlePATApiRequest(
     return true;
   }
 
-  // The route's scope (src/auth/restScopes.ts). A personal access token
-  // carries none and passes, as it does on MCP; creating and revoking refuse
-  // one separately below.
+  // The route's scope (src/auth/restScopes.ts), checked for every token. A
+  // personal access token carries read and draft (migration 037, #470), so it
+  // can list tokens and is refused minting and revoking here. The authType
+  // checks below stay as the guard for a token that ever carries mail:send.
   try {
     requireScopes(authInfo, requiredRestScopes(req.method, pathname));
   } catch (error) {
@@ -115,6 +118,13 @@ export async function handlePATApiRequest(
   }
   if (await rateLimitAccount(req, res, authInfo.userId, 'api_account')) {
     return true; // Rate limited
+  }
+  // The account, refused the way every other REST route refuses it: an erased
+  // one (#289), or one that has no confirmed address to open from.
+  const account = await prepareRestAccount(authInfo);
+  if (!account.ok) {
+    sendRestAuthFailure(res, account);
+    return true;
   }
 
   // Route handlers
@@ -130,6 +140,7 @@ export async function handlePATApiRequest(
         return true;
       }
 
+      if (refuseOtherApplications(res, authInfo)) return true;
       await handleCreateToken(req, res, authInfo);
       return true;
     }
@@ -152,6 +163,7 @@ export async function handlePATApiRequest(
         return true;
       }
 
+      if (refuseOtherApplications(res, authInfo)) return true;
       const tokenId = parseInt(deleteMatch[1], 10);
       await handleRevokeToken(res, authInfo, tokenId);
       return true;
@@ -170,6 +182,20 @@ export async function handlePATApiRequest(
     });
     return true;
   }
+}
+
+/**
+ * Tokens are made and revoked on the website only (#730), as mail is sent
+ * there: a token a connected app holds carries the same scopes, and a
+ * personal access token outlives that app's connection. Refused when the
+ * website's application is not configured, as the send is. True when refused.
+ */
+function refuseOtherApplications(res: ServerResponse, authInfo: AuthenticatedUser): boolean {
+  const website = websiteClientId();
+  if (website && clientIdOf(authInfo) === website) return false;
+  writeDiagnostic('warn', 'auth.pat_client_refused', { configured: Boolean(website) });
+  sendJson(res, 403, { error: 'website_only', message: 'Personal access tokens are managed on letterirl.com.' });
+  return true;
 }
 
 /**

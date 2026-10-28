@@ -135,3 +135,32 @@ usable signal.
 - `docs/learnings/dcr-static-client-workaround.md` — why DEV is in static-DCR mode
 - `docs/learnings/chatgpt-auth0-oauth-learnings.md`
 - `docs/auth0-tenant-configuration.md` — the tenant half
+
+
+## Addendum, 2026-09-22: the grant was the wrong instrument
+
+An earlier version of this addendum said that declaring `openid` and `email`
+on every tool (#425) changed nothing: a new connector still requested only the
+product scopes plus `offline_access`, read back from the Auth0 grant. The
+reading was wrong, and so was its conclusion that no lever existed.
+
+The Auth0 grant never lists an OIDC scope for the ChatGPT client. Its CIMD
+client is a strict third-party client, and Auth0 grants such clients no OIDC
+scopes in its current release, whatever they ask for. So the grant could never
+have shown the "never requested either" above. That may still hold for a
+linked connector, whose request is the tool union, but the evidence offered for
+it could not show an OIDC scope either way.
+
+ChatGPT's own `links/oauth` start call shows what it really asks for. A new
+connector, which has no tools yet, requests the default scopes from its
+Advanced OAuth settings, and those include `openid profile email`. The rule at
+the top of this document applies to a linked connector; a new one asks for the
+defaults. The general lesson: **read the request the client sends, not a
+record the server kept of it.**
+
+The failure #425 was meant to fix - `OAUTH_OWNER_PROFILE_ID_MISSING` at
+ChatGPT's callback - came from the connector's **OIDC enabled** setting, not
+from the scope request; see [The OIDC Checkbox That Blocked Every First
+ChatGPT Link](chatgpt-connector-oidc-setting.md). The #425 change stays: its
+advertise-versus-request validation is real, and the identity scopes cost
+nothing - tool calls work although Auth0 never grants them.

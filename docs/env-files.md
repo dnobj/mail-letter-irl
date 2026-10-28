@@ -70,9 +70,11 @@ be relaxed and the dummy provider is normal, hold a copy of every letter,
 recipient address and customer record in production.
 
 The Auth0 applications it authenticated as no longer have Management API access
-(revoked 2026-09-14). If a workstation `.env.dev` still holds
+(revoked 2026-09-14). The development one, the API Explorer Application, was
+deleted on 2026-09-26. If a workstation `.env.dev` still holds
 `AUTH0_PROD_CLIENT_ID`, `AUTH0_PROD_CLIENT_SECRET`, `AUTH0_DEV_CLIENT_ID` or
-`AUTH0_DEV_CLIENT_SECRET`, delete those lines.
+`AUTH0_DEV_CLIENT_SECRET`, delete those lines. On 2026-09-26 the owner's
+`.env.dev` still held `AUTH0_DEV_CLIENT_ID`; nothing reads it.
 
 Seed development from fixtures, or work against an empty dev branch created in
 the Neon console. If a production-shaped dataset is ever genuinely needed, build

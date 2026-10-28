@@ -6,10 +6,11 @@ import {
   type PackChoice,
   type PackProductId
 } from '../config/products.js';
+import { isSendConfirmationEnabled } from '../config/sendConfirmation.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { widgetTemplateUri } from '../mcp/widgetUris.js';
-import { createPackCheckoutInputSchema, createPackCheckoutOutputSchema } from '../schemas.js';
 import { createPackCheckout, purchaseStartUrl } from '../services/commerceService.js';
+import { SpendLimitError } from '../services/betaSpendLimits.js';
 import { findUser } from '../services/userService.js';
 
 interface CreatePackCheckoutInput {
@@ -63,6 +64,13 @@ const OUTPUT_TEMPLATE = widgetTemplateUri("PackCheckoutCard");
  * configured, which this path has no way to know.
  */
 export function friendlyPackCheckoutError(error: unknown): Error {
+  // A daily limit's sentence is fixed and ours, so it is passed on as it is,
+  // as the send tools do (draftErrors.ts). Before this the default below told
+  // the customer to try again, which for a pack above the daily limit never
+  // works.
+  if (error instanceof SpendLimitError) {
+    return Object.assign(new Error(error.message), { code: error.code });
+  }
   const source = (error ?? {}) as { code?: string };
   const diagnosticClass = carriedDiagnosticClass(error);
   const terminal = isTerminalDiagnosticClass(diagnosticClass);
@@ -161,11 +169,15 @@ export const createPackCheckoutTool: McpToolDefinition<
   CreatePackCheckoutOutput
 > = {
   name: 'create_pack_checkout',
-  description:
-    'Create a Stripe-hosted checkout to buy a pack of prepaid letters. The result carries a checkoutUrl that the customer must be shown as a link to click; nothing opens automatically and no card is guaranteed to render, so present the link. The price and pack sizes come only from server configuration. Payment adds letters to the account balance; it does not send anything, so the customer still chooses and sends afterward. Use create_mail_checkout instead to pay for one specific draft.',
+  title: 'Buy a letter pack',
+  // Under the send rule Pay & Send is card-only (#475), so the model is sent
+  // to the card rather than to a tool it cannot call.
+  description: () =>
+    'Create a Stripe-hosted checkout to buy a pack of prepaid letters. The result carries a checkoutUrl that the customer must be shown as a link to click; nothing opens automatically and no card is guaranteed to render, so present the link. The price and pack sizes come only from server configuration. Payment adds letters to the account balance, for the customer to send mail with afterward. ' +
+    (isSendConfirmationEnabled()
+      ? 'To pay for one specific draft instead, the person presses Pay & Send on its preview card.'
+      : 'Use create_mail_checkout instead to pay for one specific draft.'),
   readOnly: false,
-  inputSchema: createPackCheckoutInputSchema,
-  outputSchema: createPackCheckoutOutputSchema,
   meta: {
     'openai/outputTemplate': OUTPUT_TEMPLATE,
     'openai/toolInvocation/invoking': 'Preparing letter pack checkout...',

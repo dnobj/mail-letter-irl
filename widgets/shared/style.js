@@ -1,0 +1,1067 @@
+/*
+ * The Style row on the letter card (#563).
+ *
+ * While stationery is offered, a letter preview names the stationery its page
+ * was drawn in (stationery). The card offers the six in a Style row and
+ * changes the draft's through set_stationery, without previewing again. The
+ * tool answers with the page drawn again, in its _meta as a preview's page
+ * is, and the card shows it in place of the preview's. A theme chosen here is
+ * remembered for the account's next preview, as one the model chose is.
+ *
+ * While room to write is offered (#586), the studio's Words tab can change
+ * the letter's words the same way, through set_letter_words. The two share
+ * one draft, one wait and one page: a single change to the draft at a time,
+ * none while the card sends or pays, and the page and price the last change
+ * gave are the card's. The words stand in their boxes, ready to type in: Update
+ * the page and Put back show once they differ from the draft's. The chat can
+ * change them too, and the card hears of it when it asks the server again
+ * (onStale): words typed meanwhile are kept, never written over.
+ *
+ * While signatures are offered (#608), a letter preview also says whether it
+ * prints the person's saved signature (signature). With one saved, the row
+ * has a Signature switch, which signs or unsigns the draft through
+ * set_letter_signature in the same way: one draft, one wait, one page.
+ *
+ * The server inlines this file into the letter card, in place of its
+ * letter-irl:style marker comment (src/mcp/widgetHost.ts). It defines
+ * window.letterIrlStyle: THEMES and createStyle.
+ */
+(function () {
+  "use strict";
+
+  var THEMES = ["classic", "monogram", "botanical", "celebration", "typewriter", "handwritten"];
+
+  function isTheme(value) {
+    return THEMES.indexOf(value) !== -1;
+  }
+
+  /** The theme a saved design (#649) is drawn as: a page the card can show and change, though no theme button names it. */
+  var CUSTOM = "custom";
+
+  /** Whether the card can show a page drawn in this: a theme, or a saved design. */
+  function isDrawn(value) {
+    return isTheme(value) || value === CUSTOM;
+  }
+
+  /** A saved design as the preview's _meta offers it (#649): an id and a name, each text; anything else is none. */
+  function designOf(value) {
+    return value && typeof value === "object" && typeof value.designId === "string" && value.designId && typeof value.name === "string" && value.name
+      ? value
+      : null;
+  }
+
+  function toolData(result) {
+    return (result && result.structuredContent) || result || {};
+  }
+
+  /*
+   * The Style row. The card gives it its elements and helpers, and draws it
+   * from each render through show(). It sets the style itself, and tells the
+   * card when the draft's page changes (onChange) and when it starts or stops
+   * waiting on the server (onBusy), so the card can hold its Send buttons
+   * meanwhile.
+   *
+   * options: host, row, buttons (one per theme, each with data-theme), note,
+   *   readableError(error), resultText(result), idle() (whether the card may
+   *   change the draft now: not while it sends or starts a payment, which it
+   *   also says with hold(), nor while a send refused for a change since asks
+   *   for the draft as it is now), onSet()
+   *   (a style is being set on the draft), onChange({ draftId, stationery }),
+   *   onEdited(draftId, what) (the draft's words, stationery, signature or
+   *   mail service were changed here: the model never sees the card's calls),
+   *   onBusy(), and wordsElement(id), which finds the Words tab's editor
+   *   (#586) once the studio has drawn it; and signatureRow and
+   *   signatureSwitch, the Signature switch (#608), which may be absent
+   */
+  // What a restyle or a status answer says the letter costs now (#586): a
+  // restyle can run it on to another page, or back on to one, and with that
+  // who pays. Null when it says nothing of it, as an older server would not.
+  function termsOf(data, fit) {
+    if (!data || typeof data.canSendNow !== "boolean" || !data.sendEligibility || typeof data.sendEligibility !== "object") {
+      return null;
+    }
+    return {
+      canSendNow: data.canSendNow,
+      sendEligibility: data.sendEligibility,
+      reasonCannotSend: typeof data.reasonCannotSend === "string" ? data.reasonCannotSend : null,
+      pages: data.pages === 2 || data.pages === 3 ? data.pages : 1,
+      pageFit: fit && typeof fit === "object" ? fit : null,
+      // How the letter travels, when the answer speaks of it (#625): the certified service ("" for ordinary mail) and the
+      // words that say how it is delivered, taken with the terms so that the summary, the note, the Delivery line, the price
+      // and the buttons all come from one answer. An answer that carries a delivery class speaks of it; one without (an
+      // older server, or an ordinary letter while certified mail is off) says nothing, and the preview's words stand.
+      travel:
+        typeof data.deliveryClass === "string" && data.deliveryClass
+          ? {
+              mailService: typeof data.mailService === "string" ? data.mailService : "",
+              deliveryClass: data.deliveryClass,
+              deliveryDisclaimer: typeof data.deliveryDisclaimer === "string" ? data.deliveryDisclaimer : ""
+            }
+          : null
+    };
+  }
+
+  function createStyle(options) {
+    var host = options.host;
+    // pending: the theme being set while the server answers. slots: the
+    // initials and headline this card last saw with each theme on this
+    // draft, which come back with the theme when the person returns to it.
+    // held: the card is sending the letter or starting a payment, so the
+    // row waits too. restyled: the card changed this draft itself, its style
+    // or its words, so the server's earlier word on it (adopt) is out of
+    // date. terms: what the
+    // letter costs now and how full its pages are, as the last restyle or
+    // status answer said (#586), or null for the preview's own.
+    var state = {
+      draftId: null,
+      stationery: null,
+      previewHtml: null,
+      terms: null,
+      pending: null,
+      busy: false,
+      held: false,
+      restyled: false,
+      message: "",
+      error: false,
+      slots: {}
+    };
+
+    // The Words tab's editor (#586). updating: its words are being set. set:
+    // the words this card last set on the draft, or the server last gave it,
+    // or null for the preview's; each { bodyText, signOff, version }, the
+    // version a change of them names (#593 review round 1). current: the
+    // words the draft has now. base: the words the boxes were filled from,
+    // which an Update replaces. measured: the last count of how full the
+    // pages are ({ fit, bodyText, signOff }), with the words it counted, so
+    // the room for other words, the chat's among them, is reckoned from it.
+    // editable: the card may change them now. gift: a gift letter, which
+    // stays on one page.
+    var words = {
+      updating: false,
+      set: null,
+      current: null,
+      base: null,
+      measured: null,
+      editable: false,
+      gift: false,
+      message: "",
+      error: false
+    };
+    var element = typeof options.wordsElement === "function" ? options.wordsElement : function () { return null; };
+    var wordsBound = false;
+
+    // The Signature switch (#608). offered: the preview says a signature is
+    // saved, so the switch can turn it on. on: the draft prints it. pending:
+    // the choice being set while the server answers.
+    var signature = { offered: false, on: false, pending: null };
+    var signatureSwitch = options.signatureSwitch || null;
+    var signatureRow = options.signatureRow || null;
+
+    // The Mail choice (#648): offered, the services the preview offers; current, the one the draft travels by; pending,
+    // the one being set while the server answers.
+    var SERVICES = ["standard", "certified", "certified_return_receipt"];
+    // message and error: what the last change of service said, in the Mail row's own note on the Delivery tab, since the
+    // Style note sits on another tab.
+    var service = { offered: [], current: "standard", pending: null, message: "", error: false };
+    var serviceRow = options.serviceRow || null;
+    var serviceButtons = options.serviceButtons || [];
+    var serviceNote = options.serviceNote || null;
+    function isService(value) {
+      return SERVICES.indexOf(value) !== -1;
+    }
+    // The content version (#695) of what the card now shows, for its Send to name, with the version the change was
+    // made to: told only when the answer is drawn, so a change whose page did not come back keeps the last, and its
+    // send is refused and drawn again. The card takes it only when made to the version it shows.
+    function tellVersion(draftId, data) {
+      if (typeof options.onVersion === "function" && data && typeof data.contentVersion === "string" && data.contentVersion) {
+        options.onVersion(draftId, data.contentVersion, data.contentVersionBefore);
+      }
+    }
+    // The draft was changed here ("words", "stationery", "signature" or "mail service"), page or no page: the card tells
+    // the model, which never sees the card's own calls.
+    function edited(draftId, what) {
+      if (typeof options.onEdited === "function") options.onEdited(draftId, what);
+    }
+    // Terms taken from any answer: when they say how the letter travels, the Mail choice follows them.
+    function adoptTerms(said) {
+      state.terms = said;
+      if (said && said.travel) service.current = isService(said.travel.mailService) ? said.travel.mailService : "standard";
+    }
+
+    // What a preview or a status answer says of the signature: whether a
+    // saved one can be switched, and whether it prints. None saved, or
+    // signatures not offered: no switch.
+    function signatureOffered(said) {
+      return Boolean(said) && typeof said.printed === "boolean" && said.source !== "none_saved";
+    }
+
+    // The account's saved designs (#649), as this draft's preview offered them, and their buttons in the Style row.
+    var designs = { list: [], buttons: [] };
+    var designsElement = options.designsElement || null;
+
+    /**
+     * What the row presses for a stationery: its theme, or "design:" and the
+     * design's id (#649). A status names a design without its id: it is
+     * pressed by its name, when the preview offered one of that name.
+     */
+    function keyOf(stationery) {
+      if (!stationery) return null;
+      if (stationery.theme !== CUSTOM) return stationery.theme;
+      var id = typeof stationery.designId === "string" ? stationery.designId : null;
+      if (!id) {
+        // By its name, and only while the design of that name still has the draft's choices: one replaced
+        // since under the same name is another design, which the person may press to redraw the letter in.
+        for (var i = 0; i < designs.list.length; i++) {
+          if (designs.list[i].name === stationery.name && sameChoices(designs.list[i].design, stationery.design)) id = designs.list[i].designId;
+        }
+      }
+      return id ? "design:" + id : "design:";
+    }
+
+    function sameChoices(a, b) {
+      return Boolean(a && b) && a.face === b.face && a.ornament === b.ornament && a.ruled === b.ruled && a.tone === b.tone;
+    }
+
+    function shownTheme() {
+      if (state.busy && state.pending) return state.pending;
+      return keyOf(state.stationery);
+    }
+
+    /** The design buttons for this draft's designs, drawn afresh: each named as the person saved it. */
+    function drawDesigns(list) {
+      designs.list = list;
+      designs.buttons = [];
+      if (!designsElement) return;
+      while (designsElement.firstChild) designsElement.removeChild(designsElement.firstChild);
+      for (var i = 0; i < list.length; i++) {
+        var button = designsElement.ownerDocument.createElement("button");
+        button.type = "button";
+        button.className = "link-button";
+        button.setAttribute("data-design-id", list[i].designId);
+        button.setAttribute("aria-pressed", "false");
+        button.textContent = list[i].name;
+        // Told apart from a theme of the same name by a screen reader.
+        button.setAttribute("aria-label", list[i].name + ", your design");
+        (function (id) {
+          button.addEventListener("click", function () {
+            set("design:" + id);
+          });
+        })(list[i].designId);
+        designsElement.appendChild(button);
+        designs.buttons.push(button);
+      }
+      designsElement.hidden = list.length === 0;
+    }
+
+    function draw() {
+      var shown = shownTheme();
+      // aria-disabled, not disabled: a pressed button keeps keyboard focus
+      // while the server answers, and set() ignores a press meanwhile.
+      var waiting = state.busy || state.held ? "true" : "false";
+      for (var i = 0; i < options.buttons.length; i++) {
+        var button = options.buttons[i];
+        button.setAttribute("aria-pressed", button.getAttribute("data-theme") === shown ? "true" : "false");
+        button.setAttribute("aria-disabled", waiting);
+      }
+      for (var d = 0; d < designs.buttons.length; d++) {
+        var mine = designs.buttons[d];
+        mine.setAttribute("aria-pressed", "design:" + mine.getAttribute("data-design-id") === shown ? "true" : "false");
+        mine.setAttribute("aria-disabled", waiting);
+      }
+      options.note.textContent = state.message;
+      options.note.style.display = state.message ? "block" : "none";
+      options.note.classList.toggle("alert", state.error);
+      if (signatureSwitch) {
+        var on = state.busy && signature.pending !== null ? signature.pending : signature.on;
+        signatureSwitch.setAttribute("aria-checked", on ? "true" : "false");
+        signatureSwitch.setAttribute("aria-disabled", waiting);
+        signatureSwitch.textContent = on ? "On" : "Off";
+      }
+      var shownService = state.busy && service.pending !== null ? service.pending : service.current;
+      for (var j = 0; j < serviceButtons.length; j++) {
+        var choice = serviceButtons[j];
+        var value = choice.getAttribute("data-service");
+        choice.hidden = service.offered.indexOf(value) === -1;
+        choice.setAttribute("aria-pressed", value === shownService ? "true" : "false");
+        choice.setAttribute("aria-disabled", waiting);
+      }
+      if (serviceNote) {
+        // Hidden with the row by hide(), which the card calls whenever the row goes.
+        serviceNote.textContent = service.message;
+        serviceNote.style.display = service.message ? "block" : "none";
+        serviceNote.classList.toggle("alert", service.error);
+      }
+    }
+
+    function keepSlots(stationery) {
+      var slots = {};
+      if (typeof stationery.monogram === "string") slots.monogram = stationery.monogram;
+      if (typeof stationery.headline === "string") slots.headline = stationery.headline;
+      state.slots[keyOf(stationery)] = slots;
+    }
+
+    /** Focus on the button of the style the letter has, a theme's or a design's, or the first theme's. */
+    function focusShown() {
+      var key = keyOf(state.stationery);
+      var target = null;
+      for (var i = 0; i < options.buttons.length; i++) {
+        if (options.buttons[i].getAttribute("data-theme") === key) target = options.buttons[i];
+      }
+      for (var j = 0; j < designs.buttons.length; j++) {
+        if ("design:" + designs.buttons[j].getAttribute("data-design-id") === key) target = designs.buttons[j];
+      }
+      target = target || options.buttons[0];
+      if (target && typeof target.focus === "function") target.focus();
+    }
+
+    /** The design a key names, among this draft's (#649), or null. */
+    function designFor(key) {
+      if (typeof key !== "string" || key.indexOf("design:") !== 0) return null;
+      var id = key.slice("design:".length);
+      for (var i = 0; i < designs.list.length; i++) {
+        if (designs.list[i].designId === id) return designs.list[i];
+      }
+      return null;
+    }
+
+    // theme: a theme's name, or "design:" and one of this draft's designs' ids (#649).
+    function set(theme) {
+      var design = designFor(theme);
+      if (state.busy || state.held || !state.draftId || typeof host.callTool !== "function" || !(isTheme(theme) || design)) return;
+      if (state.stationery && keyOf(state.stationery) === theme) return;
+      if (typeof options.idle === "function" && !options.idle()) return;
+      var draftId = state.draftId;
+      state.busy = true;
+      state.pending = theme;
+      state.message = "";
+      state.error = false;
+      draw();
+      // Setting a style is acting on the draft (the card keeps it).
+      if (typeof options.onSet === "function") options.onSet();
+      options.onBusy();
+      // Only Monogram prints initials and only Celebration a headline: the
+      // ones this card last saw with the theme come back with it. A design
+      // (#649) takes back what it printed when this card last saw it.
+      var args = design ? { draftId: draftId, stationeryDesignId: design.designId } : { draftId: draftId, stationery: theme };
+      var slots = state.slots[theme] || {};
+      var monogrammed = design && design.design && design.design.ornament === "monogram";
+      if ((theme === "monogram" || monogrammed) && slots.monogram) args.monogram = slots.monogram;
+      if ((theme === "celebration" || design) && slots.headline) args.headline = slots.headline;
+      Promise.resolve()
+        .then(function () {
+          return host.callTool("set_stationery", args);
+        })
+        .then(function (result) {
+          // A refusal comes back as an error result, not a rejection.
+          if (result && result.isError) {
+            throw new Error(options.resultText(result) || "The style was not changed.");
+          }
+          if (state.draftId !== draftId) return;
+          var data = toolData(result);
+          // An answer about another draft is no answer to this one.
+          if (typeof data.draftId === "string" && data.draftId !== draftId) {
+            throw new Error("The style may have changed. Make the preview again to see it.");
+          }
+          var stationery = data.stationery;
+          // A theme asked is answered with a theme; a design (#649) with that design.
+          var answered = stationery && (design ? stationery.theme === CUSTOM && stationery.designId === design.designId : isTheme(stationery.theme));
+          if (!answered) {
+            throw new Error("The style may have changed. Make the preview again to see it.");
+          }
+          state.stationery = stationery;
+          state.restyled = true;
+          edited(draftId, "stationery");
+          keepSlots(stationery);
+          // What it costs now, and how full its pages are (#586). An answer
+          // that says nothing of it, as an older server's would not, keeps
+          // the last word on it (#592 review round 1).
+          var said = termsOf(data, result && result._meta && result._meta.pageFit);
+          if (said) adoptTerms(said);
+          var page = result && result._meta && result._meta.previewHtml;
+          // The draft has the new style either way; without its page the card
+          // keeps showing the last one and says so.
+          if (typeof page === "string" && page) {
+            state.previewHtml = page;
+            tellVersion(draftId, data);
+          } else {
+            state.message = "The style is changed, but its page did not come back here. Make the preview again to see it.";
+          }
+          options.onChange({ draftId: draftId, stationery: stationery });
+        })
+        .catch(function (error) {
+          if (state.draftId !== draftId) return;
+          state.error = true;
+          var said = options.readableError(error);
+          // A design deleted since the preview (#649): the refusal is written for the model, so the card says it in
+          // the person's words and puts the design's button away. Found anywhere in the text, as a host may wrap it.
+          if (design && said.indexOf("That stationery design was not found") !== -1) {
+            state.message = "That design was deleted. Make the preview again to see your designs.";
+            var focused = typeof document !== "undefined" && designs.buttons.indexOf(document.activeElement) !== -1;
+            drawDesigns(designs.list.filter(function (kept) {
+              return kept.designId !== design.designId;
+            }));
+            // Focus leaves with the button: to the style the letter keeps, as the signature switch's does.
+            if (focused) focusShown();
+          } else if (design && said.indexOf("Name the stationery") !== -1) {
+            // Designs turned off since the preview: the tool no longer takes one, and says so for the model.
+            state.message = "Saved designs aren't available now. Make the preview again to see the styles.";
+          } else {
+            state.message = said;
+          }
+        })
+        .then(function () {
+          if (state.draftId !== draftId) return;
+          state.busy = false;
+          state.pending = null;
+          draw();
+          options.onBusy();
+        });
+    }
+
+    // The Signature switch pressed (#608): the draft signed or unsigned, its
+    // page drawn again, as a restyle is. The account remembers the choice.
+    function setSignature() {
+      if (state.busy || state.held || !state.draftId || typeof host.callTool !== "function" || !signature.offered) return;
+      // A press a host still delivers to a hidden switch (after a send) does nothing.
+      if (signatureRow && signatureRow.style.display === "none") return;
+      if (typeof options.idle === "function" && !options.idle()) return;
+      var draftId = state.draftId;
+      var wanted = !signature.on;
+      state.busy = true;
+      signature.pending = wanted;
+      state.message = "";
+      state.error = false;
+      draw();
+      // Signing is acting on the draft (the card keeps it).
+      if (typeof options.onSet === "function") options.onSet();
+      options.onBusy();
+      Promise.resolve()
+        .then(function () {
+          return host.callTool("set_letter_signature", { draftId: draftId, signature: wanted });
+        })
+        .then(function (result) {
+          // A refusal comes back as an error result, not a rejection.
+          if (result && result.isError) {
+            throw new Error(options.resultText(result) || "The signature was not changed.");
+          }
+          if (state.draftId !== draftId) return;
+          var data = toolData(result);
+          // An answer about another draft is no answer to this one.
+          if (typeof data.draftId === "string" && data.draftId !== draftId) {
+            throw new Error("The signature may have changed. Make the preview again to see it.");
+          }
+          if (!data.signature || typeof data.signature.printed !== "boolean") {
+            throw new Error("The signature may have changed. Make the preview again to see it.");
+          }
+          signature.on = data.signature.printed;
+          state.restyled = true;
+          edited(draftId, "signature");
+          // What it costs now: the band can run the letter on to a page.
+          var said = termsOf(data, result && result._meta && result._meta.pageFit);
+          if (said) adoptTerms(said);
+          var page = result && result._meta && result._meta.previewHtml;
+          if (typeof page === "string" && page) {
+            state.previewHtml = page;
+            tellVersion(draftId, data);
+          } else {
+            state.message = "The signature is changed, but its page did not come back here. Make the preview again to see it.";
+          }
+          options.onChange({ draftId: draftId, stationery: state.stationery });
+        })
+        .catch(function (error) {
+          if (state.draftId !== draftId) return;
+          state.error = true;
+          var text = options.readableError(error);
+          // The signature was removed since the preview (SIGNATURE_NOT_SAVED): the
+          // refusal is written for the model, so the card says it in the
+          // person's words, and puts the switch away (#615 review round 1).
+          // Found anywhere in the text, as a host may wrap it (#434).
+          if (text.indexOf("No signature is saved") !== -1) {
+            state.message = "There's no saved signature to add now. Save one in the chat, or on your Letter IRL settings page.";
+            signature.offered = false;
+            signature.on = false;
+            // Focus leaves with the switch: to the first style (#615 review
+            // round 2).
+            var focused = typeof document !== "undefined" && document.activeElement === signatureSwitch;
+            if (signatureRow) signatureRow.style.display = "none";
+            if (focused && options.buttons[0] && typeof options.buttons[0].focus === "function") options.buttons[0].focus();
+          } else {
+            state.message = text;
+          }
+        })
+        .then(function () {
+          if (state.draftId !== draftId) return;
+          state.busy = false;
+          signature.pending = null;
+          draw();
+          options.onBusy();
+        });
+    }
+
+    // A refusal of set_mail_service is written for the model (it names tools and arguments): the Mail note says it in the
+    // person's words, found anywhere in the text, as a host may wrap it (#434). Anything else is said as it came.
+    var SERVICE_REFUSALS = [
+      ["This letter has already been sent", "This letter has already been sent, so how it travels can't change now."],
+      ["This letter was sent just after", "This letter was sent just as it was changed. Its order says how it travels."],
+      ["This preview has expired", "This preview has expired. Ask in the chat for a new one."],
+      ["tied to a Pay & Send payment", "A Pay & Send payment is open for this letter, so how it travels can't change now."],
+      ["gift letter does not pay for certified mail", "A gift letter can't go by certified mail. Ask in the chat for a new preview to send it certified."],
+      ["postcard always goes as ordinary mail", "A postcard always goes as ordinary mail."],
+      ["That preview wasn't found", "That preview wasn't found. Ask in the chat for a new one."]
+    ];
+    var NOT_OFFERED = "Certified mail is not available right now. The preview stays as it is.";
+    function serviceRefusal(text) {
+      for (var i = 0; i < SERVICE_REFUSALS.length; i++) {
+        if (text.indexOf(SERVICE_REFUSALS[i][0]) !== -1) return SERVICE_REFUSALS[i][1];
+      }
+      // Certified mail turned off since the preview: the tool is no longer listed, and the connection says so in its own words.
+      if (text.indexOf("set_mail_service") !== -1 && text.indexOf("not found") !== -1) return NOT_OFFERED;
+      return text;
+    }
+
+    // The Mail choice on the Delivery tab (#648): the services the preview's _meta offers (certified mail, while it is
+    // offered and the letter is not a gift letter), the one the draft travels by, and the one being set. A change of
+    // service calls set_mail_service, whose answer carries the terms and how the letter travels (#638), so the price,
+    // the buttons, the summary and the Delivery line follow it as they follow a restyle. The pressed service is asked
+    // for again too: a card that did not hear the chat change it (ChatGPT's) hears the draft as it is from the answer.
+    function setService(wanted) {
+      if (state.busy || !state.draftId || typeof host.callTool !== "function") return;
+      if (service.offered.indexOf(wanted) === -1) return;
+      if (serviceRow && serviceRow.style.display === "none") return;
+      // Not while the card sends the letter or starts paying for it.
+      if (typeof options.idle === "function" && !options.idle()) return;
+      var draftId = state.draftId;
+      state.busy = true;
+      service.pending = wanted;
+      service.message = "";
+      service.error = false;
+      draw();
+      if (typeof options.onSet === "function") options.onSet();
+      options.onBusy();
+      Promise.resolve()
+        .then(function () {
+          return host.callTool("set_mail_service", { draftId: draftId, mailService: wanted });
+        })
+        .then(function (result) {
+          if (result && result.isError) {
+            throw new Error(options.resultText(result) || "How the letter travels was not changed.");
+          }
+          if (state.draftId !== draftId) return;
+          var data = toolData(result);
+          if (typeof data.draftId === "string" && data.draftId !== draftId) {
+            throw new Error("How the letter travels may have changed. Make the preview again to see it.");
+          }
+          // The answer gives the pages (above one) with the price; how full they are is card-only and a change of
+          // service leaves the page as it is (#648 review round 1), so that stays the one the card knew, from the last
+          // terms or the preview.
+          var known = state.terms;
+          var previewFit = typeof options.previewFit === "function" ? options.previewFit() : null;
+          var said = termsOf(data, known ? known.pageFit : previewFit);
+          if (!said) throw new Error("How the letter travels may have changed. Make the preview again to see it.");
+          // A fit for another number of pages than the answer gives is for words the chat has changed since: say none.
+          if (said.pageFit && said.pageFit.pages !== said.pages) said.pageFit = null;
+          // The terms say how the letter travels now, and with them the service the draft holds, whichever was pressed.
+          adoptTerms(said);
+          state.restyled = true;
+          edited(draftId, "mail service");
+          tellVersion(draftId, data);
+        })
+        .catch(function (error) {
+          if (state.draftId !== draftId) return;
+          service.error = true;
+          service.message = serviceRefusal(options.readableError(error));
+        })
+        .then(function () {
+          if (state.draftId !== draftId) return;
+          state.busy = false;
+          service.pending = null;
+          draw();
+          options.onBusy();
+        });
+    }
+
+    // The page the room is counted on, by how many the letter takes.
+    var ROOM_ON = ["", "this page", "the back of the page", "the third page"];
+
+    // About how much of the page some words take, in characters: every line
+    // but the last ends where it ends, and takes the whole width of the page
+    // all the same, so twenty short lines take twenty lines, not their few
+    // characters (as the room was counted before, which put prose written over
+    // short lines hundreds of characters past a page it fitted). Without a
+    // width to count by, the characters themselves.
+    function pageCharacters(text, perLine) {
+      if (!(perLine > 0)) return text.length;
+      var lines = text.split("\n");
+      var taken = 0;
+      for (var i = 0; i < lines.length - 1; i++) {
+        taken += Math.max(1, Math.ceil(lines[i].length / perLine)) * perLine;
+      }
+      return taken + lines[lines.length - 1].length;
+    }
+
+    function wordsCharacters(bodyText, signOff, perLine) {
+      return pageCharacters(bodyText, perLine) + pageCharacters(signOff, perLine);
+    }
+
+    // How much room the words in the boxes leave (#586): the room the last
+    // count gave, less what they take beyond the words it counted. "About": a
+    // line ends at a word, and the count's lines are of an average width.
+    function roomText() {
+      var measured = words.measured;
+      var body = element("studio-words-body");
+      var signOff = element("studio-words-signoff");
+      if (!measured || !body || !signOff) return "";
+      var fit = measured.fit;
+      var room = Number(fit.roomCharacters);
+      if (!isFinite(room)) return "";
+      // A count of another number of pages than the letter has now (the chat, or a change of service, ran it on or
+      // back since) is no count of these: the room is not said.
+      if (state.terms && state.terms.pages !== (fit.pages === 2 || fit.pages === 3 ? fit.pages : 1)) return "";
+      // Nor is one counted in another style, or with the signature as it was not (the chat changed it since).
+      if (measured.style !== keyOf(state.stationery) || measured.signed !== signature.on) return "";
+      var perLine = Number(fit.charactersPerLine);
+      var pages = fit.pages === 2 || fit.pages === 3 ? fit.pages : 1;
+      var typed = wordsCharacters(body.value, signOff.value, perLine);
+      var counted = wordsCharacters(measured.bodyText, measured.signOff, perLine);
+      var left = Math.round(room - (typed - counted));
+      var count = Math.abs(left).toLocaleString("en-US");
+      if (left >= 0) return "About " + count + " characters left on " + ROOM_ON[pages] + ".";
+      if (words.gift) return "About " + count + " characters past this page, and a gift letter is one page.";
+      // Without room to write the letter stays on one page (#647).
+      if (fit.maxPages === 1) return "About " + count + " characters past this page, and this letter must fit on one page.";
+      if (pages === 3) return "About " + count + " characters past the third page, more than we print.";
+      return "About " + count + " characters past " + ROOM_ON[pages] + ": Update the page to see how it runs on.";
+    }
+
+    // Said when the chat changed the words while others were being typed here.
+    var KEPT =
+      "The words were changed in the chat. What you typed is kept here, and the page shows the chat's: " +
+      "Update the page to use yours instead, or Put back to take the chat's.";
+    // Said when an Update was refused for words changed elsewhere, until the card has the new ones.
+    var STALE = "The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.";
+    // Said when the words were set but their page did not come back, until a catch-up brings it.
+    var NO_PAGE = "The words are changed, but the page did not come back here. Make the preview again to see it.";
+
+    // The editor's elements live in the studio, which draws them after the
+    // card starts: found, and listened to, once they are there.
+    function bindWords() {
+      if (wordsBound) return true;
+      var update = element("studio-words-update");
+      var putBackButton = element("studio-words-cancel");
+      var body = element("studio-words-body");
+      var signOff = element("studio-words-signoff");
+      if (!update || !putBackButton || !body || !signOff) return false;
+      update.addEventListener("click", setWords);
+      putBackButton.addEventListener("click", putBack);
+      body.addEventListener("input", typedWords);
+      signOff.addEventListener("input", typedWords);
+      wordsBound = true;
+      return true;
+    }
+
+    // The boxes hold other words than the ones they were filled from.
+    function typed() {
+      var body = element("studio-words-body");
+      var signOff = element("studio-words-signoff");
+      return Boolean(words.base && body && signOff) && (body.value !== words.base.bodyText || signOff.value !== words.base.signOff);
+    }
+
+    function sameWords(a, b) {
+      return a.bodyText === b.bodyText && a.signOff === b.signOff && a.version === b.version;
+    }
+
+    // The boxes follow the draft's words while nothing is typed in them. Words
+    // typed when the draft's change under them (the chat changed them) are
+    // kept, and the card says so: an Update then replaces the chat's, which the
+    // page shows. Never while words are being set: their answer fills the boxes.
+    function fillWords() {
+      if (words.updating || !words.current || !bindWords()) return;
+      var current = words.current;
+      var body = element("studio-words-body");
+      var signOff = element("studio-words-signoff");
+      var base = words.base;
+      if (base && sameWords(base, current)) return;
+      // Box by box: one not typed in (it holds the words it was filled from) takes the draft's words now; one typed in
+      // keeps what was typed, and the card says so, unless it is what the draft has now.
+      // Other words than the boxes were filled from, not just their version.
+      var other = Boolean(base) && (base.bodyText !== current.bodyText || base.signOff !== current.signOff);
+      var bodyKept = Boolean(base) && body.value !== base.bodyText && body.value !== current.bodyText;
+      var signOffKept = Boolean(base) && signOff.value !== base.signOff && signOff.value !== current.signOff;
+      if (!bodyKept) body.value = current.bodyText;
+      if (!signOffKept) signOff.value = current.signOff;
+      words.base = current;
+      if (other && (bodyKept || signOffKept)) {
+        words.message = KEPT;
+        words.error = false;
+      } else if ((other && !words.error) || words.message === STALE) {
+        // The boxes took other words: what the last change said ("The letter's words are changed...") is about
+        // words they no longer hold. A copy said to be out of date is the draft's now, words or version, so an
+        // Update would go through (#795 review round 2). Any other refusal stays until the person acts on it.
+        words.message = "";
+        words.error = false;
+      }
+    }
+
+    // Whether the boxes held other words when the card last drew them: the
+    // card holds its Send buttons while they do, and is told when that turns.
+    var wordsTyped = false;
+
+    function typedWords() {
+      var was = wordsTyped;
+      var now = typed();
+      // What the last change said is about words the person is now changing.
+      if (now && !was && !words.error) words.message = "";
+      drawWords();
+      if (now !== was) options.onBusy();
+    }
+
+    function drawWords() {
+      if (!bindWords()) return;
+      var editable = words.editable;
+      var body = element("studio-words-body");
+      var signOff = element("studio-words-signoff");
+      var view = element("studio-words");
+      var chat = element("studio-words-chat");
+      var actions = element("studio-words-actions");
+      var count = element("studio-words-count");
+      var note = element("studio-words-note");
+      var update = element("studio-words-update");
+      wordsTyped = editable && typed();
+      element("studio-words-edit").hidden = !editable;
+      if (view) view.hidden = editable;
+      if (chat) chat.hidden = editable;
+      // Update the page and Put back, once there is something to update or put back.
+      if (actions) actions.hidden = !(wordsTyped || words.updating);
+      // The words being set stay as they are sent until the answer comes.
+      body.readOnly = words.updating;
+      signOff.readOnly = words.updating;
+      // aria-disabled, as the Style row's: a press meanwhile is ignored.
+      update.setAttribute("aria-disabled", state.busy || state.held ? "true" : "false");
+      element("studio-words-cancel").setAttribute("aria-disabled", words.updating ? "true" : "false");
+      update.textContent = words.updating ? "Updating the page\u2026" : "Update the page";
+      var room = editable ? roomText() : "";
+      if (count) {
+        count.textContent = room;
+        count.hidden = !room;
+      }
+      if (note) {
+        note.textContent = words.message;
+        note.hidden = !words.message;
+        note.classList.toggle("alert", words.error);
+      }
+    }
+
+    // Focus goes back to the letter's box when the buttons it was on go, and only then: a refused Update keeps them.
+    function focusBody() {
+      if (typed() || words.updating) return;
+      var body = element("studio-words-body");
+      var active = typeof document !== "undefined" ? document.activeElement : null;
+      var actions = element("studio-words-actions");
+      if (body && actions && active && actions.contains(active) && typeof body.focus === "function") body.focus();
+    }
+
+    // Put back: the boxes take the draft's words again, and what was typed goes.
+    function putBack() {
+      if (words.updating || !words.current || !bindWords()) return;
+      element("studio-words-body").value = words.current.bodyText;
+      element("studio-words-signoff").value = words.current.signOff;
+      words.base = words.current;
+      words.message = "";
+      words.error = false;
+      focusBody();
+      drawWords();
+      options.onBusy();
+    }
+
+    // The words as written in the boxes, set on the draft (#586). The page
+    // comes back drawn again with them, and what the letter costs now.
+    function setWords() {
+      if (!words.editable || words.updating || !typed() || state.busy || state.held || !state.draftId || typeof host.callTool !== "function") return;
+      if (typeof options.idle === "function" && !options.idle()) return;
+      var draftId = state.draftId;
+      var bodyText = element("studio-words-body").value;
+      var signOff = element("studio-words-signoff").value;
+      // The words it replaces: their version, so a change made elsewhere since
+      // is not overwritten unseen (#593 review round 1).
+      var startedFrom = words.base;
+      var args = { draftId: draftId, bodyText: bodyText, signOff: signOff };
+      if (startedFrom && typeof startedFrom.version === "string") args.wordsVersion = startedFrom.version;
+      state.busy = true;
+      words.updating = true;
+      words.message = "";
+      words.error = false;
+      draw();
+      drawWords();
+      // Changing the words is acting on the draft (the card keeps it).
+      if (typeof options.onSet === "function") options.onSet();
+      options.onBusy();
+      // Refused for words changed elsewhere: the card is asked for them once this change is over.
+      var stale = false;
+      Promise.resolve()
+        .then(function () {
+          return host.callTool("set_letter_words", args);
+        })
+        .then(function (result) {
+          // A refusal comes back as an error result, not a rejection.
+          if (result && result.isError) {
+            throw new Error(options.resultText(result) || "The words were not changed.");
+          }
+          if (state.draftId !== draftId) return;
+          var data = toolData(result);
+          // An answer about another draft is no answer to this one.
+          if (typeof data.draftId === "string" && data.draftId !== draftId) {
+            throw new Error("The words may have changed. Make the preview again to see them.");
+          }
+          state.restyled = true;
+          edited(draftId, "words");
+          words.set = {
+            bodyText: bodyText,
+            signOff: signOff,
+            version: typeof data.wordsVersion === "string" ? data.wordsVersion : undefined
+          };
+          // The boxes hold these words, as sent.
+          words.base = words.set;
+          // What it costs now, and how full its pages are.
+          var said = termsOf(data, result && result._meta && result._meta.pageFit);
+          if (said) adoptTerms(said);
+          var page = result && result._meta && result._meta.previewHtml;
+          // The draft has the words either way; without its page the card
+          // keeps showing the last one and says so.
+          if (typeof page === "string" && page) {
+            state.previewHtml = page;
+            tellVersion(draftId, data);
+            words.message = typeof data.message === "string" && data.message ? data.message : "The words are changed. Nothing has been sent.";
+          } else {
+            words.message = NO_PAGE;
+          }
+          options.onChange({ draftId: draftId, stationery: state.stationery });
+        })
+        .catch(function (error) {
+          if (state.draftId !== draftId) return;
+          words.error = true;
+          var said = options.readableError(error);
+          // A refusal of words this card had not seen (WORDS_CHANGED) is
+          // written for the model, with the whole letter: the card says it in
+          // its own words, and keeps what was typed (#593 review rounds 2 and
+          // 3). Found anywhere in the text, as a host may wrap it (#434). The
+          // server's version check is what keeps a change made elsewhere
+          // from being overwritten; the card asks for the words as they are
+          // now (onStale), and says KEPT once it has them.
+          stale = said.indexOf("Nothing was changed:") !== -1;
+          words.message = stale ? STALE : said;
+        })
+        .then(function () {
+          if (state.draftId !== draftId) return;
+          state.busy = false;
+          words.updating = false;
+          focusBody();
+          draw();
+          drawWords();
+          options.onBusy();
+          if (stale && typeof options.onStale === "function") options.onStale(draftId);
+        });
+    }
+
+    for (var i = 0; i < options.buttons.length; i++) {
+      (function (button) {
+        button.addEventListener("click", function () {
+          set(button.getAttribute("data-theme"));
+        });
+      })(options.buttons[i]);
+    }
+
+    if (signatureSwitch) signatureSwitch.addEventListener("click", setSignature);
+    for (var k = 0; k < serviceButtons.length; k++) {
+      (function (choice) {
+        choice.addEventListener("click", function () {
+          setService(choice.getAttribute("data-service"));
+        });
+      })(serviceButtons[k]);
+    }
+
+    function hide() {
+      options.row.style.display = "none";
+      options.note.style.display = "none";
+      if (signatureRow) signatureRow.style.display = "none";
+      if (serviceRow) serviceRow.style.display = "none";
+      if (serviceNote) serviceNote.style.display = "none";
+    }
+
+    return {
+      // Drawn for the card's draft while its preview names its stationery and
+      // the card can change it (enabled); hidden otherwise. A new draft starts
+      // from its own preview's stationery and page.
+      show: function (draftId, output, enabled) {
+        var offered = output && output.stationery;
+        if (
+          !enabled ||
+          typeof draftId !== "string" ||
+          !draftId ||
+          typeof host.callTool !== "function" ||
+          !offered ||
+          !isDrawn(offered.theme)
+        ) {
+          hide();
+          return;
+        }
+        if (state.draftId !== draftId) {
+          state.draftId = draftId;
+          // The account's designs as this preview offered them (#649), before anything is keyed by them.
+          var offeredDesigns = typeof options.designs === "function" ? options.designs() : null;
+          drawDesigns(Array.isArray(offeredDesigns) ? offeredDesigns.map(designOf).filter(Boolean) : []);
+          state.stationery = offered;
+          state.previewHtml = null;
+          state.terms = null;
+          state.busy = false;
+          state.pending = null;
+          state.restyled = false;
+          state.message = "";
+          state.error = false;
+          state.slots = {};
+          words.updating = false;
+          words.set = null;
+          // The boxes are filled afresh from this draft's words, and its room counted from its own count.
+          words.base = null;
+          words.measured = null;
+          words.message = "";
+          words.error = false;
+          keepSlots(offered);
+          signature.offered = signatureOffered(output.signature);
+          signature.on = signature.offered && output.signature.printed === true;
+          signature.pending = null;
+          var offer = typeof options.mailServices === "function" ? options.mailServices() : null;
+          service.offered = Array.isArray(offer) ? offer.filter(isService) : [];
+          service.current = isService(output.mailService) ? output.mailService : "standard";
+          service.pending = null;
+          service.message = "";
+          service.error = false;
+        }
+        options.row.style.display = "";
+        // The Mail choice, while the preview offers more than one service (#648).
+        if (serviceRow) serviceRow.style.display = service.offered.length > 1 && serviceButtons.length ? "" : "none";
+        // The switch beside the styles, while a signature is saved (#608).
+        if (signatureRow) signatureRow.style.display = signature.offered && signatureSwitch ? "" : "none";
+        draw();
+      },
+      hide: hide,
+      // While the card sends the letter or starts a payment (true), and after
+      // (false): the row waits, and says so.
+      hold: function (held) {
+        state.held = Boolean(held);
+        // Drawn only while shown: a hidden row keeps its note hidden.
+        if (state.draftId !== null && options.row.style.display !== "none") draw();
+        drawWords();
+      },
+      // The Words tab's editor (#586): the draft's words now, as the card set
+      // them, the server last gave them or the preview did ({ bodyText,
+      // signOff }); how full the page is for them (fit, or null when the card
+      // does not know: a status counts nothing); whether the card may change
+      // them now (editable: room to write is offered and the draft can still
+      // change); and whether it is a gift letter. Only while the row is the
+      // draft's.
+      showWords: function (draftId, current, fit, editable, gift) {
+        // { bodyText, signOff, version }: the version is the preview's, or the last change's.
+        words.current = current && typeof current.bodyText === "string" && typeof current.signOff === "string" ? current : null;
+        // A count the card has not seen is a count of the words it has now: the preview's, or a change's answer's. With
+        // none, the last count stands, and the room for these words is reckoned from the words it counted.
+        if (fit && typeof fit === "object" && words.current && state.draftId === draftId && (!words.measured || words.measured.fit !== fit)) {
+          words.measured = {
+            fit: fit,
+            bodyText: words.current.bodyText,
+            signOff: words.current.signOff,
+            // What it was counted in: another style, or the signature's band, holds other lines.
+            style: keyOf(state.stationery),
+            signed: signature.on
+          };
+        }
+        words.gift = gift === true;
+        words.editable =
+          Boolean(editable) &&
+          words.current !== null &&
+          state.draftId === draftId &&
+          options.row.style.display !== "none" &&
+          typeof host.callTool === "function";
+        var was = wordsTyped;
+        if (words.editable) fillWords();
+        drawWords();
+        // The draft's words reaching what was typed (the chat made the same change) ends the wait for them: the card
+        // is told, once its own drawing is over, as it holds Send by them.
+        if (wordsTyped !== was) {
+          Promise.resolve().then(function () {
+            options.onBusy();
+          });
+        }
+      },
+      // The words this card set on the draft (#586), or null for the preview's.
+      words: function (draftId) {
+        return state.draftId === draftId ? words.set : null;
+      },
+      // The draft's style and page as the server says they are now
+      // (get_draft_status), for a card shown its preview's first answer
+      // again: the row presses it, and the page replaces the preview's. False
+      // when the row is on another draft, setting a style, or has set one:
+      // the card asks before anyone can press, so an answer that lands after
+      // a restyle is older than it (#572 review round 2).
+      // With it, what the letter costs now (#586), when the answer says, and
+      // how full its pages are as the card knows it (fit, or null when it
+      // does not: the status lays nothing out).
+      // force (#695): asked again after a send refused for a change since, the draft as it is now is taken whatever
+      // this card has set, and the card no longer counts it restyled.
+      adopt: function (draftId, stationery, previewHtml, answer, fit, force) {
+        if (state.draftId !== draftId || (!force && (state.busy || state.restyled)) || !stationery || !isDrawn(stationery.theme)) return false;
+        if (force) state.restyled = false;
+        state.stationery = stationery;
+        keepSlots(stationery);
+        if (typeof previewHtml === "string" && previewHtml) {
+          state.previewHtml = previewHtml;
+          // The page a change of words did not bring back is here now.
+          if (words.message === NO_PAGE) words.message = "";
+        }
+        var terms = termsOf(answer, fit);
+        if (terms) adoptTerms(terms);
+        // And its words now (#593 review round 1): the chat may have changed
+        // them since the preview, and the Words tab shows and edits these.
+        if (answer && typeof answer.bodyText === "string" && typeof answer.signOff === "string" && typeof answer.wordsVersion === "string") {
+          words.set = { bodyText: answer.bodyText, signOff: answer.signOff, version: answer.wordsVersion };
+        }
+        // And whether it is signed now (#608): the chat may have signed or
+        // unsigned it since. Only where the switch is offered at all.
+        if (answer && typeof answer.signature === "boolean" && signature.offered) signature.on = answer.signature;
+        draw();
+        return true;
+      },
+      // What this draft costs now and how full its pages are (#586), as the
+      // last restyle or status answer said; null for the preview's own.
+      terms: function (draftId) {
+        return state.draftId === draftId ? state.terms : null;
+      },
+      // The page the card set for this draft, or null for its preview's own.
+      previewHtml: function (draftId) {
+        return state.draftId === draftId ? state.previewHtml : null;
+      },
+      // The stationery as this card last set or saw it, or null.
+      stationery: function () {
+        return state.stationery;
+      },
+      busy: function () {
+        return state.busy;
+      },
+      // Other words are in the editor's boxes than the draft's, or are being
+      // set (#586): until they are set or put back, sending would mail the
+      // words the draft has, not these.
+      editing: function () {
+        return words.editable && (typed() || words.updating);
+      },
+      // The editor is shown, its boxes open to type in.
+      wordsEditable: function () {
+        return words.editable;
+      }
+    };
+  }
+
+  window.letterIrlStyle = {
+    THEMES: THEMES,
+    CUSTOM: CUSTOM,
+    createStyle: createStyle
+  };
+})();

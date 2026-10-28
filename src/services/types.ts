@@ -2,6 +2,9 @@
  * Shared TypeScript types for Letter IRL services
  */
 
+import type { Stationery } from '../render/stationery.js';
+import type { PostcardFront } from '../render/postcard.js';
+
 // ============================================================================
 // User Types
 // ============================================================================
@@ -22,6 +25,8 @@ export interface User {
   tier_calculated_at: Date;
   created_at: Date;
   updated_at: Date;
+  /** Set when the account was erased (#289); sign-in refuses such an account. */
+  erased_at?: Date | null;
 }
 
 export interface CreateUserParams {
@@ -149,12 +154,38 @@ export interface Letter {
   credits_cost: number;
   status: LetterStatus;
   mail_type: MailType;
-  funding_type: 'prepaid_balance' | 'jit_order';
+  funding_type: 'prepaid_balance' | 'jit_order' | 'gift_letter';
   funding_order_id?: string;
   preview_html?: string;
   tracking_id?: string;
+  /** Arrive-by (migration 040, #535): 'YYYY-MM-DD' in New York, both or neither. */
+  arrive_by?: string | null;
+  mail_on?: string | null;
+  /**
+   * How the letter travelled (migration 053, #625): standard first-class mail,
+   * or USPS Certified Mail with or without an electronic return receipt.
+   * Copied from the draft by the send; the print reads this column.
+   */
+  mail_service?: MailService;
+  /**
+   * The USPS number of a certified letter (migration 053, #625): set by the
+   * status sync once the provider has it, NULL before and for standard mail.
+   * Not `tracking_id`, which is the provider's own id for the letter.
+   */
+  carrier_tracking_number?: string | null;
   created_at: Date;
   sent_at?: Date;
+  /** When content retention emptied the letter (migration 026): set, there is nothing left to print. */
+  redacted_at?: Date | null;
+  /**
+   * Held mail's print (migration 065, #697): the SHA-256 of the PDF stored at
+   * held-pdf/<letter_id>.pdf once its upload succeeded, the fingerprint of
+   * what the print lays out, and the layout engine that laid it out. NULL for
+   * mail not held, and for mail our renderer does not draw.
+   */
+  print_pdf_sha256?: string | null;
+  print_layout_fingerprint?: string | null;
+  print_layout_engine?: string | null;
 }
 
 // ============================================================================
@@ -197,6 +228,8 @@ export interface LetterJob {
   provider_outcome: 'not_dispatched' | 'dispatching' | 'accepted' | 'definite_failure' | 'ambiguous';
   provider_dispatch_started_at?: Date;
   held_at?: Date;
+  /** The hold an arrive-by job was created with (#535, migration 055): set for held mail only, and kept. Held now: heldMail.ts. */
+  mail_hold_until?: Date | null;
   hold_reason?: string;
   operator_resolution?: string;
   resolved_at?: Date;
@@ -390,6 +423,11 @@ export interface PromoCampaign {
   ends_at?: Date;
   requires_new_user: boolean;
   status: PromoCampaignStatus;
+  /**
+   * Set on a seed campaign (docs/gift-letters.md): redeeming it grants a gift
+   * letter with this budget. NULL on an ordinary campaign.
+   */
+  gift_generations_remaining?: number | null;
   created_by?: string;
   created_at: Date;
   updated_at: Date;
@@ -399,7 +437,9 @@ export interface PromoRedemption {
   redemption_id: string;
   campaign_id: string;
   user_id: string;
-  ledger_id: string;
+  /** NULL when a seed campaign granted only a gift letter. */
+  ledger_id: string | null;
+  gift_id?: string | null;
   redeemed_at: Date;
 }
 
@@ -416,6 +456,8 @@ export interface CreatePromoCampaignParams {
   startsAt?: Date;
   endsAt?: Date;
   requiresNewUser?: boolean;
+  /** Makes the campaign a seed code: redeeming it grants a gift letter with this budget. */
+  giftGenerationsRemaining?: number | null;
   createdBy?: string;
 }
 
@@ -428,14 +470,31 @@ export interface RedeemPromoParams {
 export interface RedeemPromoResult {
   success: boolean;
   credits?: number;
+  /** Gift letters a seed campaign granted. */
+  giftLetters?: number;
   expiresAt?: Date;
   ledgerId?: string;
   error?: string;
 }
 
+/**
+ * Why a promo campaign's code was refused, as a stable code beside the
+ * English `reason`. A seed campaign's code is a gift code, so its refusals are
+ * worded from this code instead of from the promo sentence (#432).
+ */
+export type PromoRefusalCode =
+  | 'not_found'
+  | 'inactive'
+  | 'not_started'
+  | 'expired'
+  | 'limit_reached'
+  | 'already_redeemed'
+  | 'new_users_only';
+
 export interface ValidatePromoResult {
   valid: boolean;
   reason?: string;
+  reasonCode?: PromoRefusalCode;
   campaign?: PromoCampaign;
 }
 
@@ -459,7 +518,7 @@ export type DraftStatus = 'pending' | 'consumed' | 'expired' | 'cancelled';
 export interface LetterDraft {
   draft_id: string;
   user_id: string;
-  mail_type?: MailType;
+  mail_type: MailType;
   sender: Record<string, unknown>;       // Address JSON
   recipient: Record<string, unknown>;    // Address JSON
   body_text: string;
@@ -478,8 +537,68 @@ export interface LetterDraft {
   expires_at: Date;
   consumed_at?: Date;
   consumed_letter_id?: string;
+  /**
+   * When retention or an erasure emptied the draft (migration 026): its
+   * content gone, its status kept. An erasure empties a pending draft an
+   * order points at rather than deleting it, so a pending draft may carry it.
+   */
+  redacted_at?: Date | null;
+  /** Sent as a gift letter (migration 033): funded by one, and prints its card. */
+  is_gift_send?: boolean;
+  /**
+   * The renderer that drew the preview (migration 039, #534): NULL for the
+   * legacy HTML, 'pdf-1' for src/render. The send copies it into
+   * letters.content, and dispatch prints with it.
+   */
+  renderer_version?: string | null;
+  /**
+   * The stationery the preview was drawn in (migration 044, #563): a theme and
+   * the slot text it prints, or NULL for Classic. Recorded with renderer
+   * version 'pdf-2'; the send copies it into letters.content.
+   */
+  stationery?: Stationery | null;
+  /**
+   * The person's signature as the letter was previewed with it (migration
+   * 051, #608): a PNG data URI, recorded with renderer version 'pdf-4', or ''
+   * once retention has emptied it. The send copies it into letters.content.
+   */
+  signature_image?: string | null;
+  /**
+   * Arrive-by (migration 040, #535): the date the mail should arrive by and
+   * the date it goes to the printer, 'YYYY-MM-DD' in New York; both or
+   * neither. The send holds the job until the mail date.
+   */
+  arrive_by?: string | null;
+  mail_on?: string | null;
+  /**
+   * The pages the letter prints on (migration 047, #586): 1 to 3, printed on
+   * both sides when more than 1. Only a letter our renderer drew, and never a
+   * gift send, runs past one page; it is paid per send (#579).
+   */
+  pages: number;
+  /**
+   * How a letter travels (migration 052, #625): standard first-class mail, or
+   * USPS Certified Mail with or without an electronic return receipt. Only a
+   * letter that is not a gift send is ever certified; it is paid per send (#579).
+   */
+  mail_service: MailService;
+  /** A postcard's size (migration 012): '6x9', or '6x4' or '6x11' (#594); null for a letter. */
+  postcard_size: string | null;
+  /**
+   * A postcard's front when not full bleed (migration 048, #594): a border
+   * with its caption, or a greeting with its place, as postcardFrontOf reads
+   * it. Recorded with renderer version 'pdf-3'; the send copies it into
+   * letters.content.
+   */
+  postcard_front?: unknown;
   created_at: Date;
   updated_at: Date;
+}
+
+/** A draft's arrive-by dates (#535), 'YYYY-MM-DD' in New York: from deliverySchedule's checkArrival. */
+export interface DraftSchedule {
+  arriveBy: string;
+  mailOn: string;
 }
 
 export interface CreateDraftParams {
@@ -499,11 +618,44 @@ export interface CreateDraftParams {
   headerImageUrl?: string;                // Original URL for debugging
   inlineImageData?: string;               // Base64 data URI for inline image
   inlineImageUrl?: string;                // Original URL for debugging
+  /** Funded by a gift letter and printed with its card (migration 033). */
+  isGiftSend?: boolean;
+  /** The renderer that drew the preview, which the letter prints with (migration 039, #534); unset for the legacy HTML. */
+  rendererVersion?: string;
+  /** Mail held to arrive by a date (migration 040, #535); unset to mail as soon as possible. */
+  schedule?: DraftSchedule;
+  /**
+   * The stationery the preview was drawn in (migration 044, #563); unset for
+   * Classic. With it, rendererVersion must be 'pdf-2' (rendererVersionFor).
+   * Its slots as slotText makes them, each at most STATIONERY_SLOT_MAX_LENGTH:
+   * createDraft refuses a theme stationeryOf would not read back.
+   */
+  stationery?: Stationery | null;
+  /**
+   * The pages the letter prints on (migration 047, #586); 1 when unset. More
+   * than 1 needs our renderer (rendererVersion) and no gift send, as the
+   * database's check does: createDraft refuses anything else first.
+   */
+  pages?: number;
+  /**
+   * How the letter travels (migration 052, #625); standard when unset. A
+   * service other than standard needs a letter that is not a gift send, as the
+   * database's check does: createDraft refuses anything else first.
+   */
+  mailService?: MailService;
+  /**
+   * The person's signature, a PNG data URI, when the letter prints one
+   * (migration 051, #608). With it, rendererVersion must be 'pdf-4'
+   * (rendererVersionFor).
+   */
+  signatureImage?: string;
 }
 
 export interface CreateDraftResult {
   draftId: string;
   expiresAt: Date;
+  /** The draft's content version as stored (#695, contentVersion.ts). */
+  contentVersion?: string;
 }
 
 export interface ConsumeDraftParams {
@@ -593,6 +745,8 @@ export interface PersonalAccessToken {
   last_used_at: Date | null;
   created_at: Date;
   revoked_at: Date | null;
+  /** What the token may do (migration 037, #470). Never mail:send today. */
+  scopes: string[];
 }
 
 /**
@@ -617,6 +771,7 @@ export interface TokenInfo {
   expiresAt: Date | null;
   lastUsedAt: Date | null;
   createdAt: Date;
+  scopes: string[];
 }
 
 /**
@@ -626,6 +781,8 @@ export interface ValidateTokenResult {
   valid: boolean;
   userId?: string;
   tokenId?: number;
+  /** The token's own scopes (#470). */
+  scopes?: string[];
   error?: string;
 }
 
@@ -653,6 +810,18 @@ export interface RevokeTokenResult {
 export type MailType = 'letter' | 'postcard';
 
 export type PostcardSize = '6x4' | '6x9' | '6x11';
+
+/**
+ * How a letter travels (#625). Standard is first-class mail. Certified adds USPS
+ * Certified Mail, with a tracking number and a signature at the door; the return
+ * receipt adds an electronic copy of that signature. PostGrid names the last two
+ * `certified` and `certified_return_receipt`, and so do we: the value goes to the
+ * provider as it is. Letters only: never a postcard, never a gift send.
+ */
+export type MailService = 'standard' | 'certified' | 'certified_return_receipt';
+
+/** The services that cost extra: everything but standard. */
+export type CertifiedMailService = Exclude<MailService, 'standard'>;
 
 // ============================================================================
 // Letter Layout Types (US-LAYOUT-01 through US-LAYOUT-06)
@@ -698,8 +867,15 @@ export interface PostcardDraft {
   body_text: string;              // Message for postcards
   sign_off: string | null;        // Optional for postcards
   front_image_data: string;       // Base64 data URI
-  front_image_url: string;        // Original URL for debugging
+  front_image_url: string | null; // The photo's address (where a new size crops from); null is a collage (#616)
   postcard_size: PostcardSize;
+  /**
+   * The front when not full bleed (migration 048, #594): read with
+   * postcardFrontOf, and recorded with renderer version 'pdf-3'.
+   */
+  postcard_front?: unknown;
+  renderer_version?: string | null;
+  is_gift_send?: boolean;
   required_credits: number;
   preview_html?: string;
   sender_validation?: Record<string, unknown>;
@@ -718,16 +894,34 @@ export interface CreatePostcardDraftParams {
   recipient: Record<string, unknown>;
   message: string;
   frontImageData: string;
-  frontImageUrl: string;
+  /**
+   * The photo's address: where set_postcard_style crops it again from at a new
+   * size, and how a collage is told from a photo. Every single photo records
+   * its link; null means a collage, which has no one source (#616).
+   */
+  frontImageUrl: string | null;
   postcardSize?: PostcardSize;    // Default: '6x9'
   requiredCredits?: number;       // Default: 2
   previewHtml?: string;
   senderValidation?: Record<string, unknown>;
   recipientValidation?: Record<string, unknown>;
   expiresInHours?: number;        // Default: 24
+  /** Funded by a gift letter and printed with its card (migration 033). */
+  isGiftSend?: boolean;
+  /** The renderer that drew the preview (#534 Phase 4); absent for the legacy HTML. */
+  rendererVersion?: string;
+  /** Mail held to arrive by a date (migration 040, #535); unset to mail as soon as possible. */
+  schedule?: DraftSchedule;
+  /**
+   * The front, when not full bleed (#594, migration 048): stored only as the
+   * print reads it back (postcardFrontOf), and only with rendererVersion pdf-3.
+   */
+  postcardFront?: PostcardFront | null;
 }
 
 export interface CreatePostcardDraftResult {
+  /** The draft's content version as stored (#695, contentVersion.ts). */
+  contentVersion?: string;
   draftId: string;
   expiresAt: Date;
 }

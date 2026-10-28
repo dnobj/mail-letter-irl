@@ -1,6 +1,6 @@
 # ACID Transaction Standard
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Required transaction, idempotency, outbox, recovery, and review rules for durable mutations
 
 ACID—**Atomicity, Consistency, Isolation, and Durability**—is the guiding principle for every Letter IRL operation that changes durable business state. This standard applies to financial balances and ledger entries, purchases and orders, drafts, letters and postcards, fulfillment jobs, refunds, promotions, image quota reservations, and administrative mutations.
@@ -56,7 +56,7 @@ An external vendor call **cannot be part of a single PostgreSQL ACID transaction
 Use a resumable state machine instead:
 
 - Commit the local intent and a transactional outbox record together.
-- Give each logical operation a stable, persisted idempotency key and reuse it for every retry. Never generate the key inside a retry loop.
+- Give each logical operation a stable, persisted idempotency key and reuse it for every retry. Never generate the key inside a retry loop. A retry must send the same request under that key: Stripe refuses a key it has seen with different parameters. When the request has to change, the operation is a new one with its own key, as a Pay & Send order whose Price or return URLs moved is cancelled and replaced (#279).
 - Call the vendor only after the local transaction commits.
 - Record vendor identifiers and state transitions with uniqueness and transition guards.
 - Make Stripe webhook processing idempotent by provider event and business object identifiers.
@@ -127,15 +127,46 @@ Every transaction that mutates account balances, grants, or entitlements acquire
 this order:
 
 ```
-orders -> letters -> letter_jobs -> image_generation_reservations
-       -> users -> credit_ledger -> image_entitlements
+letter_drafts -> orders -> letters -> letter_jobs -> image_generation_reservations
+              -> users -> credit_ledger -> image_entitlements
 ```
 
+A draft comes before its orders (#730): a prepaid send, a checkout's preparation, a payment's
+fulfilment and its recovery, and the account erasure all lock the draft (or the account's drafts)
+before any order, and lock it `FOR NO KEY UPDATE`: a foreign-key check's share lock on the draft,
+which PostgreSQL takes when a transaction updates the same order twice, is then not blocked by it.
+
 `users` is the account aggregate root: holding it first is what makes the ledger and entitlement
-rows below it safe. Note that a bare `UPDATE` takes the same row lock as `SELECT ... FOR UPDATE`,
-so an unguarded `UPDATE credit_ledger` or `UPDATE image_entitlements` counts as taking that lock
-first and inverts the order. Call `lockAccountForBalanceChange` (`src/services/accountLock.ts`)
-before the first ledger or entitlement statement.
+rows below it safe. Note that a bare `UPDATE` takes a row lock (`FOR NO KEY UPDATE` when it changes
+no key column, which conflicts with every other writer's lock on the row), so an unguarded
+`UPDATE credit_ledger` or `UPDATE image_entitlements` counts as taking that lock first and inverts
+the order. Call `lockAccountForBalanceChange` (`src/services/accountLock.ts`) before the first
+ledger or entitlement statement.
+
+Foreign keys take implicit locks too. Inserting a row, changing a foreign-key column, or updating a
+row the transaction already changed takes a share lock (`FOR KEY SHARE`) on each row its foreign keys
+reference (none for a null key), held to the end of the transaction (a rollback to a savepoint
+releases one taken after it; releasing the savepoint does not) and taken after the row itself. Only
+`FOR UPDATE`, a `DELETE`, or an `UPDATE` that changes a key blocks it. Account for these locks when you add or move a
+lock. The code handles them in these places:
+
+- **Drafts are held `FOR NO KEY UPDATE`** (#730), apart from the statements that delete drafts and
+  the retention sweeps (the deletes wait for a locked draft; the sweeps skip it). A refund holding its order updates the order twice,
+  which re-checks the order's key to its draft; a draft held `FOR UPDATE` by a path waiting for that
+  order would deadlock with it. Because a draft holder then no longer blocks a check on the draft,
+  every path that writes an order's `draft_id` takes the draft's lock first; `prepareJitOrder` is the
+  only one.
+- **A send takes the account before inserting its letter** (#730). The letter's insert share-locks
+  the account; inserted first, the letter would make two sends from one account each wait for the
+  other's share lock to take the account `FOR UPDATE`.
+- **A payment's fulfilment takes the account before its second update of the order** (#288), for
+  the same reason.
+- **The account stays `FOR UPDATE`.** It is what makes a checkout's order insert wait while an
+  account is erased (#449). One crossing is accepted: a draft made after an erasure's first statement
+  is not held by the erasure, so a send, checkout or draft edit holding that draft can meet the
+  erasure at the account row, or, for a draft and checkout order both made between the erasure's
+  first two statements, at the order. PostgreSQL fails one of the two; an erasure failed that way is tried
+  again at the next run (`src/services/adminOperationsQueue.ts`).
 
 Within the mail graph, take the funding order lock from `lockFundingGraph` and then address that
 order by its `order_id`. Re-deriving the order from `letter_id` in a later `UPDATE ... WHERE

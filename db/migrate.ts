@@ -4,7 +4,9 @@
  *
  * Usage:
  *   npm run db:migrate          # Run all pending migrations
- *   npm run db:migrate:rollback # Rollback last migration
+ *
+ * There are no down migrations, so there is no rollback command: a schema is
+ * rolled forward by a new migration (db/README.md).
  *
  * This file is a THIN WRAPPER. The migration algorithm itself lives in
  * `src/cli/migrate.ts`, which is also what production runs via
@@ -24,14 +26,11 @@
 import 'dotenv/config';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import pg from 'pg';
 import { migrate as runMigrations } from '../src/cli/migrate.js';
 
 // ES modules don't have __dirname, so we create it
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-const { Pool } = pg;
 
 const migrationsDirectory = join(__dirname, 'migrations');
 
@@ -46,59 +45,11 @@ async function migrate() {
   }
 }
 
-async function rollback() {
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined
-  });
-  try {
-    console.log('🔄 Rolling back last migration...\n');
-
-    // A fresh database has no ledger yet. Without this check the SELECT below
-    // dies with 42P01 and exits 1, when the correct answer is simply that there
-    // is nothing to roll back. (This check replaced an ensureMigrationsTable()
-    // call that was lost when the apply loop moved to src/cli/migrate.ts.
-    // Probing rather than re-creating is deliberate: the old helper carried its
-    // OWN `CREATE TABLE migrations` whose executed_at was TIMESTAMP where the
-    // real migrator uses TIMESTAMPTZ. Reinstating it would reinstate that
-    // drift, and a read-only advisory command has no business creating the
-    // ledger in the first place.)
-    const ledgerExists = await pool.query<{ present: boolean }>(
-      "SELECT to_regclass('migrations') IS NOT NULL AS present"
-    );
-    if (!ledgerExists.rows[0]?.present) {
-      console.log('No migrations to rollback.\n');
-      return;
-    }
-
-    const executed = await pool.query<{ name: string; executed_at: Date }>(
-      'SELECT name, executed_at FROM migrations ORDER BY id ASC'
-    );
-    if (executed.rows.length === 0) {
-      console.log('No migrations to rollback.\n');
-      return;
-    }
-
-    const lastMigration = executed.rows[executed.rows.length - 1];
-
-    console.log(`⚠️  WARNING: Rollback will drop all tables and data!`);
-    console.log(`   Last migration: ${lastMigration.name}`);
-    console.log(`   Executed at: ${lastMigration.executed_at}\n`);
-    console.log(`   To rollback, you need to manually drop tables or write down migrations.`);
-    console.log(`   For now, recommend: DROP SCHEMA public CASCADE; CREATE SCHEMA public;\n`);
-  } catch (error) {
-    console.error('❌ Rollback failed:', error);
-    process.exit(1);
-  } finally {
-    await pool.end();
-  }
+// There is no other command: one that was meant for something else (the old
+// "rollback") must not apply migrations instead.
+if (process.argv.length > 2) {
+  console.error(`Unknown argument "${process.argv[2]}". Run with no arguments to apply pending migrations.`);
+  process.exit(1);
 }
 
-// Run migrations
-const command = process.argv[2];
-
-if (command === 'rollback') {
-  rollback();
-} else {
-  migrate();
-}
+migrate();

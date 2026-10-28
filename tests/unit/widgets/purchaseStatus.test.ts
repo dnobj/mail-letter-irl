@@ -30,6 +30,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { JSDOM } from 'jsdom';
 import * as fs from 'fs';
 import * as path from 'path';
+import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
 
 const WIDGET_DIR = path.resolve(__dirname, '../../../widgets');
 const CARDS = ['LetterPreviewCard', 'PostcardPreviewCard'] as const;
@@ -97,9 +98,13 @@ function toolOutputFixture() {
 
 function mount(
   card: string,
-  options: { openExternalRejects?: boolean } = {}
+  options: { openExternalRejects?: boolean; mailCheckoutUrl?: string; scheduleMissed?: unknown; mailCheckout?: Record<string, unknown> } = {}
 ): Harness {
-  const html = fs.readFileSync(path.join(WIDGET_DIR, `${card}.html`), 'utf-8');
+  // The card as served, with the host bridge inlined (#474).
+  const html = inlineHostBridge(
+    fs.readFileSync(path.join(WIDGET_DIR, `${card}.html`), 'utf-8'),
+    WIDGET_DIR
+  );
   // See limit (1) at the top of this file.
   const runnable = html.replace('<script type="module">', '<script>');
 
@@ -142,10 +147,13 @@ function mount(
           calls.push({ name, args });
           if (gate) await gate;
           if (name === 'create_mail_checkout') {
+            // The answer as given, where a test names one (#679).
+            if (options.mailCheckout) return { structuredContent: options.mailCheckout };
             return {
               structuredContent: {
                 orderId: 'ord_test_0001',
-                checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test'
+                checkoutUrl: options.mailCheckoutUrl ?? 'https://checkout.stripe.com/c/pay/cs_test',
+                ...(options.scheduleMissed !== undefined ? { scheduleMissed: options.scheduleMissed } : {})
               }
             };
           }
@@ -186,7 +194,8 @@ function mount(
           }
           return { structuredContent: {} };
         },
-        openExternal: async () => {
+        openExternal: async (args: Record<string, unknown>) => {
+          calls.push({ name: 'openExternal', args });
           if (options.openExternalRejects) throw new Error('host refused');
         }
       };
@@ -273,6 +282,133 @@ function mount(
 async function checkout(harness: Harness): Promise<void> {
   await harness.click('pay-send-button');
 }
+
+describe.each(CARDS)('%s: an open checkout whose mail date has passed (#726)', card => {
+  it('says so before payment, shows the link, and does not open the checkout itself', async () => {
+    const harness = mount(card, { scheduleMissed: { arriveBy: '2020-01-13', mailOn: '2020-01-02' } });
+    await checkout(harness);
+    expect(harness.visible('checkout-note')).toBe(true);
+    expect(harness.text('checkout-note')).toBe(
+      'This was to go to the printer on Thu, Jan 2, 2020 to arrive by Mon, Jan 13, 2020, and that day has passed. ' +
+        'If you pay, it goes to the printer as soon as it can and may arrive after Mon, Jan 13, 2020.'
+    );
+    expect(harness.visible('checkout-link')).toBe(true);
+    expect(harness.calls.some(call => call.name === 'openExternal')).toBe(false);
+    expect(harness.text('pay-send-button-text')).toBe('Read the note, then use the checkout link below');
+    // The order is still followed, so paying from the link updates the card.
+    expect(harness.text('status-pill')).toBe('Checkout open - waiting for payment');
+  });
+
+  it('says so when a status answer marks it, as on a card reopened after the date passed', async () => {
+    const harness = mount(card);
+    await checkout(harness);
+    expect(harness.text('checkout-note')).not.toContain('has passed');
+    harness.setStatus({ purchaseStatus: 'pending_payment', scheduleMissed: { arriveBy: '2020-01-13', mailOn: '2020-01-02' } });
+    await harness.click('check-status-button');
+    await flush();
+    expect(harness.text('checkout-note')).toContain('to arrive by Mon, Jan 13, 2020, and that day has passed.');
+    // An answer with no status (a failed call) leaves it as it was.
+    harness.setStatus({});
+    await harness.click('check-status-button');
+    await flush();
+    expect(harness.visible('checkout-note')).toBe(true);
+    // Paid afterwards, through the link: the note about paying goes.
+    harness.setStatus({ purchaseStatus: 'processing' });
+    await harness.click('check-status-button');
+    await flush();
+    expect(harness.visible('checkout-note')).toBe(false);
+    // Not once it is paid.
+    const paid = mount(card);
+    await checkout(paid);
+    paid.setStatus({ purchaseStatus: 'processing', scheduleMissed: { arriveBy: '2020-01-13', mailOn: '2020-01-02' } });
+    await paid.click('check-status-button');
+    await flush();
+    expect(paid.text('checkout-note')).not.toContain('has passed');
+  });
+
+  it('opens the checkout as before when nothing is marked, or the mark is not a pair of dates', async () => {
+    for (const scheduleMissed of [undefined, { arriveBy: 'soon', mailOn: '2020-01-02' }, 'yes']) {
+      const harness = mount(card, { scheduleMissed });
+      await checkout(harness);
+      expect(harness.calls.some(call => call.name === 'openExternal')).toBe(true);
+      expect(harness.text('checkout-note')).not.toContain('has passed');
+    }
+  });
+});
+
+describe.each(CARDS)('%s: Pay & Send on a draft whose order is already paid (#679)', card => {
+  it('follows an order being refunded or on hold, with the status the server gives it, and takes no second press', async () => {
+    for (const [status, purchaseStatus, pill] of [
+      ['refund_pending', 'refund_pending', 'The order could not be fulfilled and a refund is being processed.'],
+      ['disputed', 'on_hold', 'This order is on hold. Please contact support.']
+    ]) {
+      const harness = mount(card, {
+        mailCheckout: { orderId: 'ord_taken_0001', status, reused: true, amountCents: 599, currency: 'usd', message: 'This order is already paid.' }
+      });
+      harness.setStatus({ purchaseStatus, message: pill });
+      await checkout(harness);
+      await flush();
+      expect(harness.text('pay-send-button-text'), status).toBe('Already paid');
+      expect(harness.visible('check-status-button'), status).toBe(true);
+      expect(harness.text('status-pill'), status).toBe(pill);
+      // Nothing is left to pay, so the note about paying goes.
+      expect(harness.visible('checkout-note'), status).toBe(false);
+      const button = harness.document.getElementById('pay-send-button') as HTMLButtonElement;
+      expect(button.disabled, status).toBe(true);
+      const checkouts = harness.calls.filter(call => call.name === 'create_mail_checkout').length;
+      await checkout(harness);
+      await flush();
+      expect(harness.calls.filter(call => call.name === 'create_mail_checkout').length, status).toBe(checkouts);
+    }
+  });
+
+  it('follows the paid order instead of saying the checkout failed, and opens nothing', async () => {
+    for (const status of ['paid', 'fulfillment_pending', 'refund_pending', 'disputed']) {
+      const harness = mount(card, {
+        mailCheckout: { orderId: 'ord_paid_0001', status, reused: true, amountCents: 599, currency: 'usd', message: 'This order is already paid.' }
+      });
+      harness.setStatus({ purchaseStatus: 'processing' });
+      await checkout(harness);
+      await flush();
+      expect(harness.visible('error-message'), status).toBe(false);
+      expect(harness.text('pay-send-button-text'), status).toBe('Already paid');
+      expect(harness.text('id-label'), status).toBe('Purchase');
+      expect(harness.text('id-value'), status).toBe('ord_paid_0001');
+      expect(harness.calls.filter(call => call.name === 'get_purchase_status').at(-1)?.args, status).toEqual({ orderId: 'ord_paid_0001' });
+      expect(harness.text('status-pill'), status).toBe('Paid - preparing mail');
+      expect(harness.calls.some(call => call.name === 'openExternal'), status).toBe(false);
+      expect(harness.visible('checkout-link'), status).toBe(false);
+    }
+  });
+
+  it('still says a checkout failed for an open checkout that came back with no link', async () => {
+    const harness = mount(card, {
+      mailCheckout: { orderId: 'ord_open_0001', status: 'checkout_pending', reused: true, message: 'Unable to create Pay & Send checkout. Please try again.' }
+    });
+    await checkout(harness);
+    await flush();
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('pay-send-button-text')).toBe('Retry Pay & Send');
+    expect(harness.calls.some(call => call.name === 'get_purchase_status')).toBe(false);
+  });
+
+  it('still says a checkout failed when the answer names an order but no status', async () => {
+    const harness = mount(card, { mailCheckout: { orderId: 'ord_unknown_0001', message: 'Unable to create Pay & Send checkout. Please try again.' } });
+    await checkout(harness);
+    await flush();
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('pay-send-button-text')).toBe('Retry Pay & Send');
+  });
+
+  it('still says a checkout failed when the answer names no order', async () => {
+    // A status past the checkout, but no order to follow.
+    const harness = mount(card, { mailCheckout: { status: 'refund_pending', message: 'Unable to create Pay & Send checkout. Please try again.' } });
+    await checkout(harness);
+    await flush();
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('pay-send-button-text')).toBe('Retry Pay & Send');
+  });
+});
 
 describe.each(CARDS)('%s purchase status', card => {
   let harness: Harness;
@@ -379,6 +515,33 @@ describe.each(CARDS)('%s purchase status', card => {
     expect(harness.pendingTimers().length).toBe(0);
   });
 
+  it('takes away the checkout link, the button that opened it and Check status once the checkout is cancelled or expired', async () => {
+    await checkout(harness);
+    expect(harness.visible('checkout-link')).toBe(true);
+    harness.setStatus({ purchaseStatus: 'cancelled', message: 'The checkout was cancelled or expired without sending the draft.' });
+
+    await harness.runNextTimer();
+
+    expect(harness.text('status-pill')).toBe('The checkout was cancelled or expired without sending the draft.');
+    for (const id of ['pay-send-button', 'checkout-link', 'check-status-button', 'checkout-note']) {
+      expect(harness.visible(id), id).toBe(false);
+    }
+    expect(harness.pendingTimers().length).toBe(0);
+    // A re-render of the preview it came from does not bring them back.
+    harness.fireGlobals();
+    await flush();
+    for (const id of ['pay-send-button', 'checkout-link', 'check-status-button']) {
+      expect(harness.visible(id), id).toBe(false);
+    }
+  });
+
+  it('keeps the checkout link through a failed payment, which may be tried again', async () => {
+    await checkout(harness);
+    harness.setStatus({ purchaseStatus: 'payment_failed', message: 'Payment was not completed.' });
+    await harness.runNextTimer();
+    expect(harness.visible('checkout-link')).toBe(true);
+  });
+
   it('does not flicker the button on an automatic refresh', async () => {
     // The reported symptom: the card appeared to cycle between "Checking..."
     // and "Check status". A label announcing the user's click has no business
@@ -452,6 +615,23 @@ describe.each(CARDS)('%s purchase status', card => {
     expect(harness.text('status-pill')).toBe('Paid - preparing mail');
     expect(harness.pendingTimers().length).toBe(0);
   });
+
+  it.each(['javascript:alert(1)', 'http://checkout.example/pay', 'data:text/html,x'])(
+    'makes no link of a checkout address that is not https: %s (#684)',
+    async hostile => {
+      const refusing = mount(card, { mailCheckoutUrl: hostile });
+      await checkout(refusing);
+      const link = refusing.document.getElementById('checkout-link');
+      expect(link?.getAttribute('href') ?? '').not.toBe(hostile);
+      expect(refusing.document.querySelector(`[href="${hostile}"]`)).toBeNull();
+      // Nor is it opened.
+      expect(refusing.calls.filter(call => call.name === 'openExternal' && call.args.href === hostile)).toEqual([]);
+      // While a good address is.
+      const opening = mount(card);
+      await checkout(opening);
+      expect(opening.calls.some(call => call.name === 'openExternal')).toBe(true);
+    }
+  );
 
   it('still shows the checkout link and polls when the host will not open a tab', async () => {
     // Protects what shipped in #304: openExternal resolving without opening

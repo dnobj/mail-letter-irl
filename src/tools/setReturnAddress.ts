@@ -1,9 +1,5 @@
-import { McpToolDefinition, ToolContext, Address } from "../contracts/types.js";
-import {
-  setReturnAddress,
-  ReturnAddress,
-  SetReturnAddressResult
-} from "../services/returnAddressService.js";
+import { McpToolDefinition, ToolContext } from "../contracts/types.js";
+import { setReturnAddress, ReturnAddress } from "../services/returnAddressService.js";
 
 interface SetReturnAddressInput {
   name: string;
@@ -106,55 +102,10 @@ export const setReturnAddressTool: McpToolDefinition<
   SetReturnAddressOutput
 > = {
   name: "set_return_address",
+  title: "Save return address",
   description:
     "Save your preferred return address for future letters and postcards. The address is validated before saving, corrected when possible, and used automatically when you omit a sender address. U.S. addresses only.",
   readOnly: false,
-  inputSchema: {
-    type: "object",
-    properties: {
-      name: {
-        type: "string",
-        description: "Your name as it should appear on letters"
-      },
-      addressLine1: {
-        type: "string",
-        description: "Street address (e.g., '123 Main Street')"
-      },
-      addressLine2: {
-        type: "string",
-        description: "Apartment, suite, unit, etc. (optional)"
-      },
-      city: {
-        type: "string",
-        description: "City name"
-      },
-      state: {
-        type: "string",
-        description: "State (2-letter code, e.g., 'CA', 'NY')"
-      },
-      postalCode: {
-        type: "string",
-        description: "ZIP code (5-digit or ZIP+4)"
-      },
-      country: {
-        type: "string",
-        description: "Country (currently only 'US' is supported)",
-        default: "US"
-      }
-    },
-    required: ["name", "addressLine1", "city", "state", "postalCode"]
-  },
-  outputSchema: {
-    type: "object",
-    properties: {
-      success: { type: "boolean" },
-      message: { type: "string" },
-      address: { type: "object" },
-      wasAutoCorrected: { type: "boolean" },
-      correctionDetails: { type: "string" },
-      errors: { type: "array", items: { type: "string" } }
-    }
-  },
   meta: {
     "openai/toolInvocation/invoking": "Validating and saving return address...",
     "openai/toolInvocation/invoked": "Return address saved",

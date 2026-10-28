@@ -75,6 +75,14 @@ export const WEBHOOK_BODY_LIMIT_BYTES = positiveIntegerSetting(
 export const JSON_API_BODY_LIMIT_BYTES = positiveIntegerSetting(
   'LETTER_IRL_JSON_BODY_LIMIT_BYTES', 256 * 1024, 1024, 16 * 1024 * 1024
 );
+/**
+ * The website's signature page (#608): a picture as a data URI in JSON. The
+ * page shrinks a photo to 2000 px first, so 4 MB (about 3 MB of picture) is
+ * generous.
+ */
+export const SIGNATURE_BODY_LIMIT_BYTES = positiveIntegerSetting(
+  'LETTER_IRL_SIGNATURE_BODY_LIMIT_BYTES', 4 * 1024 * 1024, 64 * 1024, 16 * 1024 * 1024
+);
 
 export interface ReadRequestBodyOptions {
   limitBytes: number;

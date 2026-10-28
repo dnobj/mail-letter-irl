@@ -1,0 +1,101 @@
+import { CERTIFIED_MAIL_FLAG, isExtraService, isJitPurchaseEnabled, mailServiceOf } from './products.js';
+import { offUnlessExplicitlyEnabled } from '../utils/envSettings.js';
+import type { CertifiedMailService, MailService } from '../services/types.js';
+
+/**
+ * Certified mail (#625): a letter sent as USPS Certified Mail, with or without
+ * an electronic return receipt. PostGrid sells it as one request field,
+ * `extraService`, on a US first-class letter; the carrier's tracking number
+ * arrives later, once USPS has the piece.
+ *
+ * Nothing here reads its environment at module load, for the reason given in
+ * src/auth/betaAccess.ts: tests vary it per call, and a module-level constant
+ * reads as live configuration when it is not.
+ */
+
+/** The values a letter preview takes for `mailService`, in the order they are offered. */
+export const MAIL_SERVICES = ['standard', 'certified', 'certified_return_receipt'] as const;
+
+/**
+ * Compile-time checks that the list above is exactly the MailService union:
+ * every listed value is a service, and every service is listed.
+ */
+type UnlistedService = Exclude<MailService, (typeof MAIL_SERVICES)[number]>;
+const _everyServiceIsListed: [UnlistedService] extends [never] ? true : never = true;
+const _everyListedValueIsAService: readonly MailService[] = MAIL_SERVICES;
+void _everyServiceIsListed;
+void _everyListedValueIsAService;
+
+/**
+ * Whether the letter previews offer certified mail: the flag is on (it also
+ * sells the two Pay & Send prices, #578), and Pay & Send is on, since nothing
+ * else pays for it (#579). Off, every letter travels standard, as before. A
+ * letter already previewed as certified still sends as certified: the send and
+ * the print read the draft's own service, never this.
+ */
+export function isCertifiedMailOffered(env: NodeJS.ProcessEnv = process.env): boolean {
+  return offUnlessExplicitlyEnabled(CERTIFIED_MAIL_FLAG, env) && isJitPurchaseEnabled(env);
+}
+
+/**
+ * The shape of a carrier tracking number this code will show: letters and digits, with spaces or
+ * hyphens between groups, 8 to 40 characters. The status sync stores only numbers of this shape
+ * (CARRIER_TRACKING_NUMBER in PostGridProvider.ts, held equal by a test); the reader checks again, since
+ * the column itself bounds only the length and an operator role can write it.
+ */
+export const CARRIER_TRACKING_NUMBER_SHAPE = /^[A-Za-z0-9][A-Za-z0-9 -]{7,39}$/;
+
+/**
+ * Where USPS shows a piece's progress, from its tracking number. The number is
+ * stored as the printer sent it, in groups that may be separated by spaces or
+ * hyphens; USPS wants the characters alone.
+ */
+export function uspsTrackingUrl(carrierNumber: string): string {
+  return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(carrierNumber.replace(/[ -]/g, ''))}`;
+}
+
+/**
+ * How long after the send the provider status sync looks for a letter's carrier number (statusSyncWorker): a
+ * certified letter with none by then will not get one from us, and its readers stop saying it is on the way.
+ */
+export const CARRIER_NUMBER_SYNC_DAYS = 30;
+
+/**
+ * Whether the sync has stopped looking for a sent letter's carrier number: the send (the provider's acceptance,
+ * sent_at, as the sync counts it) is more than CARRIER_NUMBER_SYNC_DAYS ago. False for a letter not sent yet.
+ */
+export function carrierNumberLookupEnded(sentAt: Date | null | undefined, now: Date = new Date()): boolean {
+  return sentAt instanceof Date && now.getTime() - sentAt.getTime() > CARRIER_NUMBER_SYNC_DAYS * 24 * 60 * 60 * 1000;
+}
+
+/**
+ * What a sent letter's row says about certified mail (#625), for the readers
+ * that show an order: the service, and the carrier's number and its link once
+ * there is one (the status sync stores it some time after the printer accepts
+ * the letter).
+ */
+export interface CertifiedFacts {
+  mailService: CertifiedMailService;
+  carrierTrackingNumber?: string;
+  carrierTrackingUrl?: string;
+}
+
+/**
+ * The certified facts of a letter row, or none for an ordinary letter.
+ *
+ * This only decides whether an order says anything about certified mail; it
+ * prices nothing, so text that is not one of the two services (which the
+ * column's CHECK keeps out of the table) says nothing rather than something
+ * invented. The row's number is shown only beside a certified service and only
+ * if it has the shape of a carrier number, whatever the column holds.
+ */
+export function certifiedFactsOf(row: { mail_service?: unknown; carrier_tracking_number?: unknown }): CertifiedFacts | undefined {
+  const service = mailServiceOf(typeof row.mail_service === 'string' ? row.mail_service : null);
+  if (!isExtraService(service)) return undefined;
+  const stored = typeof row.carrier_tracking_number === 'string' ? row.carrier_tracking_number.trim() : '';
+  const number = CARRIER_TRACKING_NUMBER_SHAPE.test(stored) ? stored : '';
+  return {
+    mailService: service,
+    ...(number === '' ? {} : { carrierTrackingNumber: number, carrierTrackingUrl: uspsTrackingUrl(number) })
+  };
+}

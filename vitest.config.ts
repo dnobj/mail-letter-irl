@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config';
 /**
  * Two projects, because the two lanes need opposite parallelism.
  *
- * The unit lane is 89 files that touch no database, and its whole value is a
+ * The unit lane is every file that touches no database, and its whole value is a
  * fast signal - serialising it costs 7.6s -> 34.1s, measured. The integration
  * lane must NOT run its files in parallel: src/cli/migrate.ts takes
  * pg_advisory_xact_lock, which is DATABASE-scoped rather than schema-scoped,

@@ -67,6 +67,19 @@ interface Discrepancy {
 }
 
 /**
+ * Whether a Stripe refund is a proportional pack refund the panel issued and
+ * settled with this very refund, for this order and this amount (#730).
+ */
+async function settledPanelPackRefund(refund: Stripe.Refund, orderId: string): Promise<boolean> {
+  const settled = await query(
+    `SELECT 1 FROM commerce_pack_refunds
+      WHERE stripe_refund_id = $1 AND order_id = $2 AND amount_cents = $3 AND status = 'succeeded'`,
+    [refund.id, orderId, refund.amount]
+  );
+  return (settled.rowCount ?? 0) > 0;
+}
+
+/**
  * Reconcile Stripe payments with our credit ledger
  *
  * @param daysBack - Number of days to look back (default 30)
@@ -438,12 +451,22 @@ export async function reconcileStripePayments(
 
       const matchedRefund = refundCheck.rows[0];
       if (!matchedRefund || matchedRefund.status !== 'refunded' || !matchedRefund.pack_reversal_recorded) {
-        unprocessedRefunds++;
-        // A succeeded refund for less than the order is one the app did not
-        // issue (#323): the customer keeps the letters. The webhook opened a
-        // stripe_partial_refund_unmatched alert; this is the second net.
         const partial =
           typeof matchedRefund?.amount_cents === 'number' && refund.amount < matchedRefund.amount_cents;
+        // A proportional pack refund the panel issued and settled, with this
+        // very refund, for this order and amount: it revoked the letters it
+        // paid back when it ran, so it is no discrepancy whatever the order's
+        // status since (#730). Nothing looser: three review rounds found every looser
+        // match, and every advice chosen by a command's status, hiding a
+        // payout or giving a wrong instruction.
+        if (partial && matchedRefund && (await settledPanelPackRefund(refund, matchedRefund.order_id))) continue;
+        unprocessedRefunds++;
+        // Any other succeeded refund for less than the order has no settled
+        // record here. It may be a Dashboard partial refund (the webhook opened
+        // a stripe_partial_refund_unmatched alert; this is the second net), a
+        // panel command not settled or compensated since, or the rest of a
+        // charge after a lost chargeback. The advice says what to check rather
+        // than what it is.
         discrepancies.push(
           partial
             ? {
@@ -454,9 +477,9 @@ export async function reconcileStripePayments(
                 fundingType: matchedRefund?.order_type,
                 stripeAmount: refund.amount,
                 ourAmount: matchedRefund?.amount_cents ?? undefined,
-                message: 'A partial refund exists in Stripe that the app did not issue; the customer keeps the letters',
+                message: 'A refund for less than the order exists in Stripe with no settled record in the app',
                 suggestedAction:
-                  'Review the stripe_partial_refund_unmatched alert for the order: refund the remainder (which takes the full path) or record the decision',
+                  "Before deducting letters or refunding, check what it is: the order's alerts (stripe_partial_refund_unmatched, pack_refund_failed), its pack refund commands, and any dispute in Stripe. Letters may already have been revoked or given back, and money a lost chargeback returned is not owed again. Then refund what is still owed, revoke what was paid back, or record the decision (docs/deployment.md)",
               }
             : {
                 type: 'unprocessed_refund',
@@ -486,7 +509,7 @@ export async function reconcileStripePayments(
   if (unprocessedRefunds > 0) {
     recommendations.push(
       `HIGH: ${unprocessedRefunds} refunds in Stripe were not processed. ` +
-      `Review and deduct credits from affected users.`
+      `Review each before deducting credits or refunding: some letters may already have been revoked or given back (docs/deployment.md).`
     );
   }
 

@@ -575,6 +575,50 @@ describePostgres('failed send returns the pack', () => {
     }, 60_000);
 
     /**
+     * A claimant that stalled past its lock (#730). Worker A claimed the job
+     * and stalled; the lock went stale, worker B took the job, failed it before
+     * dispatch on its last attempt and gave the pack back. A then wakes and
+     * settles its own failure: it must change nothing, or it would walk the
+     * refunded letter back to queued and its job back to pending.
+     */
+    it('lets a claimant that lost its job to another worker change nothing', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId, 2);
+      const claimed = async () =>
+        (
+          await pool.query(
+            `UPDATE letter_jobs SET status = 'processing', attempts = attempts + 1, locked_at = NOW()
+              WHERE job_id = $1 RETURNING *`,
+            [jobId]
+          )
+        ).rows[0];
+      // A's claim, then its lock goes stale.
+      const stale = await claimed();
+      expect(stale.attempts).toBe(1);
+      await pool.query(`UPDATE letter_jobs SET locked_at = NOW() - INTERVAL '1 hour' WHERE job_id = $1`, [jobId]);
+      await pool.query(`UPDATE letters SET status = 'processing' WHERE letter_id = $1`, [letterId]);
+      // B's claim, on the last attempt: its pre-dispatch failure settles the job and returns the pack.
+      const current = await claimed();
+      expect(current.attempts).toBe(2);
+      await jobs.failBeforeDispatch(current, new Error('renderer unavailable'), () => 0);
+      const settled = await pool.query<{ status: string }>('SELECT status FROM letter_jobs WHERE job_id = $1', [jobId]);
+      expect(settled.rows[0].status).toBe('failed');
+      expect(await credits(userId)).toBe(6);
+
+      // A wakes, with a retry left by its own count: it schedules nothing.
+      await expect(jobs.failBeforeDispatch(stale, new Error('renderer unavailable'), () => 0)).resolves.toBe(false);
+      const after = await pool.query<{ status: string; attempts: number }>(
+        'SELECT status, attempts FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(after.rows[0]).toMatchObject({ status: 'failed', attempts: 2 });
+      const letter = await pool.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [letterId]);
+      expect(letter.rows[0].status).toBe('failed');
+      expect(await credits(userId)).toBe(6);
+      expect(stubProvider.calls.length).toBe(0);
+    }, 60_000);
+
+    /**
      * Crash boundary: the process died after dispatching to the provider.
      *
      * The piece may well have been printed and posted - the crash destroyed the
@@ -671,6 +715,249 @@ describePostgres('failed send returns the pack', () => {
       );
       expect(letter.rows[0].status).toBe('accepted');
     }, 60_000);
+
+    /**
+     * Mail our renderer drew is accepted only from a provider that prints its PDF
+     * (#698), read from letters.content as stored: a missing key and a JSON null
+     * are the legacy HTML, any version is drawn, as the print reads it.
+     */
+    it.each([
+      ['no version', { body: 'test' }, true],
+      ['a JSON null version', { body: 'test', rendererVersion: null }, true],
+      ['a renderer version', { body: 'test', rendererVersion: 'pdf-1' }, false]
+    ] as const)('lets DIY accept a held letter with %s only when the legacy HTML drew it', async (_label, content, allowed) => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId);
+
+      stubProvider.nextResult = ambiguousFailure('stub timeout');
+      await jobs.processLetterJob(jobId);
+      await pool.query('UPDATE letters SET content = $2::jsonb WHERE letter_id = $1', [letterId, JSON.stringify(content)]);
+
+      const resolve = jobs.resolveAmbiguousLetterJobAsAdmin({
+        jobId,
+        expectedUserId: userId,
+        actorId: 'operator_test',
+        idempotencyKey: `resolve-diy-${jobId}`,
+        decision: 'accepted',
+        resolution: 'provider_confirmed_accepted',
+        providerName: 'diy',
+        providerTrackingId: `diy-tracking-${jobId}`
+      });
+
+      const letter = () => pool.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [letterId]);
+      if (allowed) {
+        await resolve;
+        expect((await letter()).rows[0].status).toBe('accepted');
+      } else {
+        await expect(resolve).rejects.toMatchObject({ code: 'invalid_state' });
+        expect((await letter()).rows[0].status).not.toBe('accepted');
+      }
+      // Either way nothing comes back: the mail is still held or accepted.
+      expect(await credits(userId)).toBe(4);
+    }, 60_000);
+
+    /**
+     * #696, decision D2: mail a pack paid for that has not gone to the printer waits for
+     * the operator when the pack's money goes back, in full or through a lost dispute, and
+     * the outbox leaves any mail of an account whose sending is blocked. Against the real
+     * schema: the claim's conditions, the marker's put-back, the hold's join through the
+     * pack's lots, 056's alert type and its one-per-order index.
+     */
+    describe('mail left for the operator (#696)', () => {
+      const jobRow = async (jobId: string) =>
+        (await pool.query<{ status: string; attempts: number; hold_reason: string | null; provider_outcome: string }>(
+          'SELECT status, attempts, hold_reason, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+        )).rows[0];
+      const alertsFor = async (orderId: string) =>
+        Number((await pool.query<{ n: string }>(
+          `SELECT COUNT(*)::text AS n FROM commerce_operational_alerts
+            WHERE alert_type = 'held_mail_funding_reversed' AND order_id = $1`, [orderId]
+        )).rows[0].n);
+      const held = (jobId: string, days = 5) =>
+        pool.query(
+          `UPDATE letter_jobs SET mail_hold_until = NOW() + ($2::int * INTERVAL '1 day'),
+             next_attempt_at = NOW() + ($2::int * INTERVAL '1 day') WHERE job_id = $1`,
+          [jobId, days]
+        );
+      const disputeEvent = (paymentIntentId: string, status: string): Stripe.Event => ({
+        id: `evt_${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+        type: 'charge.dispute.created',
+        data: { object: {
+          id: `dp_${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+          payment_intent: paymentIntentId,
+          charge: `ch_${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+          amount: 1999, currency: 'usd', reason: 'fraudulent', status
+        } }
+      }) as unknown as Stripe.Event;
+      const release = (jobId: string, userId: string) =>
+        jobs.releaseHeldLetterJobAsAdmin({
+          jobId, expectedUserId: userId, actorId: 'operator_test',
+          reason: 'the dispute was won', idempotencyKey: `release-${jobId}`
+        });
+
+      it('holds the mail a pack refunded in full paid for, due or held, until the operator releases it', async () => {
+        resetStubProvider();
+        const { userId, letterId, orderId, paymentIntentId } = await seedPackOrderLetter({ credits: 6, spend: 2 });
+        const jobId = await queueJob(letterId);
+        await held(jobId);
+
+        await commerce.processStripeWebhookEvent(refundedChargeEvent(paymentIntentId));
+
+        expect(await jobRow(jobId)).toMatchObject({ status: 'pending', attempts: 0, hold_reason: 'funding_reversed', provider_outcome: 'not_dispatched' });
+        expect(await alertsFor(orderId)).toBe(1);
+
+        // Its mail date comes: the outbox leaves it.
+        await pool.query('UPDATE letter_jobs SET next_attempt_at = NOW() - INTERVAL \'1 minute\' WHERE job_id = $1', [jobId]);
+        expect(await jobs.processLetterJob(jobId)).toMatchObject({ claimed: false });
+        expect(stubProvider.calls).toHaveLength(0);
+
+        // Released, due already as a dispute can leave it: the hold ends and it mails.
+        await expect(release(jobId, userId)).resolves.toMatchObject({ replayed: false });
+        expect((await jobRow(jobId)).hold_reason).toBeNull();
+        stubProvider.nextResult = providerSuccess('held-then-released');
+        await jobs.processLetterJob(jobId);
+        expect(stubProvider.calls).toHaveLength(1);
+        expect((await pool.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [letterId])).rows[0].status)
+          .toBe('accepted');
+      }, 60_000);
+
+      it('holds it for a dispute that takes the money, raising one alert for the order', async () => {
+        resetStubProvider();
+        const { userId, letterId, orderId, paymentIntentId } = await seedPackOrderLetter({ credits: 6, spend: 2 });
+        const jobId = await queueJob(letterId);
+        await held(jobId);
+
+        await commerce.processStripeWebhookEvent(disputeEvent(paymentIntentId, 'needs_response'));
+        // A second dispute event for the same order raises no second alert.
+        await commerce.processStripeWebhookEvent(disputeEvent(paymentIntentId, 'needs_response'));
+
+        expect((await jobRow(jobId)).hold_reason).toBe('funding_disputed');
+        expect(await alertsFor(orderId)).toBe(1);
+        const blocked = await pool.query<{ sends_blocked_reason: string | null }>(
+          'SELECT sends_blocked_reason FROM users WHERE user_id = $1', [userId]
+        );
+        expect(blocked.rows[0].sends_blocked_reason).toBe('payment_disputed');
+      }, 60_000);
+
+      it("holds nothing for a card network's inquiry, which takes no money", async () => {
+        resetStubProvider();
+        const { letterId, orderId, paymentIntentId } = await seedPackOrderLetter({ credits: 6, spend: 2 });
+        const jobId = await queueJob(letterId);
+        await held(jobId);
+        await commerce.processStripeWebhookEvent(disputeEvent(paymentIntentId, 'warning_needs_response'));
+        expect((await jobRow(jobId)).hold_reason).toBeNull();
+        expect(await alertsFor(orderId)).toBe(0);
+      }, 60_000);
+
+      it('leaves due mail of an account whose sending is blocked, and sends it once unblocked', async () => {
+        resetStubProvider();
+        const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+        const jobId = await queueJob(letterId);
+        await pool.query(
+          "UPDATE users SET sends_blocked_reason = 'payment_disputed', sends_blocked_at = NOW() WHERE user_id = $1", [userId]
+        );
+
+        expect(await jobs.processLetterJob(jobId)).toMatchObject({ claimed: false });
+        expect(stubProvider.calls).toHaveLength(0);
+
+        await pool.query('UPDATE users SET sends_blocked_reason = NULL, sends_blocked_at = NULL WHERE user_id = $1', [userId]);
+        stubProvider.nextResult = providerSuccess('unblocked');
+        await jobs.processLetterJob(jobId);
+        expect(stubProvider.calls).toHaveLength(1);
+      }, 60_000);
+
+      it('holds a letter paid from a lot returned from the pack, which names the order only as its reference', async () => {
+        resetStubProvider();
+        const { userId, letterId, orderId, paymentIntentId } = await seedPackOrderLetter({ credits: 6, spend: 2 });
+        const firstJob = await queueJob(letterId);
+        // A credit returned from the pack (a cancelled send), then spent on another letter.
+        const purchase = await pool.query<{ ledger_id: string }>(
+          "SELECT ledger_id FROM credit_ledger WHERE user_id = $1 AND source_type = 'purchase'", [userId]
+        );
+        const returned = await pool.query<{ ledger_id: string }>(
+          `INSERT INTO credit_ledger (
+             user_id, initial_amount, remaining_amount, source_type, source_reference_id, related_ledger_id,
+             activated_at, expires_at, expiration_policy, status
+           ) VALUES ($1, 1, 0, 'adjustment', $2, $3, NOW(), NOW() + INTERVAL '730 days', 'days_from_activation', 'active')
+           RETURNING ledger_id`,
+          [userId, orderId, purchase.rows[0].ledger_id]
+        );
+        const second = randomUUID();
+        await pool.query(
+          `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, funding_type)
+           VALUES ($1, $2, '{"body":"again"}'::jsonb, '{"name":"R"}'::jsonb, 1, 'queued', 'prepaid_balance')`,
+          [second, userId]
+        );
+        const txn = await pool.query<{ transaction_id: number }>(
+          `INSERT INTO credit_transactions (user_id, amount, balance_after, type, reference_type, reference_id, description)
+           VALUES ($1, -1, 3, 'deduction', 'letter', $2, 'send') RETURNING transaction_id`,
+          [userId, second]
+        );
+        await pool.query(
+          'INSERT INTO credit_consumption (transaction_id, ledger_id, amount, ledger_remaining_after) VALUES ($1, $2, 1, 0)',
+          [txn.rows[0].transaction_id, returned.rows[0].ledger_id]
+        );
+        const secondJob = await queueJob(second);
+
+        await commerce.processStripeWebhookEvent(refundedChargeEvent(paymentIntentId));
+
+        expect((await jobRow(firstJob)).hold_reason).toBe('funding_reversed');
+        expect((await jobRow(secondJob)).hold_reason).toBe('funding_reversed');
+        expect(await alertsFor(orderId)).toBe(1);
+      }, 60_000);
+
+      it('still claims and sends ordinary mail, with no hold and an account not blocked', async () => {
+        resetStubProvider();
+        const { letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+        const jobId = await queueJob(letterId);
+        stubProvider.nextResult = providerSuccess('ordinary');
+        await jobs.processLetterJob(jobId);
+        expect(stubProvider.calls).toHaveLength(1);
+      }, 60_000);
+
+      it("lets the operator cancel a blocked account's mail, giving back what paid for it", async () => {
+        resetStubProvider();
+        const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+        const jobId = await queueJob(letterId);
+        await pool.query(
+          "UPDATE users SET sends_blocked_reason = 'payment_disputed', sends_blocked_at = NOW() WHERE user_id = $1", [userId]
+        );
+        expect(await credits(userId)).toBe(4);
+
+        await expect(jobs.cancelLeftLetterJobAsAdmin({
+          jobId, expectedUserId: userId, actorId: 'operator_test', reason: 'the account is closing', idempotencyKey: `cancel-${jobId}`
+        })).resolves.toMatchObject({ replayed: false });
+
+        expect((await jobRow(jobId)).status).toBe('cancelled');
+        expect((await pool.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [letterId])).rows[0].status)
+          .toBe('cancelled');
+        expect(await credits(userId)).toBe(6);
+        const audit = await pool.query(
+          "SELECT 1 FROM commerce_operator_audit_events WHERE operation = 'mail_job_cancel' AND reason_code = 'operator_cancelled_held_mail'"
+        );
+        expect(audit.rowCount).toBeGreaterThan(0);
+        expect(stubProvider.calls).toHaveLength(0);
+      }, 60_000);
+
+      it('puts back a claim a crash left behind for mail left for the operator, its attempt given back', async () => {
+        resetStubProvider();
+        const { letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+        const jobId = await queueJob(letterId);
+        // Claimed before the pack's money went back, by a worker that then died.
+        await pool.query(
+          `UPDATE letter_jobs SET status = 'processing', attempts = 1, locked_at = NOW() - INTERVAL '1 hour',
+             hold_reason = 'funding_reversed' WHERE job_id = $1`, [jobId]
+        );
+
+        await expect(jobs.processLetterJob(jobId)).resolves.toMatchObject({ claimed: true, completed: false, error: 'Left for the operator' });
+        expect(stubProvider.calls).toHaveLength(0);
+        expect(await jobRow(jobId)).toMatchObject({ status: 'pending', attempts: 1, hold_reason: 'funding_reversed', provider_outcome: 'not_dispatched' });
+        // Nothing failed or returned: the letter still waits.
+        expect((await pool.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [letterId])).rows[0].status)
+          .toBe('queued');
+      }, 60_000);
+    });
 
     /**
      * Two handlers reaching a terminal transition for the same letter at once.
@@ -1081,6 +1368,12 @@ describePostgres('failed send returns the pack', () => {
       await commerce.processStripeWebhookEvent(refundedChargeEvent(paymentIntentId));
       expect(await credits(userId)).toBe(0);
       expect(await liveLots(userId)).toBe(0);
+      // The refund holds the letter for the operator (#696); one sends it anyway.
+      expect(await jobs.processLetterJob(jobId)).toMatchObject({ claimed: false });
+      await jobs.releaseHeldLetterJobAsAdmin({
+        jobId, expectedUserId: userId, actorId: 'operator_test',
+        reason: 'send it although refunded', idempotencyKey: `refunded-release-${jobId}`
+      });
 
       stubProvider.nextResult = definiteRejection('stub refused');
       await jobs.processLetterJob(jobId);
@@ -1109,6 +1402,96 @@ describePostgres('failed send returns the pack', () => {
       })).rejects.toMatchObject({ code: 'invalid_state' });
       expect(stubProvider.calls.length).toBe(1);
     }, 60_000);
+
+    it('holds a queued letter untouched while the outbox is paused, and sends it once resumed (#444)', async () => {
+      resetStubProvider();
+      stubProvider.nextResult = providerSuccess('stub-tracking-resumed');
+      const { letterId } = await seedSpentLetter({ lotA: 4, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId);
+      const before = await pool.query<{ status: string; attempts: number; next_attempt_at: Date }>(
+        'SELECT status, attempts, next_attempt_at FROM letter_jobs WHERE job_id = $1',
+        [jobId]
+      );
+
+      process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = 'false';
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(await jobs.processLetterJob(jobId)).toMatchObject({ claimed: false, completed: false });
+        // The maintenance batch counts what waits - this job among them - with
+        // the real statement, and claims nothing.
+        expect(await jobs.processDueLetterJobs(10)).toMatchObject({ processed: 0, paused: true });
+        const paused = warn.mock.calls.flat().map(String).find((line) => line.includes('outbox.dispatch_paused'));
+        expect(JSON.parse(paused!).waiting).toBeGreaterThanOrEqual(1);
+      } finally {
+        delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
+        warn.mockRestore();
+      }
+      expect(stubProvider.calls).toHaveLength(0);
+      const waiting = await pool.query<{ status: string; attempts: number; next_attempt_at: Date }>(
+        'SELECT status, attempts, next_attempt_at FROM letter_jobs WHERE job_id = $1',
+        [jobId]
+      );
+      // Its place, attempts and backoff are exactly as they were.
+      expect(waiting.rows[0]).toEqual(before.rows[0]);
+
+      expect(await jobs.processLetterJob(jobId)).toMatchObject({ claimed: true, completed: true });
+      expect(stubProvider.calls).toHaveLength(1);
+      const sent = await pool.query<{ status: string }>('SELECT status FROM letter_jobs WHERE job_id = $1', [jobId]);
+      expect(sent.rows[0].status).toBe('completed');
+    }, 60_000);
+
+    /**
+     * What a pause does to the jobs a crash left behind (#451 review) - the
+     * redeploy that sets the switch is such a crash. The one on its last
+     * attempt is settled by the sweep as ever; the one with attempts left is
+     * counted as waiting and goes out once resumed.
+     */
+    it('while paused, settles a crash on its last attempt and counts one with attempts left as waiting', async () => {
+      resetStubProvider();
+      const exhausted = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const exhaustedJob = await queueJob(exhausted.letterId, 1);
+      const reclaimable = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const reclaimableJob = await queueJob(reclaimable.letterId, 3);
+      const crash = (jobId: string, attempts: string) =>
+        pool.query(
+          `UPDATE letter_jobs
+              SET status = 'processing', provider_outcome = 'not_dispatched',
+                  attempts = ${attempts}, locked_at = NOW() - INTERVAL '30 minutes'
+            WHERE job_id = $1`,
+          [jobId]
+        );
+      await crash(exhaustedJob, 'max_attempts');
+      await crash(reclaimableJob, '1');
+
+      process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = 'false';
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const stale = await jobs.processDueLetterJobs(10);
+        expect(stale).toMatchObject({ processed: 0, paused: true });
+        // The same count with that claim's lock still fresh: the difference is
+        // the one job, whatever else the schema holds.
+        await pool.query(`UPDATE letter_jobs SET locked_at = NOW() WHERE job_id = $1`, [reclaimableJob]);
+        const fresh = await jobs.processDueLetterJobs(10);
+        expect(fresh.waiting).toBe((stale.waiting ?? 0) - 1);
+        await pool.query(
+          `UPDATE letter_jobs SET locked_at = NOW() - INTERVAL '30 minutes' WHERE job_id = $1`,
+          [reclaimableJob]
+        );
+      } finally {
+        delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
+        warn.mockRestore();
+      }
+
+      // Settled while paused: terminal and compensated, and never sent.
+      const settled = await pool.query<{ status: string }>('SELECT status FROM letter_jobs WHERE job_id = $1', [exhaustedJob]);
+      expect(settled.rows[0].status).toBe('failed');
+      expect(await credits(exhausted.userId)).toBe(6);
+      expect(stubProvider.calls).toHaveLength(0);
+
+      stubProvider.nextResult = providerSuccess('stub-tracking-after-pause');
+      expect(await jobs.processLetterJob(reclaimableJob)).toMatchObject({ claimed: true, completed: true });
+      expect(await credits(reclaimable.userId)).toBe(4);
+    }, 60_000);
   });
 
   it('records only a stable failure code, never provider text', async () => {
@@ -1134,4 +1517,204 @@ describePostgres('failed send returns the pack', () => {
     // content must never reach it.
     expect(stored).not.toMatch(/PostGrid|http|address|recipient/i);
   }, 60_000);
+
+  /**
+   * #566: PostGrid cancels a piece only while it is ready, before printing, and
+   * the status sync now reads its `cancelled`. The letter fails, what paid for
+   * it comes back exactly once, and one alert per letter says so; a Pay & Send
+   * order, already fulfilled, is left for a person to refund.
+   */
+  describe("a provider's cancel after acceptance (#566)", () => {
+    let jobs: typeof import('../../src/services/letterJobService.js');
+    const RAW = 'Letter was canceled before sending';
+
+    beforeAll(async () => {
+      jobs = await import('../../src/services/letterJobService.js');
+    });
+
+    /** As the outbox's acceptance leaves a letter (completeJob). */
+    async function accept(letterId: string): Promise<void> {
+      await pool.query(
+        `UPDATE letters SET status = 'accepted', tracking_id = $2, provider = 'postgrid', sent_at = NOW()
+         WHERE letter_id = $1`,
+        [letterId, `letter_${randomUUID().replace(/-/g, '').slice(0, 20)}`]
+      );
+    }
+
+    async function alerts(letterId: string) {
+      return (await pool.query(
+        `SELECT order_id, severity, details FROM commerce_operational_alerts
+          WHERE alert_type = 'provider_cancelled_mail' AND details->>'letterId' = $1`,
+        [letterId]
+      )).rows;
+    }
+
+    async function letterNow(letterId: string) {
+      return (await pool.query(
+        'SELECT status, provider_raw_status FROM letters WHERE letter_id = $1', [letterId]
+      )).rows[0];
+    }
+
+    it('fails a prepaid letter, gives its credits back once, and raises one warning', async () => {
+      const { userId, letterId } = await seedSpentLetter({ lotA: 2, lotB: 5, spend: 5 });
+      await accept(letterId);
+      expect(await credits(userId)).toBe(2);
+
+      await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('failed');
+
+      expect(await letterNow(letterId)).toEqual({ status: 'failed', provider_raw_status: RAW });
+      expect(await credits(userId)).toBe(7);
+      const history = await pool.query(
+        'SELECT old_status, new_status, provider_raw_status, source FROM letter_status_history WHERE letter_id = $1',
+        [letterId]
+      );
+      expect(history.rows).toEqual([{ old_status: 'accepted', new_status: 'failed', provider_raw_status: RAW, source: 'sync' }]);
+      expect(await alerts(letterId)).toEqual([{
+        order_id: null,
+        severity: 'warning',
+        details: { letterId, userId, fundingType: 'prepaid_balance', refundForAPerson: false, statusBefore: 'accepted' }
+      }]);
+
+      // The next sync of the same cancel finds the letter ended: nothing moves.
+      await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('unchanged');
+      expect(await credits(userId)).toBe(7);
+      expect(await alerts(letterId)).toHaveLength(1);
+      expect((await pool.query('SELECT 1 FROM letter_status_history WHERE letter_id = $1', [letterId])).rowCount).toBe(1);
+    }, 60_000);
+
+    it('gives a gift letter back and voids the code it printed', async () => {
+      // The daily caps count every letter in this schema, and are not what
+      // this case tests (giftLetters.postgres and arriveBy.postgres do the same).
+      const GIFT_ENV = {
+        LETTER_IRL_GIFT_LETTERS_ENABLED: 'true',
+        LETTER_IRL_GIFT_DAILY_SEND_CAP: '100000',
+        LETTER_IRL_GIFT_LANDING_BASE_URL: 'https://letterirl.test',
+        LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP: '1000',
+        LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING: '100000'
+      };
+      const saved = Object.fromEntries(Object.keys(GIFT_ENV).map(name => [name, process.env[name]]));
+      Object.assign(process.env, GIFT_ENV);
+      try {
+        const gifts = await import('../../src/services/giftLetterService.js');
+        const drafts = await import('../../src/services/draftService.js');
+        const mailSend = await import('../../src/services/mailSendService.js');
+        const { transaction } = await import('../../src/db/index.js');
+        const userId = `user_${randomUUID()}`;
+        await pool.query('INSERT INTO users (user_id, email) VALUES ($1, $2)', [userId, `${userId}@test.invalid`]);
+        await transaction(client => gifts.grantGiftLettersWithClient(client, {
+          userId,
+          quantity: 1,
+          generationsRemaining: 2,
+          source: 'operator',
+          sourceReferenceId: `test:${randomUUID()}`
+        }));
+        const { draftId } = await drafts.createDraft({
+          userId,
+          sender: { name: 'Pat Example', addressLine1: '1 Main St', city: 'Springfield', state: 'IL', postalCode: '62701', country: 'US' },
+          recipient: { name: 'Sam Rivera', addressLine1: '350 5th Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US' },
+          bodyText: `A gift ${randomUUID()}`,
+          signOff: 'Pat',
+          isGiftSend: true,
+          requiredCredits: 2
+        });
+        const sent = await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+        const letterId = sent.letter.letter_id;
+        const code = (await pool.query('SELECT code FROM gift_codes WHERE letter_id = $1', [letterId])).rows[0].code;
+        await accept(letterId);
+
+        await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('failed');
+
+        expect((await letterNow(letterId)).status).toBe('failed');
+        const back = await pool.query(
+          "SELECT generations_remaining FROM gift_letters WHERE user_id = $1 AND source = 'send_failed' AND source_reference_id = $2",
+          [userId, letterId]
+        );
+        expect(back.rows).toEqual([{ generations_remaining: 2 }]);
+        const voided = (await pool.query('SELECT status, void_reason FROM gift_codes WHERE code = $1', [code])).rows[0];
+        expect(voided).toEqual({ status: 'void', void_reason: 'send_failed' });
+        expect(await alerts(letterId)).toEqual([{
+          order_id: null,
+          severity: 'warning',
+          details: { letterId, userId, fundingType: 'gift_letter', refundForAPerson: false, statusBefore: 'accepted' }
+        }]);
+      } finally {
+        for (const [name, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+      }
+    }, 60_000);
+
+    it('leaves a fulfilled Pay & Send order for a person to refund, with a critical alert', async () => {
+      const drafts = await import('../../src/services/draftService.js');
+      const userId = `user_${randomUUID()}`;
+      await pool.query('INSERT INTO users (user_id, email, credits) VALUES ($1, $2, 3)', [userId, `${userId}@test.invalid`]);
+      // A Pay & Send order names the draft it paid for (021's valid_order_draft).
+      const { draftId } = await drafts.createDraft({
+        userId,
+        sender: { name: 'Pat Example', addressLine1: '1 Main St', city: 'Springfield', state: 'IL', postalCode: '62701', country: 'US' },
+        recipient: { name: 'Sam Rivera', addressLine1: '350 5th Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US' },
+        bodyText: `Paid ${randomUUID()}`,
+        signOff: 'Pat',
+        requiredCredits: 2
+      });
+      const orderId = `order-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
+           idempotency_key, draft_id)
+         VALUES ($1, $2, NULL, 499, 'USD', 'fulfilled', 'jit_mail', 'jit-letter', $3, $4)`,
+        [orderId, userId, `idem_${orderId}`, draftId]
+      );
+      const letterId = randomUUID();
+      await pool.query(
+        `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type,
+           funding_type, funding_order_id)
+         VALUES ($1, $2, '{}', $3, 2, 'queued', 'letter', 'jit_order', $4)`,
+        [letterId, userId, JSON.stringify({ name: 'R' }), orderId]
+      );
+      await accept(letterId);
+
+      await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('failed');
+
+      expect((await letterNow(letterId)).status).toBe('failed');
+      expect((await pool.query('SELECT status FROM orders WHERE order_id = $1', [orderId])).rows[0].status).toBe('fulfilled');
+      expect(await credits(userId)).toBe(3);
+      expect(await alerts(letterId)).toEqual([{
+        order_id: orderId,
+        severity: 'critical',
+        details: { letterId, userId, fundingType: 'jit_order', refundForAPerson: true, statusBefore: 'accepted' }
+      }]);
+    }, 60_000);
+
+    it('leaves the credits to a person when the cancel comes after our record saw the letter mailed', async () => {
+      // PostGrid cancels only before printing, so this contradicts its own
+      // lifecycle: nothing comes back by itself, and the alert is critical.
+      const { userId, letterId } = await seedSpentLetter({ lotA: 2, lotB: 5, spend: 5 });
+      await accept(letterId);
+      await pool.query("UPDATE letters SET status = 'in_transit' WHERE letter_id = $1", [letterId]);
+
+      await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('failed');
+
+      expect((await letterNow(letterId)).status).toBe('failed');
+      expect(await credits(userId)).toBe(2);
+      expect(await alerts(letterId)).toEqual([{
+        order_id: null,
+        severity: 'critical',
+        details: { letterId, userId, fundingType: 'prepaid_balance', refundForAPerson: true, statusBefore: 'in_transit' }
+      }]);
+    }, 60_000);
+
+    it('leaves a letter that has already ended, or that does not exist, as it is', async () => {
+      const { userId, letterId } = await seedSpentLetter({ lotA: 4, lotB: 1, spend: 2 });
+      await accept(letterId);
+      await pool.query("UPDATE letters SET status = 'delivered' WHERE letter_id = $1", [letterId]);
+
+      await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('unchanged');
+      await expect(jobs.failProviderCancelledLetter({ letterId: randomUUID(), providerRawStatus: RAW })).resolves.toBe('unchanged');
+
+      expect((await letterNow(letterId)).status).toBe('delivered');
+      expect(await credits(userId)).toBe(3);
+      expect(await alerts(letterId)).toEqual([]);
+    }, 60_000);
+  });
 });

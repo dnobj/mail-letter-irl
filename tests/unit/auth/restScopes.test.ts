@@ -43,8 +43,9 @@ describe('REST route scopes', () => {
   });
 
   it('never lets a token that cannot spend mint or revoke a personal access token', () => {
-    // A personal access token passes every scope check, so minting one with
-    // less than mail:send would be an escalation (audit A-02).
+    // Minting a personal access token creates a standing credential, so it
+    // takes the strongest scope (audit A-02); a token itself carries read and
+    // draft only (037, #470).
     expect(requiredRestScopes('POST', '/api/tokens')).toEqual(['mail:send']);
     expect(requiredRestScopes('DELETE', '/api/tokens/42')).toEqual(['mail:send']);
     expect(requiredRestScopes('GET', '/api/tokens')).toEqual(['mail:read']);
