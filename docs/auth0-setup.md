@@ -126,7 +126,7 @@ Two consequences worth knowing before touching anything here:
 ```env
 AUTH0_SECRET=<generate with `openssl rand -hex 32`>
 AUTH0_BASE_URL=https://letterirl.com
-AUTH0_ISSUER_BASE_URL=https://dev-njmdyqf8n25rqgy7.us.auth0.com
+AUTH0_DOMAIN=auth.letterirl.com
 AUTH0_CLIENT_ID=wX17u1wOn3XJRVba1ejIappBNpDno3ER
 AUTH0_CLIENT_SECRET=<from application settings - click eye icon to reveal>
 AUTH0_AUDIENCE=https://api.letterirl.com/mcp
@@ -324,10 +324,12 @@ Change from Development to Production for higher rate limits:
 ### MCP Server (letter-irl)
 
 ```env
-LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
-LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://dev-njmdyqf8n25rqgy7.us.auth0.com/authorize
-LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://dev-njmdyqf8n25rqgy7.us.auth0.com/oauth/token
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_ISSUER=https://auth.letterirl.com/
+LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
+LETTER_IRL_OAUTH_PROD_ISSUER=https://auth.letterirl.com/,https://dev-njmdyqf8n25rqgy7.us.auth0.com/
+LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://auth.letterirl.com/authorize
+LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://auth.letterirl.com/oauth/token
+LETTER_IRL_OAUTH_JWKS_URI=https://auth.letterirl.com/.well-known/jwks.json
 LETTER_IRL_MCP_RESOURCE=https://api.letterirl.com/mcp
 LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com/mcp
 LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS=RS256
@@ -339,7 +341,7 @@ LETTER_IRL_OAUTH_SCOPES=openid,profile,email,offline_access,mail:read,mail:draft
 ```env
 AUTH0_SECRET=<generate with `openssl rand -hex 32`>
 AUTH0_BASE_URL=https://letterirl.com
-AUTH0_ISSUER_BASE_URL=https://dev-njmdyqf8n25rqgy7.us.auth0.com
+AUTH0_DOMAIN=auth.letterirl.com
 AUTH0_CLIENT_ID=wX17u1wOn3XJRVba1ejIappBNpDno3ER
 AUTH0_CLIENT_SECRET=<from application settings>
 AUTH0_AUDIENCE=https://api.letterirl.com/mcp

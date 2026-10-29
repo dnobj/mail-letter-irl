@@ -4222,7 +4222,7 @@
           "mail:draft",
           "mail:send"
         ],
-        "authorizationServer": "https://dev-njmdyqf8n25rqgy7.us.auth0.com/"
+        "authorizationServer": "https://auth.letterirl.com/"
       }
     }
   ],
