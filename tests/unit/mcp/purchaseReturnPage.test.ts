@@ -122,6 +122,7 @@ describe('checkoutSessionIdOf (#730)', () => {
     expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_other_abc')).toBeNull();
     // Only the session's own path: no other segment, and no query, may name one.
     expect(checkoutSessionIdOf('https://checkout.stripe.com/x/cs_test_abc')).toBeNull();
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/pay/cs_test_abc')).toBeNull();
     expect(checkoutSessionIdOf('https://checkout.stripe.com/gg/pay/cs_test_abc')).toBeNull();
     expect(checkoutSessionIdOf('https://checkout.stripe.com/G/pay/cs_test_abc')).toBeNull();
     expect(checkoutSessionIdOf('https://checkout.stripe.com/g/x/pay/cs_test_abc')).toBeNull();
