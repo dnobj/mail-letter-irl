@@ -55,7 +55,7 @@ so that application's callbacks must stay OpenAI's alone.
 | Environment | Tenant Domain | Custom domain | Account |
 |-------------|---------------|---------------|---------|
 | **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | `auth-dev.letterirl.com`, in use since 2026-10-20 | the organization account |
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | `auth.letterirl.com`, verified 2026-10-20; the API and website move to it after the promotion | the production account |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | `auth.letterirl.com`, verified 2026-10-20, in use since 2026-10-28 | the production account |
 
 How the custom domains were set up, and their state, is in "Moving a tenant to a custom domain" below.
 
@@ -1316,14 +1316,18 @@ When updating development, ensure production is also updated:
 ### Environment Variables by Tenant
 
 ```bash
-# Production (.env)
-LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
+# Production (.env): the custom domain since 2026-10-28; the tenant address stays accepted
+LETTER_IRL_OAUTH_ISSUER=https://auth.letterirl.com/
+LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
+LETTER_IRL_OAUTH_PROD_ISSUER=https://auth.letterirl.com/,https://dev-njmdyqf8n25rqgy7.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://auth.letterirl.com/.well-known/jwks.json
 LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com/mcp
 
-# Development (.env.dev)
-LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
+# Development (.env.dev): the custom domain since 2026-10-20; the tenant address stays accepted
+LETTER_IRL_OAUTH_ISSUER=https://auth-dev.letterirl.com/
+LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_DEV_ISSUER=https://auth-dev.letterirl.com/,https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://auth-dev.letterirl.com/.well-known/jwks.json
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 ```
 
