@@ -1060,10 +1060,12 @@ The MCP server reads these (development tenant values; `.env.dev.example` has
 the full list):
 
 ```bash
-LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
-LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/authorize
-LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/token
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_ISSUER=https://auth-dev.letterirl.com/
+LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_DEV_ISSUER=https://auth-dev.letterirl.com/,https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://auth-dev.letterirl.com/authorize
+LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://auth-dev.letterirl.com/oauth/token
+LETTER_IRL_OAUTH_JWKS_URI=https://auth-dev.letterirl.com/.well-known/jwks.json
 LETTER_IRL_MCP_RESOURCE=https://letter-irl-api-development.up.railway.app/mcp
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 LETTER_IRL_OAUTH_SCOPES=openid,profile,email,offline_access,mail:read,mail:draft,mail:send
