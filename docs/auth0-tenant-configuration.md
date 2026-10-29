@@ -1390,7 +1390,7 @@ Check afterwards:
 - use a connector made before the move, at once and again after its access token has expired, which proves the
   refresh at the old address still works.
 
-**State on 2026-10-23:**
+**State on 2026-10-29:**
 
 | | Development | Production |
 | --- | --- | --- |
@@ -1400,9 +1400,10 @@ Check afterwards:
 | Google callback | both, on the new "Auth0 Development" client | both, on "Auth0 Production" |
 | GitHub | new GitHub App, both callbacks | new GitHub App, both callbacks, swapped in and tested |
 | Apple, Microsoft | turned off on every listed application and domain-level promotion off (developer keys) | not offered |
-| Steps 3 and 4 | done (#826 at `e2b230d`) | after the API promotion ([launch-promotion.md](launch-promotion.md), stage B) |
-| Checks passed | website sign-in with Google, GitHub and email and password; sign-out; one call on a connection made before the move; a new ChatGPT connector (2026-10-21: authorize, token and issuer on the custom domain); Claude's connector from before the move, still working on 2026-10-22 and 10-23, days after its access token expired | after stage B |
-| Checks outstanding | sign-out of a session from before step 4 | all |
+| Steps 3 and 4 | done (#826 at `e2b230d`) | done 2026-10-28 after stage B: the API at 19:39Z, the website at 20:00Z |
+| Step 5, the manifest | nothing to change | the snapshot, the fallback and its test name the custom domain (2026-10-29) |
+| Checks passed | website sign-in with Google, GitHub and email and password; sign-out; one call on a connection made before the move; a new ChatGPT connector (2026-10-21: authorize, token and issuer on the custom domain); Claude's connector from before the move, still working on 2026-10-22 and 10-23, days after its access token expired | website sign-in with Google, GitHub and email and password, each signed out after; a ChatGPT connection made before the move, which kept working, including the canary's purchase and send on 2026-10-29 |
+| Checks outstanding | sign-out of a session from before step 4 | sign-out of a session from before step 4; a new connector; a connection made before the move once its access token has expired |
 
 A client that keys its sign-in by the authorization server signs in again instead of refreshing. VS Code's
 connection from 2026-09-26 asked once, on 2026-10-23, to "authenticate to auth-dev.letterirl.com", and worked after

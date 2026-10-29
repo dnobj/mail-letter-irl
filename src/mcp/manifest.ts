@@ -38,7 +38,7 @@ function getManifestUrls(publicBaseUrlOverride?: string) {
   const healthPath = process.env.LETTER_IRL_HEALTH_PATH ?? "/healthz";
   const authorizationServer =
     process.env.LETTER_IRL_OAUTH_ISSUER ??
-    "https://dev-njmdyqf8n25rqgy7.us.auth0.com/";
+    "https://auth.letterirl.com/";
 
   return {
     authorizationServer,
