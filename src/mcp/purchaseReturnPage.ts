@@ -109,16 +109,19 @@ export function readReturnCookie(cookieHeader: string | undefined): string | nul
 
 /**
  * The Checkout Session a checkout link opens, or null: Stripe's hosted page
- * is `/c/pay/cs_live_…` or `/c/pay/cs_test_…`, on checkout.stripe.com or our
- * own checkout domain, as parseCheckoutTarget allows, with no query. The
+ * is `/<letter>/pay/cs_live_…` or `…/cs_test_…`, on checkout.stripe.com or
+ * our own checkout domain, as parseCheckoutTarget allows, with no query. The
  * whole path is the session's, so no other segment can name one (#730).
+ * The letter varies: test sessions came back as `/c/pay/`, live ones as
+ * `/g/pay/` (2026-10-28, the production canary). Any one letter is accepted,
+ * since the page forwards only to the address our order recorded.
  */
 export function checkoutSessionIdOf(to: string | null | undefined): string | null {
   const target = parseCheckoutTarget(to);
   if (!target) return null;
   const url = new URL(target);
   if (url.search) return null;
-  const match = /^\/c\/pay\/(cs_(?:live|test)_[A-Za-z0-9]+)\/?$/.exec(url.pathname);
+  const match = /^\/[a-z]\/pay\/(cs_(?:live|test)_[A-Za-z0-9]+)\/?$/.exec(url.pathname);
   return match ? match[1] : null;
 }
 
