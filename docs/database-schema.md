@@ -100,7 +100,7 @@ Serialized credit entries with expiration tracking. Source of truth for balances
 | expiration_policy | VARCHAR(50) | YES | - | fixed_date, days_from_activation, never |
 | expiration_days | INTEGER | YES | - | Days until expiration |
 | status | credit_ledger_status | NO | 'active' | active, depleted, expired, revoked |
-| description | TEXT | YES | - | Derived, data-free label (`Sent letter (2 credits)`, `Operator adjustment`); never a recipient name or an operator's reason since migration 030; not selectable by the admin reader role |
+| description | TEXT | YES | - | Derived, data-free label (`Purchased Starter Pack - 2 Letters`, `Operator adjustment`); never a recipient name or an operator's reason since migration 030; not selectable by the admin reader role |
 | related_ledger_id | UUID | YES | - | Links refunds to original |
 | created_at | TIMESTAMPTZ | NO | NOW() | Entry creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
@@ -131,7 +131,7 @@ Complete audit trail of all credit changes.
 | type | VARCHAR(50) | NO | - | purchase, deduction, refund, adjustment |
 | reference_type | VARCHAR(50) | YES | - | order, letter, manual |
 | reference_id | VARCHAR(255) | YES | - | Related order_id, letter_id |
-| description | TEXT | YES | - | Derived, data-free label the customer's history shows as it is (`Sent letter`, `Refunded Starter Pack - 2 Letters`, `Operator adjustment`); never a recipient name or an operator's reason since migration 030, and never a credit count for new sends and refunds (rows before then read `Sent letter (2 credits)`, which the website rewrites); not selectable by the admin reader role. A whole-pack refund always writes one `refund` row, with amount 0 when every letter was already spent |
+| description | TEXT | YES | - | Derived, data-free label the customer's history shows as it is (`Sent letter`, `Refunded Starter Pack - 2 Letters`, `Operator adjustment`); never a recipient name or an operator's reason since migration 030, and never a credit count for new sends and refunds (rows before then read `Sent letter (2 credits)`, which the website rewrites); not selectable by the admin reader role. A whole-pack refund writes one `refund` row per order, with amount 0 when every letter was already spent (none when a dispute had already reversed the pack) |
 | created_at | TIMESTAMPTZ | NO | NOW() | Transaction timestamp |
 
 **Indexes:**

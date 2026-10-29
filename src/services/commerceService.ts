@@ -2309,11 +2309,13 @@ async function revokeWholePack(
      RETURNING credits`,
     [remaining, lifetimeDecrement, order.user_id]
   );
-  // A refund always leaves a line in the customer's history, even when every
-  // letter was already spent and nothing comes off the balance (a zero-amount
-  // row): without it the history shows the purchase and the sends but no sign
-  // the money went back. Written once per order, as the early return above
-  // stops a replay. A dispute writes a line only when it takes letters.
+  // A refund that reaches here leaves a line in the customer's history, even
+  // when every letter was already spent and nothing comes off the balance (a
+  // zero-amount row): without it the history shows the purchase and the sends
+  // but no sign the money went back. Written at most once per order, as the
+  // early return above stops a replay; that return also means a refund after a
+  // dispute already reversed the pack writes none. A dispute writes a line only
+  // when it takes letters.
   const refunded = cause === 'payment_refunded';
   if ((remaining > 0 || refunded) && user.rows[0]) {
     await client.query(
