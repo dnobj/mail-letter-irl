@@ -740,6 +740,53 @@ describe('commerceService', () => {
     });
   });
 
+  describe('whole-pack history line', () => {
+    async function revokeAll(remaining: number, options: Record<string, unknown>, order: Record<string, unknown>) {
+      const lines: unknown[][] = [];
+      const client = {
+        query: vi.fn(async (sql: string, params?: unknown[]) => {
+          if (sql.includes('INSERT INTO credit_transactions')) lines.push(params ?? []);
+          if (sql.includes('SELECT ledger_id, initial_amount')) {
+            return { rows: [{ ledger_id: 'lot-1', initial_amount: 4, remaining_amount: remaining, source_type: 'purchase' }] };
+          }
+          if (sql.includes('UPDATE users')) return { rows: [{ credits: 0 }] };
+          return { rows: [] };
+        })
+      };
+      await revokePackLots(client as never, { ...baseOrder, order_type: 'letter_pack', credits: 4, ...order } as any, {
+        credits: 'all',
+        ...options
+      });
+      return lines;
+    }
+
+    it('names the pack from the catalogue when the order recorded no name', async () => {
+      const lines = await revokeAll(0, {}, { product_code: 'credit-pack-10', product_snapshot: null });
+      expect(lines).toEqual([['user-1', -0, 0, 'order-1', 'Refunded Regular Pack - 5 Letters']]);
+    });
+
+    it('writes no line for a dispute that takes no letters, and the old line for one that does', async () => {
+      const named = { product_code: 'credit-pack-4', product_snapshot: { name: 'Starter Pack - 2 Letters' } };
+      const dispute = { cause: 'payment_disputed', disputeId: 'dp-1' };
+      expect(await revokeAll(0, dispute, named)).toEqual([]);
+      expect(await revokeAll(2, dispute, named)).toEqual([
+        ['user-1', -2, 0, 'order-1', 'Revoked unused credits after refund of order-1']
+      ]);
+    });
+
+    it('writes no second line when a replayed refund finds the pack already reversed', async () => {
+      const client = {
+        query: vi.fn(async (sql: string) => {
+          if (sql.includes('UPDATE users')) return { rows: [{ credits: 0 }] };
+          return { rows: [] };
+        })
+      };
+      await revokePackLots(client as never, { ...baseOrder, order_type: 'letter_pack', credits: 4 } as any, { credits: 'all' });
+      expect(client.query).toHaveBeenCalledWith(expect.stringContaining('SELECT ledger_id, initial_amount'), expect.anything());
+      expect(client.query).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO credit_transactions'), expect.anything());
+    });
+  });
+
   // Deterministic proof of the canonical order. The PostgreSQL concurrency
   // tests can only ever show the absence of a deadlock on the interleavings
   // they happen to hit; this asserts the statement order itself.
@@ -3694,6 +3741,9 @@ describe('commerceService', () => {
             {
               ...baseOrder,
               order_type: 'letter_pack',
+              product_code: 'credit-pack-4',
+              // Named at checkout unlike the catalogue, so the recorded name is what shows.
+              product_snapshot: { name: 'Holiday Pack - 2 Letters' },
               credits: 4,
               amount_cents: 1999,
               status: 'fulfilled'
@@ -3739,7 +3789,7 @@ describe('commerceService', () => {
     );
     expect(mocks.query).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO credit_transactions'),
-      ['user-1', -2, 0, 'order-1', expect.stringContaining('Revoked unused credits')]
+      ['user-1', -2, 0, 'order-1', 'Refunded Holiday Pack - 2 Letters']
     );
     // What was left is stamped on the audit row, so a later restore knows the figure.
     expect(mocks.query).toHaveBeenCalledWith(
@@ -3753,7 +3803,7 @@ describe('commerceService', () => {
     );
   });
 
-  it('refunds a fully spent pack to a zero balance without booking a negative movement', async () => {
+  it('refunds a fully spent pack to a zero balance and records the refund as a zero-letter line', async () => {
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) {
         return { rows: [{ event_id: 'evt-spent' }] };
@@ -3764,6 +3814,8 @@ describe('commerceService', () => {
             {
               ...baseOrder,
               order_type: 'letter_pack',
+              product_code: 'credit-pack-4',
+              product_snapshot: { name: 'Starter Pack - 2 Letters' },
               credits: 4,
               amount_cents: 1999,
               status: 'fulfilled'
@@ -3805,10 +3857,12 @@ describe('commerceService', () => {
       expect.stringContaining('SET credits = GREATEST'),
       [0, 4, 'user-1']
     );
-    expect(mocks.query).not.toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO credit_transactions'),
-      expect.anything()
-    );
+    // Nothing comes off the balance, but the history still says the pack was
+    // refunded: one zero-amount refund line, named as the purchase line names it.
+    const lines = mocks.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO credit_transactions'));
+    expect(lines).toEqual([
+      [expect.stringContaining("'refund'"), ['user-1', -0, 0, 'order-1', 'Refunded Starter Pack - 2 Letters']]
+    ]);
     // The lot is still revoked and audited, with nothing left to restore.
     expect(mocks.query).toHaveBeenCalledWith(
       expect.stringContaining("status = 'revoked'"),

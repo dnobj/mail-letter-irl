@@ -260,7 +260,7 @@ describe('send_postcard Tool', () => {
       const expectedTransaction = {
         type: 'deduction',
         amount: -2,
-        description: 'Sent postcard (2 credits)',
+        description: 'Sent postcard',
         letter_id: 'letter-123',
       };
 

@@ -361,7 +361,7 @@ export async function deductCreditsFromLedgerWithClient(
         'deduction',
         'letter',
         letterId,
-        description || `Sent letter (${credits} credits)`,
+        description || 'Sent letter',
       ]
     );
     const txn = txResult.rows[0];
