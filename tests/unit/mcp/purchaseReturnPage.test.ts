@@ -102,6 +102,10 @@ describe('checkoutSessionIdOf (#730)', () => {
     expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_live_a1B2c3/')).toBe('cs_live_a1B2c3');
   });
 
+  it('reads it from a live link, which Stripe serves under /g/pay/', () => {
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/g/pay/cs_live_a1B2c3#frag')).toBe('cs_live_a1B2c3');
+  });
+
   it('reads it on our own checkout domain too (#373)', () => {
     vi.stubEnv('STRIPE_CHECKOUT_DOMAIN', 'pay.example.test');
     try {
@@ -118,6 +122,9 @@ describe('checkoutSessionIdOf (#730)', () => {
     expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_other_abc')).toBeNull();
     // Only the session's own path: no other segment, and no query, may name one.
     expect(checkoutSessionIdOf('https://checkout.stripe.com/x/cs_test_abc')).toBeNull();
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/gg/pay/cs_test_abc')).toBeNull();
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/G/pay/cs_test_abc')).toBeNull();
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/g/x/pay/cs_test_abc')).toBeNull();
     expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_test_abc/more')).toBeNull();
     expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_test_abc?next=1')).toBeNull();
     expect(checkoutSessionIdOf(null)).toBeNull();
