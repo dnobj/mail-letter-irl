@@ -533,10 +533,23 @@ function productSnapshot(product: CommerceProductConfig): Record<string, unknown
  * line; that it was a repair is on the order event, not in the history.
  */
 function packPurchaseLine(order: Pick<Order, 'product_code' | 'product_snapshot'>): string {
+  return `Purchased ${packName(order)}`;
+}
+
+/**
+ * The line a whole-pack refund writes, named as the purchase line names the
+ * pack, so the history pairs the two. Never the order id or a credit count:
+ * the customer reads it as it is, and counts letters.
+ */
+function packRefundLine(order: Pick<Order, 'product_code' | 'product_snapshot'>): string {
+  return `Refunded ${packName(order)}`;
+}
+
+function packName(order: Pick<Order, 'product_code' | 'product_snapshot'>): string {
   const recorded = (order.product_snapshot as { name?: unknown } | null)?.name;
-  if (typeof recorded === 'string' && recorded.trim()) return `Purchased ${recorded.trim()}`;
+  if (typeof recorded === 'string' && recorded.trim()) return recorded.trim();
   const product = PACK_PRODUCTS.find(candidate => candidate.productCode === order.product_code);
-  return `Purchased ${product?.name ?? 'a letter pack'}`;
+  return product?.name ?? 'a letter pack';
 }
 
 /**
@@ -2296,7 +2309,13 @@ async function revokeWholePack(
      RETURNING credits`,
     [remaining, lifetimeDecrement, order.user_id]
   );
-  if (remaining > 0 && user.rows[0]) {
+  // A refund always leaves a line in the customer's history, even when every
+  // letter was already spent and nothing comes off the balance (a zero-amount
+  // row): without it the history shows the purchase and the sends but no sign
+  // the money went back. Written once per order, as the early return above
+  // stops a replay. A dispute writes a line only when it takes letters.
+  const refunded = cause === 'payment_refunded';
+  if ((remaining > 0 || refunded) && user.rows[0]) {
     await client.query(
       `INSERT INTO credit_transactions (
          user_id, amount, balance_after, type, reference_type, reference_id, description
@@ -2306,7 +2325,7 @@ async function revokeWholePack(
         -remaining,
         user.rows[0].credits,
         order.order_id,
-        `Revoked unused credits after refund of ${order.order_id}`
+        refunded ? packRefundLine(order) : `Revoked unused credits after refund of ${order.order_id}`
       ]
     );
   }

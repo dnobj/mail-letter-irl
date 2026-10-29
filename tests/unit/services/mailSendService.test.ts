@@ -234,6 +234,16 @@ describe('createMailOrderFromDraft', () => {
     expect(result.job?.idempotency_key).toBe(result.letter.letter_id);
   });
 
+  it.each([['letter', 'Sent letter'], ['postcard', 'Sent postcard']] as const)(
+    'labels the history line for a %s with the mail type alone: no credit count, no recipient',
+    async (mailType, line) => {
+      draft.mail_type = mailType;
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType });
+      expect(deductCredits).toHaveBeenCalledTimes(1);
+      expect(deductCredits.mock.calls[0][1].description).toBe(line);
+    }
+  );
+
   it('takes the account before inserting the letter, so two sends from one account cannot deadlock (#730 review)', async () => {
     await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
     const statements = client.query.mock.calls.map(([sql]) => String(sql));

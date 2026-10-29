@@ -485,8 +485,10 @@ export async function createMailOrderFromDraftWithClient(
       // The mail type, never the recipient. This string is readable by the
       // customer's own transaction history, and the recipient is third-party
       // data that belongs only on letters.recipient, which the admin panel's
-      // reader role cannot select (issue #162 security review, A-01).
-      description: `Sent ${params.mailType === 'postcard' ? 'postcard' : 'letter'} (${requiredCredits} credits)`
+      // reader role cannot select (issue #162 security review, A-01). No
+      // credit count either: the customer counts letters, and the amount
+      // beside this line already says how many.
+      description: `Sent ${params.mailType === 'postcard' ? 'postcard' : 'letter'}`
     });
     creditsRemaining = deduction.user.credits;
 
