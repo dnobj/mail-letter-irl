@@ -3742,7 +3742,8 @@ describe('commerceService', () => {
               ...baseOrder,
               order_type: 'letter_pack',
               product_code: 'credit-pack-4',
-              product_snapshot: { name: 'Starter Pack - 2 Letters' },
+              // Named at checkout unlike the catalogue, so the recorded name is what shows.
+              product_snapshot: { name: 'Holiday Pack - 2 Letters' },
               credits: 4,
               amount_cents: 1999,
               status: 'fulfilled'
@@ -3788,7 +3789,7 @@ describe('commerceService', () => {
     );
     expect(mocks.query).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO credit_transactions'),
-      ['user-1', -2, 0, 'order-1', 'Refunded Starter Pack - 2 Letters']
+      ['user-1', -2, 0, 'order-1', 'Refunded Holiday Pack - 2 Letters']
     );
     // What was left is stamped on the audit row, so a later restore knows the figure.
     expect(mocks.query).toHaveBeenCalledWith(
