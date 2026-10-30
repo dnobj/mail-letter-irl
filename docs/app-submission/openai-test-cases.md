@@ -1,6 +1,6 @@
 # Letter IRL - OpenAI Apps SDK Submission Materials
 
-**Last Updated:** October 17, 2026
+**Last Updated:** October 30, 2026
 **Target Platform:** ChatGPT App Directory
 **Submission Status:** Pre-submission
 
@@ -74,7 +74,10 @@ The setup itself:
 > 3. Press Send on the preview — we print and mail it. Only you send it: ChatGPT never mails anything on its own
 >
 > Sending needs payment: prepaid letters from a Letter Pack, or Pay & Send for a single letter. Both
-> are paid on Stripe's hosted checkout. US addresses only.
+> are paid on Letter IRL's checkout page in your browser, never inside ChatGPT. US addresses only.
+
+The listing's own copy is `longDescription` in [plugin/plugin.json](../../plugin/plugin.json); keep
+the two in step.
 
 ---
 
@@ -508,12 +511,12 @@ Implemented:
 **Required Materials:**
 - App name: Letter IRL
 - App description: (see above)
-- App icon: `https://letterirl.com/logo.jpg`
+- App icon: `plugin/assets/logo.png` (the website's `icon-512.png`), in the package
 - Privacy policy URL: `https://letterirl.com/privacy`
 - Terms of service URL: `https://letterirl.com/terms`
 - MCP server endpoint: `https://api.letterirl.com/mcp`
 - Test cases: the portal test cases above
-- Screenshots: optional
+- Screenshots: optional, and no longer shown in the Directory (plugin guidelines); the package names none
 
 **Test Account:**
 - Production, with the reviewer account described in [Reviewer Setup](#reviewer-setup)
