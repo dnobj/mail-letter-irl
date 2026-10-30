@@ -159,8 +159,9 @@ describe("get_account_balance: where to buy letters", () => {
 
     expect(result.lettersRemaining).toBe(0);
     expect(result.message).toContain(
-      "No letters on this account yet. You can buy a letter pack here, or pay for a single letter as you send it."
+      "No letters on this account yet. You can buy a letter pack from here (the checkout opens on Letter IRL's page in your browser), or pay for a single letter as you send it."
     );
+    expect(result.message).not.toMatch(/letter pack here\b|right here|without leaving the conversation/);
     expect(result.message).not.toContain("website.example");
   });
 

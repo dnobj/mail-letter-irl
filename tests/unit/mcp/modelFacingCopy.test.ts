@@ -389,7 +389,7 @@ describe('tool text in every app', () => {
     name => {
       for (const tool of listed(name)) {
         expect(tool.description, tool.name).not.toMatch(
-          /without leaving the conversation|from the conversation|right here|buy a letter pack here|create_pack_checkout buys/i
+          /without leaving the conversation|(buy|bought|purchase)[^.]*from the conversation|right here|buy a letter pack here|create_pack_checkout buys/i
         );
       }
     }
@@ -401,7 +401,11 @@ describe('tool text in every app', () => {
     '%s: no description says a purchase happens without leaving the conversation',
     name => {
       for (const tool of listed(name)) {
-        expect(tool.description, tool.name).not.toMatch(/without leaving the conversation|right here/i);
+        expect(tool.description, tool.name).not.toMatch(/without leaving the conversation|right here|buy a letter pack here/i);
+      }
+      for (const named of ['get_started', 'get_account_balance']) {
+        const tool = listed(name).find(candidate => candidate.name === named);
+        expect(tool?.description, named).toMatch(/checkout (opens )?in the browser/);
       }
     }
   );

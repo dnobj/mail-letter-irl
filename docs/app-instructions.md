@@ -21,7 +21,7 @@ served instructions, word for word. There is no assumed auto-greet hook when the
 
 Use this wording for broad first-run prompts such as `what can you do?` or `help me get started`:
 
-> Letter IRL can draft, preview, and mail real physical letters or postcards in the U.S. Tell me who it is for and what you want to say, and I will prepare a free preview before anything is mailed. To send it, you can use prepaid letters, buy a letter pack right here, or pay for just that one letter.
+> Letter IRL can draft, preview, and mail real physical letters or postcards in the U.S. Tell me who it is for and what you want to say, and I will prepare a free preview before anything is mailed. To send it, you can use prepaid letters, buy a letter pack from here (the checkout opens in your browser), or pay for just that one letter.
 
 ## Tool-Use Instructions
 
@@ -80,8 +80,9 @@ ChatGPT's would be false there. The app's profile (`src/auth/clientProfiles.ts`)
   - An app that shows no cards is not told about the **Create my preview** button; Claude is.
   - An app that takes no purchases hears nothing about a checkout. Its line about the same mail
     twice names only the send tools, or, under the send rule, the confirmation page.
-- **Tool descriptions.** `get_started`, `get_account_balance` and `list_letter_packs` promise a
-  purchase in the conversation only where the app takes purchases; elsewhere they say letters are
+- **Tool descriptions.** `get_started`, `get_account_balance` and `list_letter_packs` say a
+  purchase starts from the conversation, with the checkout in the browser, only where the app takes
+  purchases; elsewhere they say letters are
   bought on the website. `generate_image_for_mail` names ChatGPT only to ChatGPT. Under the send
   rule, the four preview tools end with how the person sends: the card's Send in an app with
   `rendersCards`, `request_send`'s link elsewhere (#516). `send_letter` and `send_postcard` keep

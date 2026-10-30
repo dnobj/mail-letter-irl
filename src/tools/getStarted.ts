@@ -36,10 +36,10 @@ function purchaseStep(client: ClientProfile): string {
   // unreachable with LETTER_IRL_PACKS_URL unset.
   if (isJitPurchaseEnabled()) {
     return (
-      "You can either buy a pack of prepaid letters from here - the checkout opens on " +
-      "Letter IRL's page in your browser - or pay for a single letter at the moment you " +
-      "send it - no pre-purchase needed. Tell me who the mail is for and what you want to " +
-      "say, and I'll walk you through whichever you prefer."
+      "You can either buy a pack of prepaid letters from here (the checkout opens on " +
+      "Letter IRL's page in your browser), or pay for a single letter as you send it, with " +
+      "no pre-purchase needed. Tell me who the mail is for and what you want to say, and " +
+      "I'll walk you through whichever you prefer."
     );
   }
   return (
