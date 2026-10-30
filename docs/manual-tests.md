@@ -398,7 +398,8 @@ after **Refresh tools** on the (DEV) app. The iPhone is not run yet.
 
 **Status:** Partly run in development on 2026-09-26, with the send rule on. It used Claude on the web
 (claude.ai, in the Claude app's built-in browser) and Letter IRL test account testlirl02. Steps 1 to
-3 passed; step 4 ran as far as the link; steps 5 and 6 were not run. Step 7 ran the same day, after
+3 passed; step 4 ran as far as the link; steps 5 and 6 were not run there (step 6 ran in production
+on 2026-10-30, below). Step 7 ran the same day, after
 #486 deployed (88dd3d2): titles and the image text passed, and the purchase text needs #475. Step 8
 ran after #489 deployed (d686367). Claude has no checkout tools and offers none, and it gives the
 letter packs link only when asked. Step 9 ran after #491 deployed (45c7287) and passed: Claude has
@@ -406,7 +407,7 @@ no image tool and says Letter IRL can't create images. Step 10 ran after #494 de
 the getting-started card draws in Claude on the web and still works in ChatGPT. Step 11 ran on
 2026-09-27 after #496 deployed (5ee991e): both preview cards draw in Claude on the web from the
 result's `_meta`, and Claude keeps the card-only send tools from its model. Opening the letter
-packs page is still to check in a normal browser. Step 12 ran the same day after #498 deployed
+packs page in a normal browser passed in production on 2026-10-30 (below). Step 12 ran the same day after #498 deployed
 (1290a83) and passed: the card's Send sends in Claude, and asked to send, Claude points to the card.
 Step 13 ran after #499 deployed (8babf9f) and passed: reopened, the sent card shows it was sent.
 
@@ -417,13 +418,13 @@ showed `client=claude` and steering r56 with widgets v100; the tool list held no
 for the model, and the card-only tools sat under **App-only tools**. The balance said 0 and gave
 the letter packs link unprompted. The preview card drew with "Not enough letters", and its link
 opened the packs page in a normal browser (step 11's open check). Asked "send it", Claude called
-`request_send` only; the confirmation page, with 0 letters, went to the packs page with the way
-back. A real send was not made in production (no pack bought); SEND-01 and the stage B canary
+`request_send` only; with 0 letters, the confirmation page redirected to the letter packs page,
+with a `returnTo` back to the confirmation page. A real send was not made in production (no pack bought); SEND-01 and the stage B canary
 cover it. After **Disconnect**, no call reached the server, but Auth0 still listed Claude's consent
 and its refresh token (step 6). Findings, all on #849: new Claude connectors default to Auto
 permission mode, so tools run unprompted; Claude told the person the page offers "Pay & Send" for a
 pack-payable letter, which no tool text says; the website's page title still says "from ChatGPT".
-The Connect page lists Claude since the same day (`LETTER_IRL_CONNECT_APPS`).
+The Connect page has listed Claude since 2026-10-30 (`LETTER_IRL_CONNECT_APPS`).
 
 Background: Claude connects with its published identity, the document at
 `https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
@@ -464,10 +465,12 @@ change without a refresh.
 - [ ] No letters, an unconfirmed address, an erased account. (Not run.)
 6. Disconnect
 - [x] Disconnect on Claude's connector page, then check that no call reaches the server. (Passed in
-      production on 2026-10-30. Claude's Disconnect revokes nothing at Auth0: the user still lists
-      Claude under Authorized Applications, and Devices still holds its refresh token until it
-      lapses, 15 days unused or 30 at most. Clear both by hand in the Auth0 dashboard, Devices then
-      Authorized Applications, until #849 gives the person a **Remove access** of their own.)
+      production on 2026-10-30.)
+- [ ] Check that the Auth0 user no longer lists Claude among authorized applications. (Open, #849.
+      In production on 2026-10-30, Claude's Disconnect revoked nothing at Auth0: the user still
+      listed Claude under Authorized Applications, and Devices still held its refresh token until
+      it lapses, 15 days unused or 30 at most. Clear both by hand in the Auth0 dashboard, Devices
+      then Authorized Applications, until #849 gives the person a **Remove access** of their own.)
 
 Findings, fixed by #484:
 - Several tool descriptions said "so ChatGPT can reuse that existing image".
@@ -900,7 +903,8 @@ account). Production Auth0 already had Codex imported, under the fixed client do
 `https://chatgpt.com/oauth/codex/IJMOsCBL6i7U/client.json`. Codex 0.166 starts the sign-in as soon
 as `codex mcp add` runs and asks for the mail scopes without the `scopes` line in
 `~/.codex/config.toml`; the calls succeeded without it (the line is harmless, and the Connect page
-keeps it for older versions). Through `codex exec --approve-for-me`: 19 tools, a balance of 0, a
+keeps it for older versions). Through `codex exec --approve-for-me`, the direct server listed 19
+tools; then came a balance of 0, a
 preview, and "No matching order found for this user." for an order that isn't on the account. The
 owner's "send it" (`codex exec --approve-for-me resume <session> "send it"`; the flags go before
 `resume`) gave `request_send`'s link, and the page asked to buy letters. Every call logged
@@ -949,8 +953,8 @@ Hermes on their own computer needs none of this.
 production test account, through the same one-shot relay). The entry was added for the test with
 the Connect page's commands, plus `connect_timeout` 300, and removed afterwards. Back up
 `config.yaml` first: `hermes config set` rewrites it and drops its comments. Hermes reported
-"Authenticated — 22 tool(s) available", and every call logged `client=hermes`. With the bot's model
-(Kimi K3) and Hermes's lazily loaded tools, a four-part request looped on the balance and listed tool
+"Authenticated — 22 tool(s) available", and every call logged `client=hermes`. With that Hermes
+instance's model (Kimi K3) and Hermes's lazily loaded tools, a four-part request looped on the balance and listed tool
 names that don't exist; one focused request made the preview. Asked to send, its model chose
 `request_send`, and the page asked to buy letters. `hermes mcp remove` revoked nothing at Auth0
 (#849).
@@ -3195,10 +3199,11 @@ reopened card shows what happened.
 
 **Status:** Passed on development on 2026-10-30, as the owner's development account through ChatGPT
 (DEV), with PostGrid in test mode. The letter was sent from the card with an arrival date of
-November 20, so it was held for its mail date, November 10. One snag: **Preview sending now…**
-without an elevation sends you to elevate, and the panel then returns to the overview rather than
-to the command (the audit shows the refused `command.execute` with `ADMIN_ELEVATION_REQUIRED`).
-Open the job again and preview once elevated.
+November 20, 2026, so it was held for its mail date, November 10, 2026. One snag: on a preview
+opened without an elevation, typing the confirmation phrase turns **Execute** on in the browser
+although the server drew it disabled. Pressing it is refused (`command.execute`,
+`ADMIN_ELEVATION_REQUIRED`, in the audit), and elevating from that refusal returns to the overview,
+not to the command. Elevate first through the preview's own link, which returns to the preview.
 
 **Preconditions:** Full mode; arrival dates on in development (`LETTER_IRL_ARRIVE_BY_ENABLED`); a letter
 sent with an arrival date whose mail date has not come (#535).
