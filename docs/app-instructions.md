@@ -80,10 +80,10 @@ ChatGPT's would be false there. The app's profile (`src/auth/clientProfiles.ts`)
   - An app that shows no cards is not told about the **Create my preview** button; Claude is.
   - An app that takes no purchases hears nothing about a checkout. Its line about the same mail
     twice names only the send tools, or, under the send rule, the confirmation page.
-- **Tool descriptions.** `get_started`, `get_account_balance` and `list_letter_packs` say a
-  purchase starts from the conversation, with the checkout in the browser, only where the app takes
-  purchases; elsewhere they say letters are
-  bought on the website. `generate_image_for_mail` names ChatGPT only to ChatGPT. Under the send
+- **Tool descriptions.** Only where the app takes purchases do `get_started` and
+  `get_account_balance` say a purchase starts from the conversation, with the checkout in the
+  browser, and `list_letter_packs` offer packs to buy; elsewhere they say letters are bought on the
+  website. `generate_image_for_mail` names ChatGPT only to ChatGPT. Under the send
   rule, the four preview tools end with how the person sends: the card's Send in an app with
   `rendersCards`, `request_send`'s link elsewhere (#516). `send_letter` and `send_postcard` keep
   their words where the app keeps card-only tools from its model (ChatGPT, Claude). In any other
