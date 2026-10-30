@@ -1,6 +1,6 @@
 # OpenAI Apps SDK Owner Checklist
 
-**Last Updated:** October 8, 2026
+**Last Updated:** October 30, 2026
 **Purpose:** Owner-managed submission tasks, assets, and the final readiness gate
 
 This checklist tracks the non-code items the project owner needs to gather, verify, or decide before submitting Letter IRL for OpenAI Apps SDK review. Keep secrets, private billing details, private tax IDs, and passwords out of this file.
@@ -135,9 +135,33 @@ Remaining:
 
 ## Plugin Portal Gates
 
-The portal's submission steps as of September 2026 (With MCP, Universal endpoint;
-`https://developers.openai.com/plugins/deploy/submission`). Record each gate's outcome in the
-[release record](#release-record) below.
+The portal's submission steps as read on October 30, 2026
+(`https://developers.openai.com/plugins/deploy/submission` and
+`https://developers.openai.com/plugins/plugin-guidelines`). Apps are now plugins in the Plugin
+Directory. A plugin is uploaded as a ZIP whose `plugin.json` carries the listing and the review
+details; the package is [`plugin/`](../../plugin/README.md). The first release is offered in
+**ChatGPT only**, in the **Productivity** category (owner decision, 2026-10-30); Codex is added as
+an update after approval, once its plugin route has been run end to end. Record each gate's outcome
+in the [release record](#release-record) below.
+
+- [ ] **Checkout on our own domain.** The guidelines allow commerce for physical goods only, with
+      checkout outside ChatGPT "on your own domain". Stripe must serve Checkout on
+      `pay.letterirl.com` ([stripe-custom-domain.md](../stripe-custom-domain.md)): a pack checkout
+      and a Pay & Send open on that host before submitting.
+- [ ] **Package.** Build the ZIP as [plugin/README.md](../../plugin/README.md) says, then
+      **Upload new or existing plugin**, choose the verified developer (Objective Works), and resolve
+      the **Metadata & Skills** findings. Remote servers connect under **MCPs** (**With MCP**).
+- [ ] **Sign-in client.** Production Auth0 does not return RFC 9207 `iss`, so ChatGPT signs in with
+      its per-callback CIMD document, `https://chatgpt.com/oauth/{callback_id}/client.json`. After
+      connecting the MCP server, read the client document and redirect URI on the server's
+      management page, and compare them with the ChatGPT application production Auth0 already
+      imported. A new callback id means importing that document too, and production has one
+      application slot of ten left.
+- [ ] **Commerce declaration.** `review.commerce` is true, and `review.commerce_description` says
+      packs are prepaid mailings redeemable only for printed mail, never credits or tokens.
+- [ ] **Review details in the dashboard.** The demo recording URL, and the reviewer account's
+      sign-in and notes (with the controlled mail address), go in the **Review details** form,
+      never in the ZIP.
 
 - [ ] **Launch build.** Production runs the launch promotion from `dev` (#158) with stages A to G
       and the live checks of [launch-promotion.md](../launch-promotion.md) done, so the launch cut
@@ -149,7 +173,9 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
 - [ ] **Access.** The submitting account has Apps Management write access in `Objective Works` /
       `Mail Letter IRL`.
 - [ ] **Listing.** Name, descriptions, logo, category, website, support, privacy and terms URLs,
-      and release notes, matching `docs/chatgpt-app-submission.md`.
+      and release notes, as `plugin/plugin.json` sets them (`tests/unit/mcp/pluginPackage.test.ts`
+      holds them to the portal's limits). If the portal's category list has a closer fit than
+      Productivity, choose it there.
 - [ ] **Domain verification.** In MCP configuration the portal issues a token for
       `https://api.letterirl.com/mcp`; the challenge host is the MCP host. Set
       `OPENAI_APPS_CHALLENGE_TOKEN` on the production API service, wait for the redeploy, and check
@@ -167,9 +193,11 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
       stages C to G, and each switch adds its tools, so scan only after the last switch and a
       connector refresh. Record any warning, and give each tool's three hint
       justifications from [Justifications for the portal](./openai-test-cases.md#justifications-for-the-portal).
-- [ ] **Starter prompts.** The listing's prompts for customers, from
+- [ ] **Starter prompts.** The listing's prompts for customers, `defaultPrompt` in `plugin/plugin.json`, from
       [Starter Prompts](./openai-test-cases.md#starter-prompts); not the reviewer's test cases.
-- [ ] **Test cases.** Five positive and three negative, from `openai-test-cases.md` (#406).
+- [ ] **Test cases.** Exactly five positive and three negative, `review.test_cases` in
+      `plugin/plugin.json`, from [Portal Test Cases](./openai-test-cases.md#portal-test-cases) (#406).
+      Run the positive cases on the reviewer account before submitting.
 - [ ] **Availability.** United States only.
 - [ ] **Attestations and submit.**
 - [ ] **Publish.** A separate step after approval. Publish, refresh the production connector, and
@@ -200,6 +228,9 @@ timestamps and screenshot names, never tokens, cookies or personal data.
 | --- | --- | --- | --- | --- | --- |
 | Launch build on production (commit) | | | production | | |
 | Pay & Send on | | | production | | |
+| Checkout on pay.letterirl.com | | | production | | |
+| Package uploaded, metadata findings resolved | | | production | | |
+| Sign-in client (CIMD document) checked | | | production | | |
 | Access | | | production | | |
 | Listing | | | production | | |
 | Domain verification | | | production | | |
