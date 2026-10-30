@@ -410,6 +410,21 @@ packs page is still to check in a normal browser. Step 12 ran the same day after
 (1290a83) and passed: the card's Send sends in Claude, and asked to send, Claude points to the card.
 Step 13 ran after #499 deployed (8babf9f) and passed: reopened, the sent card shows it was sent.
 
+**Production gate, 2026-10-30, passed** (Claude on the web in Chrome, the owner's production test
+account, 0 letters). Production Auth0 already had Claude imported, with the three mail scopes
+user-delegated and no client access. The connector was added through the prefilled link. The log
+showed `client=claude` and steering r56 with widgets v100; the tool list held no send or pay tool
+for the model, and the card-only tools sat under **App-only tools**. The balance said 0 and gave
+the letter packs link unprompted. The preview card drew with "Not enough letters", and its link
+opened the packs page in a normal browser (step 11's open check). Asked "send it", Claude called
+`request_send` only; the confirmation page, with 0 letters, went to the packs page with the way
+back. A real send was not made in production (no pack bought); SEND-01 and the stage B canary
+cover it. After **Disconnect**, no call reached the server, but Auth0 still listed Claude's consent
+and its refresh token (step 6). Findings, all on #849: new Claude connectors default to Auto
+permission mode, so tools run unprompted; Claude told the person the page offers "Pay & Send" for a
+pack-payable letter, which no tool text says; the website's page title still says "from ChatGPT".
+The Connect page lists Claude since the same day (`LETTER_IRL_CONNECT_APPS`).
+
 Background: Claude connects with its published identity, the document at
 `https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
 ([auth0-tenant-configuration.md](auth0-tenant-configuration.md), Applications, section 6). One
@@ -448,8 +463,11 @@ change without a refresh.
 5. Refusals
 - [ ] No letters, an unconfirmed address, an erased account. (Not run.)
 6. Disconnect
-- [ ] Disconnect on Claude's connector page, then check that the Auth0 user no longer lists Claude
-      among authorized applications. (Not run.)
+- [x] Disconnect on Claude's connector page, then check that no call reaches the server. (Passed in
+      production on 2026-10-30. Claude's Disconnect revokes nothing at Auth0: the user still lists
+      Claude under Authorized Applications, and Devices still holds its refresh token until it
+      lapses, 15 days unused or 30 at most. Clear both by hand in the Auth0 dashboard, Devices then
+      Authorized Applications, until #849 gives the person a **Remove access** of their own.)
 
 Findings, fixed by #484:
 - Several tool descriptions said "so ChatGPT can reuse that existing image".
@@ -792,6 +810,19 @@ model doesn't see: Claude Code hides card-only tools, and the server answers a c
 A Claude Code session signed in to a Claude account also gets that account's connectors. There,
 our tools arrive through Claude's own connection and log as `client=claude` (checked the same day).
 
+**Production gate, 2026-10-30, passed** (Claude Code 2.1.296 on Windows, the owner's production
+test account). Production Auth0 already had Claude Code imported. The Connect page's own command
+added the server (`claude mcp add --transport http --scope user letter-irl <production /mcp>`), and
+`claude mcp login letter-irl` signed in; the first try timed out while the owner signed in, and a
+second run passed. A `claude -p` session allowed only `mcp__letter-irl` tools: 19 tools, none that
+sends or pays; the balance said 0 with the packs link; the preview made a draft with "Not enough
+letters". The owner resumed it with "send it": `request_send` gave the link, and the page asked to
+buy letters. Every call logged `client=claude_code`. `claude mcp logout` revoked the refresh token
+(Auth0 "Success Revocation", and Devices dropped Claude Code), but the consent stayed under
+Authorized Applications (#849). Each `subscriptions/listen` request logs `mcp.handler_error` as a
+`transport_error`: the server refuses those streams on purpose (`maxSubscriptions: 0`), so the
+line is noise, noted on #849.
+
 ### CLIENT-03 — Visual Studio Code (launch gate, #471)
 
 **Status:** Passed in development: steps 1 and 2 on 2026-09-26, the rest on 2026-10-26 (VS Code
@@ -861,7 +892,20 @@ first steps on 2026-09-26 (0.157.1). The account was testlirl02.
 - Pay & Send is still open to the model on that route, because the server takes it for ChatGPT.
   The person still pays on Stripe, but never saw our card (#475). PR #508 makes Pay & Send
   card-only under the send rule in every app. After it deploys, list this route's tools again:
-  `create_mail_checkout` should be gone as well.
+  `create_mail_checkout` should be gone as well. (It is: in production on 2026-10-30 the route
+  listed 20 tools, with no `send_letter`, `send_postcard` or `create_mail_checkout`.)
+
+**Production gate, 2026-10-30, passed** (Codex CLI 0.166.0 on Windows, the owner's production test
+account). Production Auth0 already had Codex imported, under the fixed client document
+`https://chatgpt.com/oauth/codex/IJMOsCBL6i7U/client.json`. Codex 0.166 starts the sign-in as soon
+as `codex mcp add` runs and asks for the mail scopes without the `scopes` line in
+`~/.codex/config.toml`; the calls succeeded without it (the line is harmless, and the Connect page
+keeps it for older versions). Through `codex exec --approve-for-me`: 19 tools, a balance of 0, a
+preview, and "No matching order found for this user." for an order that isn't on the account. The
+owner's "send it" (`codex exec --approve-for-me resume <session> "send it"`; the flags go before
+`resume`) gave `request_send`'s link, and the page asked to buy letters. Every call logged
+`client=codex`. `codex mcp logout` then showed "Not logged in" but revoked nothing at Auth0 (#849).
+The "No matching order" refusal logs as `Tool invocation failed` with `unknown_error`, also on #849.
 
 ### CLIENT-05 — Hermes Agent on a remote host (launch gate, #471)
 
@@ -900,6 +944,16 @@ Hermes's own bugs on remote hosts are [#87329](https://github.com/NousResearch/h
 (the port collision) and [#103633](https://github.com/NousResearch/hermes-agent/issues/103633). The
 second, about the token exchange for `/mcp` paths, did not occur against Auth0. A person running
 Hermes on their own computer needs none of this.
+
+**Production gate, 2026-10-30, passed** (Hermes v0.21.0 in Docker on the owner's VPS, the owner's
+production test account, through the same one-shot relay). The entry was added for the test with
+the Connect page's commands, plus `connect_timeout` 300, and removed afterwards. Back up
+`config.yaml` first: `hermes config set` rewrites it and drops its comments. Hermes reported
+"Authenticated — 22 tool(s) available", and every call logged `client=hermes`. With the bot's model
+(Kimi K3) and Hermes's lazily loaded tools, a four-part request looped on the balance and listed tool
+names that don't exist; one focused request made the preview. Asked to send, its model chose
+`request_send`, and the page asked to buy letters. `hermes mcp remove` revoked nothing at Auth0
+(#849).
 
 ### CLIENT-06 — OpenClaw (launch gate, #471)
 
@@ -3139,24 +3193,34 @@ reopened card shows what happened.
 
 ### ADMIN-CMD-04 — Send held mail now, and the refusals
 
-**Status:** Not run. A released letter goes to whatever provider development routes to at the next
-maintenance run, an outside effect the owner should trigger knowingly.
+**Status:** Passed on development on 2026-10-30, as the owner's development account through ChatGPT
+(DEV), with PostGrid in test mode. The letter was sent from the card with an arrival date of
+November 20, so it was held for its mail date, November 10. One snag: **Preview sending now…**
+without an elevation sends you to elevate, and the panel then returns to the overview rather than
+to the command (the audit shows the refused `command.execute` with `ADMIN_ELEVATION_REQUIRED`).
+Open the job again and preview once elevated.
 
 **Preconditions:** Full mode; arrival dates on in development (`LETTER_IRL_ARRIVE_BY_ENABLED`); a letter
 sent with an arrival date whose mail date has not come (#535).
 
 **Steps:**
 
-1. [ ] Open the held letter's job page. Verify that **held for its mail date until** and **next attempt** both
+1. [x] Open the held letter's job page. Verify that **held for its mail date until** and **next attempt** both
    show the same time, 09:00 New York time on its mail date (the page shows it in UTC in the tooltip), and that
-   the page offers **Preview sending now…**.
-2. [ ] Preview. Verify the letter, the account, the funding and the hold, and the warnings. Give a reason of
+   the page offers **Preview sending now…**. (Scheduled, next attempt and held until all read
+   2026-11-10 14:00:00Z, 09:00 Eastern Standard Time.)
+2. [x] Preview. Verify the letter, the account, the funding and the hold, and the warnings. Give a reason of
    at least 8 characters and execute. Verify that **next attempt** is now, **held for its mail date until** is
-   unchanged, the letter is still `queued`, and `/audit` shows the run.
-3. [ ] After the next maintenance run, verify that the provider accepted the letter (PostGrid test mode in
-   development).
-4. [ ] Open the job page again. Verify that it no longer offers sending now, and that
-   `/commands/job.dispatch_now/preview?target=<job>` answers `409 ADMIN_INVALID_STATE`.
+   unchanged, the letter is still `queued`, and `/audit` shows the run. (The preview showed the job, letter,
+   account, prepaid funding, "held until 2026-11-10T14:00:00.000Z (09:00 New York time on its mail date)"
+   and the three warnings. After **Execute**, next attempt read 17:50:43Z and held until was unchanged.
+   `/audit` showed `job.dispatch_now` succeeded with the reason, and the commerce audit showed
+   `mail_job_release` / `operator_released_hold` with the before and after next attempt.)
+3. [x] After the next maintenance run, verify that the provider accepted the letter (PostGrid test mode in
+   development). (About 18:02 UTC: the letter `accepted`, the job `completed` after 1 of 5 attempts, with a
+   provider order id.)
+4. [x] Open the job page again. Verify that it no longer offers sending now, and that
+   `/commands/job.dispatch_now/preview?target=<job>` answers `409 ADMIN_INVALID_STATE`. (Both.)
 
 **Pass criteria:** Only held mail can be sent early, with a live elevation, a reason and an audit row; the
 hold's original time stays on record.

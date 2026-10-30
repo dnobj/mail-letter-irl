@@ -1,8 +1,8 @@
 # Stripe Custom Checkout Domain
 
-**Last Updated:** September 24, 2026
+**Last Updated:** October 30, 2026
 **Purpose:** Serving Stripe-hosted Checkout on `pay.letterirl.com`, and the order to set it up in (#373)
-**Status:** Steps 4 to 7 done on 2026-09-24: `pay.letterirl.com` added in live mode with **Switch to this domain once added** unticked, DNS verified. Development has the setting (step 2). Left for launch: the production setting and connector refresh (steps 1 to 3), then switching to the domain in Stripe, then step 8.
+**Status:** Steps 1 to 3 done in production on 2026-10-29: `STRIPE_CHECKOUT_DOMAIN` deployed and the connector refreshed. The domain added on 2026-09-24 was no longer on the Stripe account by 2026-10-29, with no record of its removal (#848 proposes an alert). It was added again the same day, in live mode with **Switch to this domain once added** ticked. Stripe issued a new `_acme-challenge` value, which replaced the old one in DNS, and reported the records verified. On 2026-10-30 it still read "Adding", waiting on Stripe's stability check and email; DNS was consistent across resolvers. Left: Stripe's email, then step 8. Until then checkouts open on `checkout.stripe.com`, which the start page accepts.
 
 The app guidelines ask for purchases to complete on our own domain. Stripe can serve its hosted Checkout page on a subdomain of ours. That is a paid Stripe feature: USD 10 a month, billed in the first week of the following month, and only for months it was on for the whole month ([Stripe's FAQ](https://support.stripe.com/questions/custom-domain-on-stripe-hosted-surfaces-faq)).
 
