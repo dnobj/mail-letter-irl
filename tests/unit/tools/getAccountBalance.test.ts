@@ -215,10 +215,10 @@ describe("get_account_balance: where to buy letters", () => {
 
   it("describes where letters are bought, per app", () => {
     expect(describeTool(getAccountBalanceTool, clientProfileNamed("chatgpt"))).toContain(
-      "Letters can be bought without leaving the conversation"
+      "Letters can be bought from the conversation, with the checkout in the browser"
     );
     const elsewhere = describeTool(getAccountBalanceTool, clientProfileNamed("claude"));
     expect(elsewhere).toContain("Letter packs are bought on the Letter IRL website");
-    expect(elsewhere).not.toMatch(/without leaving the conversation|create_pack_checkout/);
+    expect(elsewhere).not.toMatch(/from the conversation|create_pack_checkout/);
   });
 });

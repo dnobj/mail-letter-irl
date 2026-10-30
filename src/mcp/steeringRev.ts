@@ -226,4 +226,7 @@
 // partner's schedule (the certified note stays in the result: an order tool's description never names certified mail, #625).
 // The preview narration now carries the delivery estimate for mail sent at once (held mail already gave its dates), so an
 // app whose model reads only the text sees it too.
-export const STEERING_COPY_REV = 56;
+// r57: where the app takes purchases, get_started and get_account_balance say a pack is bought from the conversation with
+// the checkout in the browser, not "without leaving the conversation" or "right here": the Plugin Directory's commerce
+// rule puts checkout outside ChatGPT, on our own page, and descriptions must match behaviour (#852).
+export const STEERING_COPY_REV = 57;

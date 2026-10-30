@@ -185,7 +185,7 @@ export const getAccountBalanceTool: McpToolDefinition<
   // sentence, where purchases through connectors are not allowed (#484).
   description: (client) =>
     client.inAppPurchases
-      ? "Check how many prepaid letters remain on this account. Letters can be bought without leaving the conversation: list_letter_packs shows the sizes, create_pack_checkout buys one."
+      ? "Check how many prepaid letters remain on this account. Letters can be bought from the conversation, with the checkout in the browser: list_letter_packs shows the sizes, create_pack_checkout starts one."
       : "Check how many prepaid letters remain on this account. Letter packs are bought on the Letter IRL website, and the result gives the link when none are left.",
   readOnly: true,
   meta: {

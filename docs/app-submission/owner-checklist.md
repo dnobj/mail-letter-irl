@@ -164,10 +164,11 @@ in the [release record](#release-record) below.
 - [ ] **Commerce declaration.** `review.commerce` is true, and `review.commerce_description` says
       packs are prepaid mailings redeemable only for printed mail, never credits or tokens.
 - [ ] **Served copy matches the declaration.** The guidelines want each tool's description to match
-      its behaviour, and the declaration says checkout opens outside ChatGPT. `get_started` and
-      `get_account_balance` still say a pack can be bought "right here" or "without leaving the
-      conversation", and so does the manifest's description. That copy is reworded, deployed to
-      production and the connector refreshed before the scan (#852).
+      its behaviour, and the declaration says checkout opens outside ChatGPT. Since #852 (steering
+      r57), `get_started`, `get_account_balance` and the manifest's description say a pack is bought
+      from the conversation with the checkout in the browser, where they said "right here" or
+      "without leaving the conversation". Before the scan, production runs r57 (the log's
+      `steeringRev`) and the connector has been refreshed.
 - [ ] **Review details in the dashboard.** The demo recording URL, and the reviewer account's
       sign-in and notes (with the controlled mail address), go in the **Review details** form,
       never in the ZIP.

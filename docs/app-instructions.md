@@ -15,7 +15,7 @@ served instructions, word for word. There is no assumed auto-greet hook when the
 
 ## App Description
 
-`Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. Buy prepaid letters without leaving the conversation, or pay for a single letter as you send it.`
+`Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. Buy prepaid letters from the conversation, with the checkout on Letter IRL's page in your browser, or pay for a single letter as you send it.`
 
 ## First-Turn Onboarding Copy
 

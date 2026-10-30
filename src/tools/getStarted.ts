@@ -28,21 +28,24 @@ function purchaseStep(client: ClientProfile): string {
       "Then tell me who the mail is for and what you want to say."
     );
   }
-  // Both branches now buy IN the conversation. Only Pay & Send is conditional:
+  // Both branches start the purchase in the conversation; its checkout opens on our page in
+  // the browser, never inside ChatGPT (the Plugin Directory's commerce rule, #852). Only Pay & Send is conditional:
   // packs are gated on beta access and price configuration, never on
   // JIT_PURCHASE_ENABLED - so the flag-off branch changed most. It used to
   // offer nothing but a link to letterirl.com, which is also currently
   // unreachable with LETTER_IRL_PACKS_URL unset.
   if (isJitPurchaseEnabled()) {
     return (
-      "You can either buy a pack of prepaid letters right here, or pay for a single " +
-      "letter at the moment you send it - no pre-purchase needed. Tell me who the mail " +
-      "is for and what you want to say, and I'll walk you through whichever you prefer."
+      "You can either buy a pack of prepaid letters from here - the checkout opens on " +
+      "Letter IRL's page in your browser - or pay for a single letter at the moment you " +
+      "send it - no pre-purchase needed. Tell me who the mail is for and what you want to " +
+      "say, and I'll walk you through whichever you prefer."
     );
   }
   return (
     "Before sending mail, buy a pack of prepaid letters - I can show you the sizes and " +
-    "prices right here. Then tell me who the mail is for and what you want to say."
+    "prices here, and the checkout opens on Letter IRL's page in your browser. Then tell " +
+    "me who the mail is for and what you want to say."
   );
 }
 
@@ -60,7 +63,7 @@ export const getStartedTool: McpToolDefinition<GetStartedInput, GetStartedOutput
   title: "Get started",
   description: (client) =>
     client.inAppPurchases
-      ? "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy prepaid letters without leaving the conversation, and example prompts to try next."
+      ? "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy prepaid letters from the conversation (the checkout opens in the browser), and example prompts to try next."
       : "Get a short getting-started guide for new Letter IRL users: what the app can do, how to buy prepaid letters, and example prompts to try next.",
   readOnly: true,
   meta: {
