@@ -22,11 +22,15 @@ that every test case names only tools ChatGPT is served at the launch cut
 
 ## Building the ZIP
 
-The files must sit at the root of the ZIP, not inside a `plugin/` folder. In PowerShell, from the
-repository root:
+The files must sit at the root of the ZIP, not inside a `plugin/` folder, with forward slashes in
+the entry names (`assets/logo.png`). From the repository root, with Windows' own `tar`:
 
 ```powershell
-Compress-Archive -Path plugin\plugin.json, plugin\mcp.json, plugin\assets -DestinationPath letter-irl-plugin.zip -Force
+tar.exe -a -c -f letter-irl-plugin.zip -C plugin plugin.json mcp.json assets
 ```
+
+Windows PowerShell 5.1's `Compress-Archive` writes `assets\logo.png`, with a backslash, which a
+validator looking for `./assets/logo.png` may not find; do not use it. Check the entries with
+`tar.exe -t -f letter-irl-plugin.zip`.
 
 The README stays out of the ZIP. Keep `letter-irl-plugin.zip` out of Git.

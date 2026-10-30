@@ -52,6 +52,8 @@ describe("Plugin Directory package", () => {
     }
   });
 
+  // The portal asks 2:1 on white for brandColor (on #212121 only for brandColorDark, which we leave
+  // out); holding brandColor to both keeps it legible in either theme.
   it("names a brand colour with at least 2:1 contrast on white and on #212121", () => {
     const luminance = (hex: string) => {
       const channel = (offset: number) => {
@@ -77,8 +79,11 @@ describe("Plugin Directory package", () => {
       expect(testCase.description).toBeTruthy();
       expect(testCase.prompt).toBeTruthy();
       expect(testCase.expected_behavior).toBeTruthy();
-      expect(testCase.tools_triggered.length).toBeGreaterThan(0);
-      for (const tool of testCase.tools_triggered) expect(served.has(tool)).toBe(true);
+      // A string of comma-separated tool names, as the portal's field table types it.
+      expect(typeof testCase.tools_triggered).toBe("string");
+      const tools = testCase.tools_triggered.split(/,\s*/);
+      expect(tools.length).toBeGreaterThan(0);
+      for (const tool of tools) expect(served.has(tool)).toBe(true);
     }
     for (const testCase of review.test_cases.negative) {
       expect(testCase.description).toBeTruthy();

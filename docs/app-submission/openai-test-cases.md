@@ -1,6 +1,6 @@
 # Letter IRL - OpenAI Apps SDK Submission Materials
 
-**Last Updated:** October 17, 2026
+**Last Updated:** October 30, 2026
 **Target Platform:** ChatGPT App Directory
 **Submission Status:** Pre-submission
 
@@ -511,12 +511,12 @@ Implemented:
 **Required Materials:**
 - App name: Letter IRL
 - App description: (see above)
-- App icon: `https://letterirl.com/logo.jpg`
+- App icon: `plugin/assets/logo.png` (the website's `icon-512.png`), in the package
 - Privacy policy URL: `https://letterirl.com/privacy`
 - Terms of service URL: `https://letterirl.com/terms`
 - MCP server endpoint: `https://api.letterirl.com/mcp`
 - Test cases: the portal test cases above
-- Screenshots: optional
+- Screenshots: optional, 706 px wide, one per starter prompt; the package names none
 
 **Test Account:**
 - Production, with the reviewer account described in [Reviewer Setup](#reviewer-setup)

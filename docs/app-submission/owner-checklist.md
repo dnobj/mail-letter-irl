@@ -100,7 +100,8 @@ Remaining:
       changes in production. Since #673 it is the served instructions word for word (a test keeps it
       so). An older copy told the model to call the send tools itself and called tools "read-only",
       which ChatGPT flags as a "Suspicious Instruction" (#670).
-- [ ] Confirm app description and short metadata match `docs/chatgpt-app-submission.md`.
+- [ ] Confirm the listing in `plugin/plugin.json` and the
+      [App Description](./openai-test-cases.md#app-description) say the same things.
 - [ ] Confirm localization fields, if required by the submission portal.
 
 ### Reviewer Materials
@@ -151,6 +152,9 @@ in the [release record](#release-record) below.
 - [ ] **Package.** Build the ZIP as [plugin/README.md](../../plugin/README.md) says, then
       **Upload new or existing plugin**, choose the verified developer (Objective Works), and resolve
       the **Metadata & Skills** findings. Remote servers connect under **MCPs** (**With MCP**).
+      `mcp.json` declares OAuth with CIMD under `extensions.com.openai.auth`, as OpenAI's package
+      guide documents, though the generic Agent Plugins schema it names does not list that block. If
+      the upload refuses it, remove the block: the server's discovery already leads ChatGPT to CIMD.
 - [ ] **Sign-in client.** Production Auth0 does not return RFC 9207 `iss`, so ChatGPT signs in with
       its per-callback CIMD document, `https://chatgpt.com/oauth/{callback_id}/client.json`. After
       connecting the MCP server, read the client document and redirect URI on the server's
@@ -159,10 +163,14 @@ in the [release record](#release-record) below.
       application slot of ten left.
 - [ ] **Commerce declaration.** `review.commerce` is true, and `review.commerce_description` says
       packs are prepaid mailings redeemable only for printed mail, never credits or tokens.
+- [ ] **Served copy matches the declaration.** The guidelines want each tool's description to match
+      its behaviour, and the declaration says checkout opens outside ChatGPT. `get_started` and
+      `get_account_balance` still say a pack can be bought "right here" or "without leaving the
+      conversation", and so does the manifest's description. That copy is reworded, deployed to
+      production and the connector refreshed before the scan (#852).
 - [ ] **Review details in the dashboard.** The demo recording URL, and the reviewer account's
       sign-in and notes (with the controlled mail address), go in the **Review details** form,
       never in the ZIP.
-
 - [ ] **Launch build.** Production runs the launch promotion from `dev` (#158) with stages A to G
       and the live checks of [launch-promotion.md](../launch-promotion.md) done, so the launch cut
       (#816) is on: group 1, each group 2 feature whose step passed, and group 3 off. The production
@@ -189,7 +197,8 @@ in the [release record](#release-record) below.
       `create_mail_checkout` and `get_draft_status` among them. If a group 2 feature stayed off,
       that file was re-recorded to match and is the count to expect, and the feature is out of
       [openai-test-cases.md](./openai-test-cases.md) (the app description, its launch feature case,
-      and the count and list under Tool Annotations Verification). Production serves 24 before
+      and the count and list under Tool Annotations Verification) and out of `longDescription` and
+      `release_notes` in `plugin/plugin.json`. Production serves 24 before
       stages C to G, and each switch adds its tools, so scan only after the last switch and a
       connector refresh. Record any warning, and give each tool's three hint
       justifications from [Justifications for the portal](./openai-test-cases.md#justifications-for-the-portal).
