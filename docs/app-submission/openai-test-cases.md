@@ -516,7 +516,7 @@ Implemented:
 - Terms of service URL: `https://letterirl.com/terms`
 - MCP server endpoint: `https://api.letterirl.com/mcp`
 - Test cases: the portal test cases above
-- Screenshots: optional, 706 px wide, one per starter prompt; the package names none
+- Screenshots: optional, and no longer shown in the Directory (plugin guidelines); the package names none
 
 **Test Account:**
 - Production, with the reviewer account described in [Reviewer Setup](#reviewer-setup)
