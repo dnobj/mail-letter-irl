@@ -68,7 +68,7 @@ npm run build
 
 - App name: `Letter IRL`
 - Submitting organization: `Objective Works` / DBA `Letter IRL` (see `docs/company-and-accounts.md`)
-- App description (the `description` in `manifest.json`, generated from `src/mcp/manifest.ts`): `Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. Buy prepaid letters without leaving the conversation, or pay for a single letter as you send it.`
+- App description (the `description` in `manifest.json`, generated from `src/mcp/manifest.ts`): `Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. Buy prepaid letters from the conversation, with the checkout on Letter IRL's page in your browser, or pay for a single letter as you send it.`
 - Privacy policy: `https://letterirl.com/privacy`
 - Terms: `https://letterirl.com/terms`
 - Support email: `support@letterirl.com`

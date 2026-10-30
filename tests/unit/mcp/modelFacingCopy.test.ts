@@ -389,11 +389,30 @@ describe('tool text in every app', () => {
     name => {
       for (const tool of listed(name)) {
         expect(tool.description, tool.name).not.toMatch(
-          /without leaving the conversation|right here|buy a letter pack here|create_pack_checkout buys/i
+          /without leaving the conversation|(buy|bought|purchase)[^.]*from the conversation|right here|buy a letter pack here|create_pack_checkout buys/i
         );
       }
     }
   );
+
+  // The Plugin Directory puts checkout outside ChatGPT, on our own page, and wants descriptions to
+  // match behaviour (#852): an app that takes purchases is told where the checkout opens.
+  it.each(CLIENT_PROFILE_NAMES.filter(name => clientProfileNamed(name).inAppPurchases).map(name => [name]))(
+    '%s: no description says a purchase happens without leaving the conversation',
+    name => {
+      for (const tool of listed(name)) {
+        expect(tool.description, tool.name).not.toMatch(/without leaving the conversation|right here|buy a letter pack here/i);
+      }
+      for (const named of ['get_started', 'get_account_balance']) {
+        const tool = listed(name).find(candidate => candidate.name === named);
+        expect(tool?.description, named).toMatch(/checkout (opens )?in the browser/);
+      }
+    }
+  );
+
+  it('bumps the steering copy revision for the checkout wording (#852)', () => {
+    expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(57);
+  });
 
   it.each(CLIENT_PROFILE_NAMES.filter(name => !clientProfileNamed(name).rendersCards).map(name => [name]))(
     '%s: the instructions name no card button',

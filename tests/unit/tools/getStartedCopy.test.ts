@@ -38,7 +38,7 @@ describe('get_started payment copy', () => {
       // beta access and pricing, never JIT_PURCHASE_ENABLED - so this branch
       // must still offer a route. It used to offer only a link to
       // letterirl.com, which is now neither current nor reachable.
-      expect(copy).toContain('right here');
+      expect(copy).toContain("the checkout opens on Letter IRL's page in your browser");
       expect(copy).not.toContain('letterirl.com');
       // The claim that must not survive the flag flipping.
       expect(copy.toLowerCase()).not.toContain('pay for a single');
@@ -52,6 +52,9 @@ describe('get_started payment copy', () => {
     expect(copy).toContain('prepaid letters');
     expect(copy).toContain('pay for a single');
     expect(copy).not.toContain('letterirl.com');
+    // Production runs with Pay & Send on: the pack's checkout opens on our page, outside ChatGPT (#852).
+    expect(copy).toContain("the checkout opens on Letter IRL's page in your browser");
+    expect(copy).not.toMatch(/right here|without leaving the conversation/);
     // "Before sending mail, buy..." states a precondition that is no longer
     // true; a customer can now send without ever visiting the site.
     expect(copy).not.toMatch(/^Before sending mail/);

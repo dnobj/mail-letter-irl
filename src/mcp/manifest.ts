@@ -54,7 +54,8 @@ function getManifestUrls(publicBaseUrlOverride?: string) {
 // production that way and was found while connecting the production connector.
 export const APP_DIRECTORY_DESCRIPTION =
   "Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. " +
-  "Buy prepaid letters without leaving the conversation, or pay for a single letter as you send it.";
+  "Buy prepaid letters from the conversation, with the checkout on Letter IRL's page in your browser, or pay for a " +
+  "single letter as you send it.";
 
 export function buildManifest(publicBaseUrl?: string) {
   const server = new LetterIrlServer();

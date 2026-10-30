@@ -136,11 +136,11 @@ describe("tool text on the wire (#484)", () => {
     const chatgpt = await described("chatgpt");
     const claude = await described("claude");
 
-    expect(chatgpt.get("get_account_balance")).toContain("without leaving the conversation");
+    expect(chatgpt.get("get_account_balance")).toContain("from the conversation, with the checkout in the browser");
     expect(claude.get("get_account_balance")).toContain("bought on the Letter IRL website");
     expect(chatgpt.get("generate_image_for_mail")).toContain("ChatGPT's built-in image generation");
     for (const [name, description] of claude) {
-      expect(description, name).not.toMatch(/ChatGPT|without leaving the conversation/);
+      expect(description, name).not.toMatch(/ChatGPT|without leaving the conversation|from the conversation/);
     }
   });
 

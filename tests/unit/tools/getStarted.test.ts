@@ -29,7 +29,9 @@ describe("get_started tool", () => {
     // Was "letterirl.com". Packs sell in the conversation since #312, and
     // that variable is unset in both environments, so the guidance now points
     // here rather than away.
-    expect(result.purchaseStep).toMatch(/right here/);
+    // The checkout opens outside ChatGPT, on our page (the Plugin Directory's commerce rule, #852).
+    expect(result.purchaseStep).toContain("the checkout opens on Letter IRL's page in your browser");
+    expect(result.purchaseStep).not.toMatch(/right here|without leaving the conversation/);
     expect(result.purchaseStep).not.toContain("letterirl.com");
     expect(result.examplePrompts.length).toBeGreaterThanOrEqual(3);
   });
@@ -69,10 +71,10 @@ describe("get_started in an app that takes no purchases", () => {
 
   it("describes itself without promising a purchase in the conversation", () => {
     expect(describeTool(getStartedTool, clientProfileNamed("chatgpt"))).toContain(
-      "without leaving the conversation"
+      "from the conversation (the checkout opens in the browser)"
     );
     const elsewhere = describeTool(getStartedTool, clientProfileNamed("claude"));
     expect(elsewhere).toContain("how to buy prepaid letters");
-    expect(elsewhere).not.toMatch(/without leaving the conversation|right here/);
+    expect(elsewhere).not.toMatch(/from the conversation|right here/);
   });
 });
