@@ -418,8 +418,8 @@ showed `client=claude` and steering r56 with widgets v100; the tool list held no
 for the model, and the card-only tools sat under **App-only tools**. The balance said 0 and gave
 the letter packs link unprompted. The preview card drew with "Not enough letters", and its link
 opened the packs page in a normal browser (step 11's open check). Asked "send it", Claude called
-`request_send` only; with 0 letters, the confirmation page redirected to the letter packs page,
-with a `returnTo` back to the confirmation page. A real send was not made in production (no pack bought); SEND-01 and the stage B canary
+`request_send` only; with 0 letters, the confirmation page offered **Buy letters** (the letter
+packs page, with a `returnTo` back to the confirmation) and no Send button. A real send was not made in production (no pack bought); SEND-01 and the stage B canary
 cover it. After **Disconnect**, no call reached the server, but Auth0 still listed Claude's consent
 and its refresh token (step 6). Findings, all on #849: new Claude connectors default to Auto
 permission mode, so tools run unprompted; Claude told the person the page offers "Pay & Send" for a
