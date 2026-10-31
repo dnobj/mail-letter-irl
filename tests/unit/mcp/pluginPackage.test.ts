@@ -109,7 +109,9 @@ describe("Plugin Directory package", () => {
   // The portal's metadata check flags pricing in a description (2026-10-31): how sending is paid
   // lives in the commerce declaration, and the About text says only where checkout opens.
   it("keeps pricing out of the About text, in the Communication category", () => {
-    expect(listing.longDescription).not.toMatch(/\$|\bfree\b|\bprepaid\b|Letter Pack|Pay & Send|\bpaid\b/i);
+    expect(listing.longDescription).not.toMatch(
+      /\$|\bfree\b|\bprepaid\b|\bpaid\b|\bpacks?\b|\bprices?\b|\bpricing\b|\bcosts?\b|\bdiscount|\bsubscri|\btrial\b|\d+\s*%|\bUSD\b|\bdollars?\b|\bcents?\b|Pay (?:&|and) Send/i
+    );
     expect(listing.longDescription).toMatch(/checkout page in your browser, never inside ChatGPT/);
     expect(listing.category).toBe("Communication");
   });

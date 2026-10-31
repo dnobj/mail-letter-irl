@@ -70,11 +70,10 @@ The setup itself:
 >
 > **How it works:**
 > 1. Tell ChatGPT what you want to send and to whom
-> 2. Review the preview (free, no commitment)
+> 2. Review the preview
 > 3. Press Send on the preview — we print and mail it. Only you send it: ChatGPT never mails anything on its own
 >
-> Sending needs payment: prepaid letters from a Letter Pack, or Pay & Send for a single letter. Both
-> are paid on Letter IRL's checkout page in your browser, never inside ChatGPT. US addresses only.
+> You pay for mail on Letter IRL's checkout page in your browser, never inside ChatGPT. US addresses only.
 
 The listing's own copy is `longDescription` in [plugin/plugin.json](../../plugin/plugin.json); keep
 the two in step.
