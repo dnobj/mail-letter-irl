@@ -23,3 +23,6 @@ manual-test-logs/
 # The owner's private notes: account mapping, security findings, runbooks (#730).
 # Never committed; the repository is public.
 docs/private/
+
+# Plugin Directory upload, built from plugin/ (plugin/README.md)
+letter-irl-plugin.zip

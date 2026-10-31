@@ -159,8 +159,9 @@ describe("get_account_balance: where to buy letters", () => {
 
     expect(result.lettersRemaining).toBe(0);
     expect(result.message).toContain(
-      "No letters on this account yet. You can buy a letter pack here, or pay for a single letter as you send it."
+      "No letters on this account yet. You can buy a letter pack from here (the checkout opens on Letter IRL's page in your browser), or pay for a single letter as you send it."
     );
+    expect(result.message).not.toMatch(/letter pack here\b|right here|without leaving the conversation/);
     expect(result.message).not.toContain("website.example");
   });
 
@@ -215,10 +216,10 @@ describe("get_account_balance: where to buy letters", () => {
 
   it("describes where letters are bought, per app", () => {
     expect(describeTool(getAccountBalanceTool, clientProfileNamed("chatgpt"))).toContain(
-      "Letters can be bought without leaving the conversation"
+      "Letters can be bought from the conversation, with the checkout in the browser"
     );
     const elsewhere = describeTool(getAccountBalanceTool, clientProfileNamed("claude"));
     expect(elsewhere).toContain("Letter packs are bought on the Letter IRL website");
-    expect(elsewhere).not.toMatch(/without leaving the conversation|create_pack_checkout/);
+    expect(elsewhere).not.toMatch(/from the conversation|create_pack_checkout/);
   });
 });

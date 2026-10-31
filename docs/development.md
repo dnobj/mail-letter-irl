@@ -190,9 +190,11 @@ Copy `.env.example` to `.env` and configure:
 # Database (production branch)
 DATABASE_URL=postgres://...
 
-# Auth0 (production tenant)
-LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
+# Auth0 (production tenant, on its custom domain since 2026-10-28)
+LETTER_IRL_OAUTH_ISSUER=https://auth.letterirl.com/
+LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
+LETTER_IRL_OAUTH_PROD_ISSUER=https://auth.letterirl.com/,https://dev-njmdyqf8n25rqgy7.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://auth.letterirl.com/.well-known/jwks.json
 LETTER_IRL_MCP_RESOURCE=https://api.letterirl.com/mcp
 LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com/mcp
 
@@ -222,9 +224,11 @@ full production variable list, and **Boot validation rules** in
 # Database (dev branch)
 DATABASE_URL=postgres://...?options=branch%3Ddev
 
-# Auth0 (dev tenant)
-LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
+# Auth0 (dev tenant, on its custom domain since 2026-10-20)
+LETTER_IRL_OAUTH_ISSUER=https://auth-dev.letterirl.com/
+LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_DEV_ISSUER=https://auth-dev.letterirl.com/,https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://auth-dev.letterirl.com/.well-known/jwks.json
 LETTER_IRL_MCP_RESOURCE=https://letter-irl-api-development.up.railway.app/mcp
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 

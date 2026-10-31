@@ -37,6 +37,9 @@ describe("Submission readiness checks", () => {
     expect(APP_DIRECTORY_DESCRIPTION).toContain("real physical letters and postcards");
     expect(APP_DIRECTORY_DESCRIPTION).not.toMatch(/letterirl\.com/i);
     expect(APP_DIRECTORY_DESCRIPTION).not.toMatch(/credit/i);
+    // The Plugin Directory puts checkout outside ChatGPT, on our own page (#852).
+    expect(APP_DIRECTORY_DESCRIPTION).not.toMatch(/without leaving the conversation|right here/i);
+    expect(APP_DIRECTORY_DESCRIPTION).toContain("checkout");
   });
 
   it("should expose the full widget inventory in the compatibility manifest", () => {

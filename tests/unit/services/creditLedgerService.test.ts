@@ -236,6 +236,7 @@ describe('creditLedgerService', () => {
         'deduction'
       );
 
+      let queries: ReturnType<typeof vi.fn> | undefined;
       vi.mocked(db.transaction).mockImplementation(async (callback) => {
         const mockClient = {
           query: vi.fn()
@@ -260,6 +261,7 @@ describe('creditLedgerService', () => {
               }],
             }),
         };
+        queries = mockClient.query;
         return callback(mockClient as any);
       });
 
@@ -274,6 +276,9 @@ describe('creditLedgerService', () => {
       // Should consume from the first entry (expiring soonest)
       expect(result.consumedFrom).toBeDefined();
       expect(result.consumedFrom![0].ledger_id).toBe(entries[0].ledger_id);
+      // With no description given, the history line counts nothing in credits.
+      const line = queries!.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO credit_transactions'));
+      expect(line?.[1]).toEqual([testUsers.marcus.user_id, -2, 24, 'deduction', 'letter', 'letter-001', 'Sent letter']);
     });
 
     it('should throw error for insufficient credits', async () => {

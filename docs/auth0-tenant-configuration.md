@@ -55,7 +55,7 @@ so that application's callbacks must stay OpenAI's alone.
 | Environment | Tenant Domain | Custom domain | Account |
 |-------------|---------------|---------------|---------|
 | **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | `auth-dev.letterirl.com`, in use since 2026-10-20 | the organization account |
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | `auth.letterirl.com`, verified 2026-10-20; the API and website move to it after the promotion | the production account |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | `auth.letterirl.com`, verified 2026-10-20, in use since 2026-10-28 | the production account |
 
 How the custom domains were set up, and their state, is in "Moving a tenant to a custom domain" below.
 
@@ -1060,10 +1060,12 @@ The MCP server reads these (development tenant values; `.env.dev.example` has
 the full list):
 
 ```bash
-LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
-LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/authorize
-LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/token
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_ISSUER=https://auth-dev.letterirl.com/
+LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_DEV_ISSUER=https://auth-dev.letterirl.com/,https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://auth-dev.letterirl.com/authorize
+LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://auth-dev.letterirl.com/oauth/token
+LETTER_IRL_OAUTH_JWKS_URI=https://auth-dev.letterirl.com/.well-known/jwks.json
 LETTER_IRL_MCP_RESOURCE=https://letter-irl-api-development.up.railway.app/mcp
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 LETTER_IRL_OAUTH_SCOPES=openid,profile,email,offline_access,mail:read,mail:draft,mail:send
@@ -1316,14 +1318,18 @@ When updating development, ensure production is also updated:
 ### Environment Variables by Tenant
 
 ```bash
-# Production (.env)
-LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
+# Production (.env): the custom domain since 2026-10-28; the tenant address stays accepted
+LETTER_IRL_OAUTH_ISSUER=https://auth.letterirl.com/
+LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
+LETTER_IRL_OAUTH_PROD_ISSUER=https://auth.letterirl.com/,https://dev-njmdyqf8n25rqgy7.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://auth.letterirl.com/.well-known/jwks.json
 LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com/mcp
 
-# Development (.env.dev)
-LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
+# Development (.env.dev): the custom domain since 2026-10-20; the tenant address stays accepted
+LETTER_IRL_OAUTH_ISSUER=https://auth-dev.letterirl.com/
+LETTER_IRL_OAUTH_ADDITIONAL_ISSUERS=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_DEV_ISSUER=https://auth-dev.letterirl.com/,https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://auth-dev.letterirl.com/.well-known/jwks.json
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 ```
 
@@ -1390,7 +1396,7 @@ Check afterwards:
 - use a connector made before the move, at once and again after its access token has expired, which proves the
   refresh at the old address still works.
 
-**State on 2026-10-23:**
+**State on 2026-10-29:**
 
 | | Development | Production |
 | --- | --- | --- |
@@ -1400,9 +1406,10 @@ Check afterwards:
 | Google callback | both, on the new "Auth0 Development" client | both, on "Auth0 Production" |
 | GitHub | new GitHub App, both callbacks | new GitHub App, both callbacks, swapped in and tested |
 | Apple, Microsoft | turned off on every listed application and domain-level promotion off (developer keys) | not offered |
-| Steps 3 and 4 | done (#826 at `e2b230d`) | after the API promotion ([launch-promotion.md](launch-promotion.md), stage B) |
-| Checks passed | website sign-in with Google, GitHub and email and password; sign-out; one call on a connection made before the move; a new ChatGPT connector (2026-10-21: authorize, token and issuer on the custom domain); Claude's connector from before the move, still working on 2026-10-22 and 10-23, days after its access token expired | after stage B |
-| Checks outstanding | sign-out of a session from before step 4 | all |
+| Steps 3 and 4 | done (#826 at `e2b230d`) | done 2026-10-28 after stage B: the API at 19:39Z, the website at 20:00Z |
+| Step 5, the manifest | nothing to change | the snapshot, the fallback and its test name the custom domain (2026-10-29) |
+| Checks passed | website sign-in with Google, GitHub and email and password; sign-out; one call on a connection made before the move; a new ChatGPT connector (2026-10-21: authorize, token and issuer on the custom domain); Claude's connector from before the move, still working on 2026-10-22 and 10-23, days after its access token expired | website sign-in with Google, GitHub and email and password, each signed out after; a ChatGPT connection made before the move, which kept working, including the canary's purchase and send on 2026-10-29 |
+| Checks outstanding | sign-out of a session from before step 4 | sign-out of a session from before step 4; a new connector; a connection made before the move once its access token has expired |
 
 A client that keys its sign-in by the authorization server signs in again instead of refreshing. VS Code's
 connection from 2026-09-26 asked once, on 2026-10-23, to "authenticate to auth-dev.letterirl.com", and worked after

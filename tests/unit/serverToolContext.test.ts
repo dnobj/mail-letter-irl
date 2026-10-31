@@ -38,7 +38,7 @@ describe("LetterIrlServer.execute", () => {
         })
       ).result.purchaseStep;
 
-    expect(await purchaseStep("chatgpt")).toContain("right here");
+    expect(await purchaseStep("chatgpt")).toContain("the checkout opens on Letter IRL's page in your browser");
     expect(await purchaseStep("claude")).toContain("https://website.example/dashboard/letter-packs");
   });
 });

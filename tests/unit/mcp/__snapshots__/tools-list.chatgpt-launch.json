@@ -2874,7 +2874,7 @@
   {
     "name": "get_account_balance",
     "title": "Check letter balance",
-    "description": "Check how many prepaid letters remain on this account. Letters can be bought without leaving the conversation: list_letter_packs shows the sizes, create_pack_checkout buys one.",
+    "description": "Check how many prepaid letters remain on this account. Letters can be bought from the conversation, with the checkout in the browser: list_letter_packs shows the sizes, create_pack_checkout starts one.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -6271,7 +6271,7 @@
   {
     "name": "get_started",
     "title": "Get started",
-    "description": "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy prepaid letters without leaving the conversation, and example prompts to try next.",
+    "description": "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy prepaid letters from the conversation (the checkout opens in the browser), and example prompts to try next.",
     "inputSchema": {
       "type": "object",
       "properties": {},

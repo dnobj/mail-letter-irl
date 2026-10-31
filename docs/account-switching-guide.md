@@ -5,8 +5,10 @@
 > **Partly out of date.** The `switch_account` tool this guide recommends was removed
 > (commit `b5045bf`, "not useful in practice"); no Letter IRL tool logs you out. Switch accounts by
 > disconnecting Letter IRL in ChatGPT's app settings, ending the Auth0 session (Method 2), and
-> connecting again. The Auth0 logout URL below is the **development** tenant; production uses
-> `https://dev-njmdyqf8n25rqgy7.us.auth0.com/v2/logout`.
+> connecting again. The Auth0 logout URL below is the **development** tenant's custom domain;
+> production uses `https://auth.letterirl.com/v2/logout`. Sign-in moved to these domains (development
+> 2026-10-20, production 2026-10-28), and a session is kept per address, so log out at the domain you
+> signed in at.
 
 This guide explains how to switch between different accounts or authentication methods when using Letter IRL in ChatGPT.
 
@@ -60,7 +62,7 @@ The easiest way to switch accounts is by asking ChatGPT directly:
 You can also manually log out by visiting the Auth0 logout URL directly:
 
 ```
-https://dev-ky21dxn3qmi71hjl.us.auth0.com/v2/logout
+https://auth-dev.letterirl.com/v2/logout
 ```
 
 After logging out:

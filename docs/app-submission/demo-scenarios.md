@@ -109,7 +109,7 @@ This scenario is a good candidate for mobile testing because it uses a realistic
 
 ### Opening
 
-`Mail Letter IRL lets you use ChatGPT to create and send real physical letters and postcards through USPS. You can buy prepaid letters without leaving the conversation, or pay for a single letter as you send it.`
+`Mail Letter IRL lets you use ChatGPT to create and send real physical letters and postcards through USPS. You can buy prepaid letters from the conversation, with the checkout on Letter IRL's page in your browser, or pay for a single letter as you send it.`
 
 ### Letter segment
 

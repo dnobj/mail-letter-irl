@@ -264,9 +264,18 @@ describePostgres('pack refunds issued from the Stripe Dashboard', () => {
 
     expect((await readUser(userId)).credits).toBe(0);
     expect(await purchaseLot(userId)).toEqual({ status: 'revoked', remaining_amount: 0 });
-    // Nothing was left to take back, so no balance movement is booked...
-    expect(await creditTransactions(userId)).toEqual([]);
-    // ...but the revocation itself is still on record, with zero to restore.
+    // Nothing was left to take back, so the history's line for the refund moves
+    // no letters; it is there so the history shows the money went back. The
+    // seed's product code is not in the catalogue and it recorded no name.
+    expect(await creditTransactions(userId)).toEqual([
+      { amount: 0, balance_after: 0, type: 'refund' }
+    ]);
+    const line = await pool.query<{ description: string }>(
+      'SELECT description FROM credit_transactions WHERE user_id = $1',
+      [userId]
+    );
+    expect(line.rows).toEqual([{ description: 'Refunded a letter pack' }]);
+    // The revocation itself is on record too, with zero to restore.
     const audit = await refundAuditRows(userId);
     expect(audit).toHaveLength(1);
     expect(audit[0].metadata).toMatchObject({ remaining_at_revocation: 0 });
