@@ -141,7 +141,8 @@ The portal's submission steps as read on October 30, 2026
 `https://developers.openai.com/plugins/plugin-guidelines`). Apps are now plugins in the Plugin
 Directory. A plugin is uploaded as a ZIP whose `plugin.json` carries the listing and the review
 details; the package is [`plugin/`](../../plugin/README.md). The first release is offered in
-**ChatGPT only**, in the **Productivity** category (owner decision, 2026-10-30); Codex is added as
+**ChatGPT only**, in the **Communication** category (owner decision, 2026-10-31, after the portal
+could not confirm Productivity); Codex is added as
 an update after approval, once its plugin route has been run end to end. Record each gate's outcome
 in the [release record](#release-record) below.
 
@@ -183,8 +184,8 @@ in the [release record](#release-record) below.
       `Mail Letter IRL`.
 - [ ] **Listing.** Name, descriptions, logo, category, website, support, privacy and terms URLs,
       and release notes, as `plugin/plugin.json` sets them (`tests/unit/mcp/pluginPackage.test.ts`
-      holds them to the portal's limits). If the portal's category list has a closer fit than
-      Productivity, choose it there.
+      holds them to the portal's limits). The About text leaves out how sending is paid: the
+      portal flags pricing in a description, and `review.commerce_description` carries it.
 - [ ] **Domain verification.** In MCP configuration the portal issues a token for
       `https://api.letterirl.com/mcp`; the challenge host is the MCP host. Set
       `OPENAI_APPS_CHALLENGE_TOKEN` on the production API service, wait for the redeploy, and check
