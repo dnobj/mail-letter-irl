@@ -106,6 +106,14 @@ describe("Plugin Directory package", () => {
     expect(openai.publication.countries).toEqual(["US"]);
   });
 
+  // The portal's metadata check flags pricing in a description (2026-10-31): how sending is paid
+  // lives in the commerce declaration, and the About text says only where checkout opens.
+  it("keeps pricing out of the About text, in the Communication category", () => {
+    expect(listing.longDescription).not.toMatch(/\$|\bfree\b|\bprepaid\b|Letter Pack|Pay & Send|\bpaid\b/i);
+    expect(listing.longDescription).toMatch(/checkout page in your browser, never inside ChatGPT/);
+    expect(listing.category).toBe("Communication");
+  });
+
   it("points at the production MCP endpoint over streamable HTTP with CIMD sign-in", () => {
     const servers = Object.values(mcp.mcpServers) as Array<Record<string, any>>;
     expect(servers).toHaveLength(1);
