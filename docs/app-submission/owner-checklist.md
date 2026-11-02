@@ -146,7 +146,7 @@ could not confirm Productivity); Codex is added as
 an update after approval, once its plugin route has been run end to end. Record each gate's outcome
 in the [release record](#release-record) below.
 
-- [ ] **Checkout on our own domain.** The guidelines allow commerce for physical goods only, with
+- [x] **Checkout on our own domain.** The guidelines allow commerce for physical goods only, with
       checkout outside ChatGPT "on your own domain". Stripe must serve Checkout on
       `pay.letterirl.com` ([stripe-custom-domain.md](../stripe-custom-domain.md)): a pack checkout
       and a Pay & Send open on that host before submitting.
@@ -239,7 +239,7 @@ timestamps and screenshot names, never tokens, cookies or personal data.
 | --- | --- | --- | --- | --- | --- |
 | Launch build on production (commit) | | | production | | |
 | Pay & Send on | | | production | | |
-| Checkout on pay.letterirl.com | | | production | | |
+| Checkout on pay.letterirl.com | 2026-11-02 | 7f695f4 | production | Pass | Stripe shows the domain Active; a pack checkout and a Certified Mail Pay & Send each opened on pay.letterirl.com with no safe-link warning, both left unpaid |
 | Package uploaded, metadata findings resolved | | | production | | |
 | Sign-in client (CIMD document) checked | | | production | | |
 | Access | | | production | | |
