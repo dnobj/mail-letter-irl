@@ -1,6 +1,6 @@
 # OpenAI Apps SDK Owner Checklist
 
-**Last Updated:** October 30, 2026
+**Last Updated:** November 2, 2026
 **Purpose:** Owner-managed submission tasks, assets, and the final readiness gate
 
 This checklist tracks the non-code items the project owner needs to gather, verify, or decide before submitting Letter IRL for OpenAI Apps SDK review. Keep secrets, private billing details, private tax IDs, and passwords out of this file.
@@ -64,7 +64,7 @@ Remaining:
 - [ ] Confirm submission materials explain that Letter Packs are prepaid physical mail sends for real USPS letters/postcards.
 - [ ] Describe checkout as it runs: a card opens Letter IRL's own start page
       (`https://api.letterirl.com/purchase/start`), which hands off to Stripe-hosted Checkout on
-      Letter IRL's checkout domain, `pay.letterirl.com` (#373, switched on in Stripe at launch), and
+      Letter IRL's checkout domain, `pay.letterirl.com` (#373, active in Stripe since 2026-11-02), and
       nothing is paid inside the widget. Never claim embedded payment.
 - [ ] The listing sells physical mail only: no digital generation credits, and no upsell of
       image-generation capacity.
