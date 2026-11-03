@@ -1,6 +1,6 @@
 # OpenAI Apps SDK Owner Checklist
 
-**Last Updated:** October 30, 2026
+**Last Updated:** November 2, 2026
 **Purpose:** Owner-managed submission tasks, assets, and the final readiness gate
 
 This checklist tracks the non-code items the project owner needs to gather, verify, or decide before submitting Letter IRL for OpenAI Apps SDK review. Keep secrets, private billing details, private tax IDs, and passwords out of this file.
@@ -64,7 +64,7 @@ Remaining:
 - [ ] Confirm submission materials explain that Letter Packs are prepaid physical mail sends for real USPS letters/postcards.
 - [ ] Describe checkout as it runs: a card opens Letter IRL's own start page
       (`https://api.letterirl.com/purchase/start`), which hands off to Stripe-hosted Checkout on
-      Letter IRL's checkout domain, `pay.letterirl.com` (#373, switched on in Stripe at launch), and
+      Letter IRL's checkout domain, `pay.letterirl.com` (#373, active in Stripe since 2026-11-02), and
       nothing is paid inside the widget. Never claim embedded payment.
 - [ ] The listing sells physical mail only: no digital generation credits, and no upsell of
       image-generation capacity.
@@ -146,7 +146,7 @@ could not confirm Productivity); Codex is added as
 an update after approval, once its plugin route has been run end to end. Record each gate's outcome
 in the [release record](#release-record) below.
 
-- [ ] **Checkout on our own domain.** The guidelines allow commerce for physical goods only, with
+- [x] **Checkout on our own domain.** The guidelines allow commerce for physical goods only, with
       checkout outside ChatGPT "on your own domain". Stripe must serve Checkout on
       `pay.letterirl.com` ([stripe-custom-domain.md](../stripe-custom-domain.md)): a pack checkout
       and a Pay & Send open on that host before submitting.
@@ -239,7 +239,7 @@ timestamps and screenshot names, never tokens, cookies or personal data.
 | --- | --- | --- | --- | --- | --- |
 | Launch build on production (commit) | | | production | | |
 | Pay & Send on | | | production | | |
-| Checkout on pay.letterirl.com | | | production | | |
+| Checkout on pay.letterirl.com | 2026-11-02 | 7f695f4 | production | Pass | Stripe shows the domain Active; a pack checkout and a Certified Mail Pay & Send each opened on pay.letterirl.com with no safe-link warning, both left unpaid |
 | Package uploaded, metadata findings resolved | | | production | | |
 | Sign-in client (CIMD document) checked | | | production | | |
 | Access | | | production | | |

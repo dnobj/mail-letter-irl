@@ -1,8 +1,8 @@
 # Stripe Custom Checkout Domain
 
-**Last Updated:** October 30, 2026
+**Last Updated:** November 2, 2026
 **Purpose:** Serving Stripe-hosted Checkout on `pay.letterirl.com`, and the order to set it up in (#373)
-**Status:** Steps 1 to 3 done in production on 2026-10-29: `STRIPE_CHECKOUT_DOMAIN` deployed and the connector refreshed. The domain added on 2026-09-24 was no longer on the Stripe account by 2026-10-29, with no record of its removal (#848 proposes an alert). It was added again the same day, in live mode with **Switch to this domain once added** ticked. Stripe issued a new `_acme-challenge` value, which replaced the old one in DNS, and reported the records verified. On 2026-10-30 it still read "Adding", waiting on Stripe's stability check and email; DNS was consistent across resolvers. Left: Stripe's email, then step 8, then step 9 (note which host development's test checkout opens on). Until then checkouts open on `checkout.stripe.com`, which the start page accepts.
+**Status:** Active in production since 2026-11-02. That day both step 8 checkouts opened on `pay.letterirl.com` with no safe-link warning; the `purchase.start` log line was not checked. Left: step 8's log line, and step 9. Steps 1 to 3 were done on 2026-10-29: `STRIPE_CHECKOUT_DOMAIN` deployed and the connector refreshed. The domain added on 2026-09-24 was no longer on the Stripe account by 2026-10-29, with no record of its removal (#848 proposes an alert). It was added again the same day, in live mode with **Switch to this domain once added** ticked, and Stripe issued a new `_acme-challenge` value, which replaced the old one in DNS. Stripe reported the records verified that evening, but the domain then read "Adding" for four days with DNS unchanged and no certificate served. On 2026-11-02 we wrote to Stripe support, which is also where we asked what removed the first domain, and Stripe's "Your custom domain is active" email came the same day.
 
 The app guidelines ask for purchases to complete on our own domain. Stripe can serve its hosted Checkout page on a subdomain of ours. That is a paid Stripe feature: USD 10 a month, billed in the first week of the following month, and only for months it was on for the whole month ([Stripe's FAQ](https://support.stripe.com/questions/custom-domain-on-stripe-hosted-surfaces-faq)).
 
@@ -10,7 +10,7 @@ The app guidelines ask for purchases to complete on our own domain. Stripe can s
 
 The letter pack card opens our start page, `https://api.letterirl.com/purchase/start`, which forwards to the Checkout Session's URL (#372). The Pay & Send buttons on the preview cards open the Checkout URL itself. With the custom domain active, Stripe returns that URL on `pay.letterirl.com` either way.
 
-The start page forwards only to hosts it knows (`src/config/checkoutDomain.ts`). `STRIPE_CHECKOUT_DOMAIN` adds ours beside `checkout.stripe.com`, which always stays, because a session opened before the switch keeps its old URL. It also forwards only to a Checkout Session one of our orders opened, to the address that order recorded (#730). It reads the session id from the link's path (`/c/pay/cs_…` in test mode, `/g/pay/cs_live_…` in live mode), so the custom domain works the same.
+The start page forwards only to hosts it knows (`src/config/checkoutDomain.ts`). `STRIPE_CHECKOUT_DOMAIN` adds ours beside `checkout.stripe.com`, which always stays, because a session opened before the switch keeps its old URL. It also forwards only to a Checkout Session one of our orders opened, to the address that order recorded (#730). It reads the session id from the link's path (`/<letter>/pay/cs_…`; the letter varies, `/c/`, `/f/` and `/g/` have been seen, and the start page accepts any one letter: `checkoutSessionIdOf` in `src/mcp/purchaseReturnPage.ts`), so the custom domain works the same.
 
 The domain is added once, in live mode; a sandbox cannot add one. Stripe's docs suggest test-mode sessions of the same account may still use it. Development shares that account, so it sets the variable too. An extra allowed host costs nothing, and without it every development checkout would stop on our page.
 
@@ -48,7 +48,7 @@ The same setting adds `https://pay.letterirl.com` to the widgets' redirect list.
 
    Stripe then issues the certificate. It emails, and the Dashboard shows the domain as active.
 8. **Check.** In production ChatGPT, open a letter pack checkout from the card.
-   - The start page should forward to `https://pay.letterirl.com/c/pay/...` with Stripe's page on it.
+   - The start page should forward to `https://pay.letterirl.com/<letter>/pay/cs_live_…` with Stripe's page on it. The letter varies (`/f/` and `/g/` on 2026-11-02); the host is what matters.
    - Cancel without paying.
    - The API log's `purchase.start` line shows the forward.
    - From a letter preview on an account with no letters, **Pay & Send** should open `pay.letterirl.com` without ChatGPT's safe-link warning. Cancel that too.
