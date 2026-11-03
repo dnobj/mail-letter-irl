@@ -12,7 +12,7 @@ The letter pack card opens our start page, `https://api.letterirl.com/purchase/s
 
 The start page forwards only to hosts it knows (`src/config/checkoutDomain.ts`). `STRIPE_CHECKOUT_DOMAIN` adds ours beside `checkout.stripe.com`, which always stays, because a session opened before the switch keeps its old URL. It also forwards only to a Checkout Session one of our orders opened, to the address that order recorded (#730). It reads the session id from the link's path (`/<letter>/pay/cs_…`; the letter varies, `/c/`, `/f/` and `/g/` have been seen, and the start page accepts any one letter: `checkoutSessionIdOf` in `src/mcp/purchaseReturnPage.ts`), so the custom domain works the same.
 
-The domain is added once, in live mode; a sandbox cannot add one. Stripe's docs suggest test-mode sessions of the same account may still use it, but development's do not: on 2026-11-03 its checkout opened on `checkout.stripe.com` (step 9). Development sets the variable anyway. An extra allowed host costs nothing, and development keeps working if Stripe ever serves the domain there.
+The domain is added once, in live mode; a sandbox cannot add one. Stripe's docs suggest test-mode sessions of the same account may still use it, but development's did not on 2026-11-03: its checkout opened on `checkout.stripe.com` (step 9). Development sets the variable anyway. An extra allowed host costs nothing, and development keeps working if Stripe ever serves the domain there.
 
 The same setting adds `https://pay.letterirl.com` to the widgets' redirect list. That list matters for Pay & Send: its cards open the Checkout URL itself, while the pack card opens the start page. A malformed value refuses to boot production (`stripe.checkout_domain_invalid`).
 
@@ -50,7 +50,7 @@ The same setting adds `https://pay.letterirl.com` to the widgets' redirect list.
 8. **Check.** In production ChatGPT, open a letter pack checkout from the card.
    - The start page should forward to `https://pay.letterirl.com/<letter>/pay/cs_live_…` with Stripe's page on it. The letter varies (`/f/` and `/g/` on 2026-11-02); the host is what matters.
    - Cancel without paying.
-   - The API log's `purchase.start` line shows the forward: `targetOk=true`, and `returnKept=true` when ChatGPT added its return link. It does not name the host; the browser shows that. The 2026-11-02 run logged it at 22:40:05Z with both true.
+   - The API log's `purchase.start` line shows the forward: `targetOk=true`, and `returnKept=true` when ChatGPT added its return link. It does not name the checkout host (its `redirectHost` is ChatGPT's return link); the browser shows that. The 2026-11-02 run logged it at 22:40:05Z with both true.
    - Only the pack checkout writes that line. Pay & Send opens Stripe's URL directly, without the start page.
    - From a letter preview on an account with no letters, **Pay & Send** should open `pay.letterirl.com` without ChatGPT's safe-link warning. Cancel that too.
 9. **Development.** Open a checkout on the (DEV) connector and note which host Stripe's test page is on, and record it here. Either way the start page forwards, since development allows both hosts.
