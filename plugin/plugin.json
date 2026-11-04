@@ -42,14 +42,14 @@
             {
               "description": "Sending: only the person sends, with the card's Send button. Continue in the same conversation as the preview case.",
               "prompt": "Send it.",
-              "tools_triggered": "send_letter",
-              "expected_behavior": "Asked in chat, ChatGPT calls no tool to send: it points to the preview card's Send button. When the reviewer presses Send on the card, the card calls send_letter for that draft, paid from the prepaid balance, and shows the order as placed and accepted by the printer. The balance drops by one letter. One real letter is mailed to the controlled address."
+              "tools_triggered": "request_send, send_letter",
+              "expected_behavior": "Asked in chat, ChatGPT sends nothing. It points to the preview card's Send button, or calls request_send, which only returns a link to Letter IRL's confirmation page, where the person would press Send. When the reviewer presses Send on the card, the card calls send_letter for that draft, paid from the prepaid balance, and shows the order as placed and accepted by the printer. The balance drops by one letter. One real letter is mailed to the controlled address."
             },
             {
-              "description": "Preview a postcard from an image.",
-              "prompt": "Make a postcard for the address in my reviewer notes with a photo of a lighthouse.",
+              "description": "Preview a postcard from an image ChatGPT generates. Two turns in the same conversation: ChatGPT makes the image first, then Letter IRL makes the postcard from it.",
+              "prompt": "First: \"Create an image of a lighthouse on a rocky coast at sunset.\" Then: \"Use Letter IRL to make a postcard from that image for the address in my reviewer notes.\"",
               "tools_triggered": "quote_and_preview_postcard",
-              "expected_behavior": "The image comes from ChatGPT's own image generation or from an upload; Letter IRL makes no images. The postcard preview card shows the front and the message side, the size and the cost, with a Send button. Nothing is mailed unless the reviewer presses Send."
+              "expected_behavior": "ChatGPT's own image generation draws the lighthouse; Letter IRL makes no images. The second turn passes that image to quote_and_preview_postcard, and the postcard preview card shows it on the front at 6x9, the message on the back, the cost (1 prepaid letter) and a Send Postcard button. Nothing is mailed unless the reviewer presses Send."
             },
             {
               "description": "Read-only account questions.",
