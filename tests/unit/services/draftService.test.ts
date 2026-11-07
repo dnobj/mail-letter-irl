@@ -868,7 +868,7 @@ describe('draftService', () => {
       expect(Math.abs(before - 4 * 24 * 60 * 60 * 1000 - params[3].getTime())).toBeLessThan(5_000);
     });
 
-    it('measures an unsent draft from its own expiry, four days, whatever olderThanDays is (#730)', async () => {
+    it('measures an unsent draft from its own expiry, two days, whatever olderThanDays is (#730)', async () => {
       vi.mocked(db.query).mockResolvedValueOnce({ rows: [], rowCount: 0, command: 'DELETE', oid: 0, fields: [] });
       const before = Date.now();
       await cleanupOldDrafts(7);
@@ -876,15 +876,16 @@ describe('draftService', () => {
       expect(sql.replace(/\s+/g, ' ')).toContain("(CASE WHEN status = 'expired' THEN expires_at < $3 ELSE COALESCE(");
       expect(sql.match(/\$3/g)).toHaveLength(1);
       expect(params[2]).toBeInstanceOf(Date);
-      // Four days: inside the seven from the expiry or from creation, with room for the daily sweep's drift.
-      expect(Math.abs(before - 4 * 24 * 60 * 60 * 1000 - params[2].getTime())).toBeLessThan(5_000);
+      // Two days: a 3-day draft goes about 5 days after its creation, 6 with the
+      // daily sweep's drift, inside the seven from the expiry or from creation.
+      expect(Math.abs(before - 2 * 24 * 60 * 60 * 1000 - params[2].getTime())).toBeLessThan(5_000);
 
-      // Fixed, not taken from olderThanDays: a caller passing 2 does not delete every expired draft at once.
+      // Fixed, not taken from olderThanDays: a caller passing 1 does not delete every expired draft at once.
       vi.mocked(db.query).mockResolvedValueOnce({ rows: [], rowCount: 0, command: 'DELETE', oid: 0, fields: [] });
       const again = Date.now();
-      await cleanupOldDrafts(2);
+      await cleanupOldDrafts(1);
       const [, shortParams] = vi.mocked(db.query).mock.calls[1] as unknown as [string, [Date, number, Date]];
-      expect(Math.abs(again - 4 * 24 * 60 * 60 * 1000 - shortParams[2].getTime())).toBeLessThan(5_000);
+      expect(Math.abs(again - 2 * 24 * 60 * 60 * 1000 - shortParams[2].getTime())).toBeLessThan(5_000);
     });
   });
 

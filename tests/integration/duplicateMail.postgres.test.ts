@@ -372,13 +372,15 @@ describePostgres('duplicate mail check (#412)', () => {
     ).resolves.toMatchObject({ alreadyConsumed: false });
   });
 
-  it('counts only the last 24 hours', async () => {
+  it("counts only the last 3 days, a draft's whole lifetime", async () => {
     const userId = await seedUser();
-    await seedLetter(userId, { hoursAgo: 25 });
+    await seedLetter(userId, { hoursAgo: 73 });
     const draftId = await seedDraft(userId);
     await expect(findFor(userId, draftId)).resolves.toBeNull();
 
-    await seedLetter(userId, { hoursAgo: 23 });
+    // Inside 3 days but past the old 24 hours: a second draft made beside the
+    // first can still be sent this late, so it is still the same mail.
+    await seedLetter(userId, { hoursAgo: 71 });
     await expect(findFor(userId, draftId)).resolves.toMatchObject({ kind: 'sent' });
   });
 

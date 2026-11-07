@@ -1572,7 +1572,7 @@
       // ---- The same mail twice (#412) ------------------------------------
       //
       // The server refuses a send or a checkout for mail that went out, was
-      // paid for or is awaiting payment in the last 24 hours, unless the
+      // paid for or is awaiting payment in the last 3 days, unless the
       // person asks for another copy. The refusal comes back as an error
       // result with its details in _meta. Its text starts with
       // DUPLICATE_PREFIX, which is all that is left when a host drops _meta
@@ -1745,7 +1745,9 @@
         if (minutes < 1) return "less than a minute ago";
         if (minutes < 60) return minutes === 1 ? "1 minute ago" : `${minutes} minutes ago`;
         const hours = Math.floor(minutes / 60);
-        return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+        if (hours < 24) return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+        const days = Math.floor(hours / 24);
+        return days === 1 ? "1 day ago" : `${days} days ago`;
       }
 
       function duplicateNotice(details) {

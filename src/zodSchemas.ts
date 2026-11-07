@@ -346,13 +346,13 @@ export const sendLetterInputZ = z.object({
   draftId: z.string(),
   confirm: z.boolean(),
   contentVersion: contentVersionInputZ,
-  sendAnotherCopy: z.boolean().optional().describe("Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.")
+  sendAnotherCopy: z.boolean().optional().describe("Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 3 days. Leave it out otherwise.")
 });
 
 export const createMailCheckoutInputZ = z.object({
   draftId: z.string(),
   contentVersion: contentVersionInputZ,
-  sendAnotherCopy: z.boolean().optional().describe("Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.")
+  sendAnotherCopy: z.boolean().optional().describe("Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 3 days. Leave it out otherwise.")
 });
 
 export const listLetterPacksInputZ = z.object({});
@@ -530,7 +530,7 @@ export const sendPostcardInputZ = z.object({
   draftId: z.string(),
   confirm: z.boolean(),
   contentVersion: contentVersionInputZ,
-  sendAnotherCopy: z.boolean().optional().describe("Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.")
+  sendAnotherCopy: z.boolean().optional().describe("Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 3 days. Leave it out otherwise.")
 });
 
 // A link where the person sends a preview themselves (#470).

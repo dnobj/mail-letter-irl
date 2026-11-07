@@ -28,7 +28,7 @@
 
 ## Previews and Sends
 
-- Preview tools are **write** tools: they create a 24-hour draft. They never deduct credits.
+- Preview tools are **write** tools: they create a 3-day draft. They never deduct credits.
 - A preview returns `lettersRequired`, `canSendNow` (compared against the caller's balance),
   `reasonCannotSend` when it cannot, and `sendEligibility`, which describes the prepaid path, Pay & Send
   availability and price, and the letter-pack option.

@@ -177,7 +177,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | sender_validation | JSONB | YES | - | Cached address validation |
 | recipient_validation | JSONB | YES | - | Cached address validation |
 | status | draft_status | NO | 'pending' | pending, consumed, expired, cancelled |
-| expires_at | TIMESTAMPTZ | NO | - | Expiration (24h from creation) |
+| expires_at | TIMESTAMPTZ | NO | - | Expiration (3 days from creation, `DRAFT_LIFETIME_HOURS`) |
 | consumed_at | TIMESTAMPTZ | YES | - | When draft was sent |
 | consumed_letter_id | VARCHAR(255) | YES | - | FK to letters (after send) |
 | front_image_data | TEXT | YES | - | Base64 JPEG for postcard front (NULL for letters) |

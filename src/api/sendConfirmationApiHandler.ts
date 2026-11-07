@@ -248,7 +248,7 @@ export function refusalFor(error: unknown): Refusal {
 
   if (isDuplicateMailError(error)) {
     const { kind, mailType, recipientName, ageSeconds } = error.duplicate;
-    return refuse(409, 'duplicate', 'The same mail went out from this account in the last 24 hours.', {
+    return refuse(409, 'duplicate', 'The same mail went out from this account in the last 3 days.', {
       duplicate: { kind, mailType, recipientName, ageMinutes: Math.floor(Math.max(0, ageSeconds) / 60) }
     });
   }

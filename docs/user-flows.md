@@ -21,7 +21,7 @@ This is the main flow for composing and sending a letter.
 
 4. Server creates a **draft** in `letter_drafts` table:
    - Status: `pending`
-   - Expires in 24 hours
+   - Expires in 3 days
    - Stores all letter content
    - Calculates required credits (based on page count)
    - Generates HTML preview
@@ -250,7 +250,7 @@ deletes it too; the drafts' copies go with the draft's other content.
 - Calling `send_letter` twice with same `draftId`:
   - First call: Full processing, credits deducted
   - Second call: Returns existing letter, no duplicate charge
-- Drafts expire after 24 hours if not used
+- Drafts expire after 3 days if not used
 
 ### Credit Safety
 - Credits deducted in same transaction as letter creation
@@ -266,7 +266,7 @@ deletes it too; the drafts' copies go with the draft's other content.
 - User directed to purchase more credits
 
 ### Expired Draft
-- `send_letter` fails if draft > 24 hours old
+- `send_letter` fails if draft > 3 days old
 - User asked to call `quote_and_preview_letter` again
 
 ### Invalid Address

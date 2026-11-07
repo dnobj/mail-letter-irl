@@ -59,7 +59,7 @@ written:
 - [ ] System calculates required credits (2 per standard letter)
 - [ ] Returns HTML preview of formatted letter
 - [ ] Returns `canSendNow` based on credit balance
-- [ ] Creates draft with 24-hour expiration
+- [ ] Creates draft with 3-day expiration
 - [ ] Returns `draftId` for use in send operation
 
 **Error Cases:**
@@ -87,7 +87,7 @@ written:
 **Error Cases:**
 - [ ] Missing `draftId` → "Draft ID required"
 - [ ] `confirm` not true → "Must confirm to send"
-- [ ] Draft expired (>24h) → "DRAFT_EXPIRED" error
+- [ ] Draft expired (>3 days) → "DRAFT_EXPIRED" error
 - [ ] Draft already used → Returns existing order (idempotent)
 - [ ] Draft belongs to other user → "DRAFT_NOT_OWNED"
 - [ ] Insufficient credits → "INSUFFICIENT_CREDITS"
@@ -254,7 +254,7 @@ interface ProviderStatus {
 - [ ] System calculates required credits (2 per postcard, same as letter)
 - [ ] Returns preview of front (image) and back (message)
 - [ ] Returns `canSendNow` based on credit balance
-- [ ] Creates draft with `mail_type='postcard'` and 24-hour expiration
+- [ ] Creates draft with `mail_type='postcard'` and 3-day expiration
 - [ ] Returns `draftId` for use in send operation
 
 **Image Requirements:**
@@ -292,7 +292,7 @@ interface ProviderStatus {
 **Error Cases:**
 - [ ] Missing `draftId` → "Draft ID required"
 - [ ] `confirm` not true → "Must confirm to send"
-- [ ] Draft expired (>24h) → "DRAFT_EXPIRED" error
+- [ ] Draft expired (>3 days) → "DRAFT_EXPIRED" error
 - [ ] Draft already used → Returns existing order (idempotent)
 - [ ] Draft belongs to other user → "DRAFT_NOT_OWNED"
 - [ ] Insufficient credits → "INSUFFICIENT_CREDITS"
@@ -516,7 +516,7 @@ There is a mobile workaround - ask me about it if you want to try.
 - [ ] Preview returns `canSendNow: false` when balance < required
 - [ ] Message clearly states: credits needed vs credits available
 - [ ] Provides purchase link or promo code option
-- [ ] Draft still created (user can purchase and send within 24h)
+- [ ] Draft still created (user can purchase and send within 3 days)
 - [ ] After purchasing, same `draftId` can be used
 
 **User Flow:**
@@ -843,11 +843,11 @@ See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_EN
 **So that** stale quotes don't cause issues
 
 **Acceptance Criteria:**
-- [ ] Drafts expire after 24 hours
+- [ ] Drafts expire after 3 days
 - [ ] Expired drafts cannot be sent
 - [ ] User gets clear error with instructions to re-preview
 - [ ] Daily job marks pending drafts as expired
-- [ ] Expired unsent drafts deleted 4 days after their expiry, inside the published 7 (#730)
+- [ ] Expired unsent drafts deleted 2 days after their 3-day expiry, inside the published 7 (#730)
 - [ ] Old drafts cleaned up after 7 days, except a held letter's, kept until 7 days after its mail date (#564), or 4 days after the cancel once it is cancelled (#701)
 
 ---

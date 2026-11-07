@@ -147,7 +147,7 @@ export function friendlyDraftError(
   }
   if (code === 'DRAFT_EXPIRED') {
     return new Error(
-      `Draft has expired (drafts are valid for 24 hours). Please create a new ${noun} draft.`
+      `Draft has expired (drafts are valid for 3 days). Please create a new ${noun} draft.`
     );
   }
   if (code === 'DRAFT_CANCELLED') {
