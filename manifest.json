@@ -1825,7 +1825,7 @@
     },
     {
       "name": "send_letter",
-      "description": "Send a physical letter using a draft from a preview tool. Requires a draftId and confirm: true. A retry returns the existing order, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
+      "description": "Send a physical letter using a draft from a preview tool. Requires a draftId and confirm: true. A retry returns the existing order, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 3 days, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1841,7 +1841,7 @@
             "type": "string"
           },
           "sendAnotherCopy": {
-            "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.",
+            "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 3 days. Leave it out otherwise.",
             "type": "boolean"
           }
         },
@@ -1953,7 +1953,7 @@
     },
     {
       "name": "create_mail_checkout",
-      "description": "Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
+      "description": "Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward. If the same mail was sent or paid for from this account in the last 3 days, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1966,7 +1966,7 @@
             "type": "string"
           },
           "sendAnotherCopy": {
-            "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.",
+            "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 3 days. Leave it out otherwise.",
             "type": "boolean"
           }
         },
@@ -3249,7 +3249,7 @@
     },
     {
       "name": "send_postcard",
-      "description": "Send a physical postcard using a draft from quote_and_preview_postcard. Requires a draftId and confirm: true. A retry returns the existing order, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
+      "description": "Send a physical postcard using a draft from quote_and_preview_postcard. Requires a draftId and confirm: true. A retry returns the existing order, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 3 days, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
       "inputSchema": {
         "type": "object",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3265,7 +3265,7 @@
             "type": "string"
           },
           "sendAnotherCopy": {
-            "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.",
+            "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 3 days. Leave it out otherwise.",
             "type": "boolean"
           }
         },

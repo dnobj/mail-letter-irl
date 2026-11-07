@@ -14,6 +14,7 @@ import { CUSTOM_THEME, stationeryOf, type Stationery } from '../render/stationer
 import { postcardFrontOf, type PostcardFront } from '../render/postcard.js';
 import { POSTCARD_FRONT_RENDERER_VERSION, RENDERER_VERSION, rendererVersionFor } from '../render/pdf.js';
 import { DRAFT_OPTION_COLUMNS, storedMailService, storedPages } from './mailOptions.js';
+import { DRAFT_LIFETIME_HOURS } from '../config/drafts.js';
 import type {
   Letter,
   LetterDraft,
@@ -30,8 +31,8 @@ import type {
   PostcardSize,
 } from './types.js';
 
-// Default draft expiration: 24 hours
-const DEFAULT_EXPIRATION_HOURS = 24;
+// Default draft expiration: 3 days (src/config/drafts.ts)
+const DEFAULT_EXPIRATION_HOURS = DRAFT_LIFETIME_HOURS;
 
 // ============================================================================
 // Draft Creation
@@ -434,14 +435,15 @@ export async function markExpiredDrafts(): Promise<number> {
  * it expired (#730): the privacy policy says an unsent draft's content is
  * deleted within 7 days, and the run that marks it can come a day after the
  * expiry. Its cutoff ($3) is UNSENT_DRAFT_DAYS_AFTER_EXPIRY, fixed rather than
- * taken from `olderThanDays`. Four days meets the 7 however they are counted:
- * from the expiry, or from the draft's creation a day before it. This sweep
- * runs once a day and that day drifts (the next run waits a full day from the
- * end of the last, so it usually comes about 25 hours later), so a draft it
- * just misses goes at the next run, still inside the 7. Earlier costs nothing:
- * the draft expired unsent and nothing paid for it.
+ * taken from `olderThanDays`. Two days meets the 7 however they are counted:
+ * from the expiry, or from the draft's creation 3 days before it
+ * (DRAFT_LIFETIME_HOURS). This sweep runs once a day and that day drifts (the
+ * next run waits a full day from the end of the last, so it usually comes
+ * about 25 hours later), so a draft it just misses goes at the next run, about
+ * 6 days after its creation, still inside the 7. Earlier costs nothing: the
+ * draft expired unsent and nothing paid for it.
  */
-export const UNSENT_DRAFT_DAYS_AFTER_EXPIRY = 4;
+export const UNSENT_DRAFT_DAYS_AFTER_EXPIRY = 2;
 
 /** A cancelled held letter's sent draft goes this many days after the cancel (#701, #730). */
 export const CANCELLED_HELD_DRAFT_DAYS = 4;

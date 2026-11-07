@@ -212,7 +212,7 @@ export const createMailCheckoutTool: McpToolDefinition<
   name: 'create_mail_checkout',
   title: 'Pay & Send a letter or postcard',
   description:
-    'Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.',
+    'Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward. If the same mail was sent or paid for from this account in the last 3 days, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.',
   readOnly: false,
   meta: {
     'openai/toolInvocation/invoking': 'Preparing secure checkout...',

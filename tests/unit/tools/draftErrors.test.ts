@@ -134,6 +134,13 @@ describe('mail-type wording', () => {
     expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toContain('The day this letter was to go to the printer has passed');
   });
 
+  it("says an expired draft lasted a draft's 3 days (DRAFT_LIFETIME_HOURS)", () => {
+    const upstream = Object.assign(new Error('Draft d-1 has expired'), { code: 'DRAFT_EXPIRED' });
+    expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toBe(
+      'Draft has expired (drafts are valid for 3 days). Please create a new letter draft.'
+    );
+  });
+
   it('says a full mail date needs another date, naming the open ones, and that nothing was sent (#700)', () => {
     const upstream = Object.assign(new Error('Draft d-1 was to go to the printer on 2026-10-06, which is full'), {
       code: 'SCHEDULE_FULL',

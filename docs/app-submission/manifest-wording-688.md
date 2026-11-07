@@ -42,7 +42,7 @@ Models never saw these: tools/list did not serve them.
 | `quote_and_preview_letter (input).bodyText` | Letter body. Must not exceed 1600 characters OR 24 lines. Write as continuous paragraphs - do NOT put blank lines between sentences. |
 | `quote_and_preview_letter (input).sender` | Return address (optional - will use saved return address if not provided) |
 | `quote_and_preview_letter (input).signOff` | Closing/signature (e.g., 'Sincerely, Name') |
-| `quote_and_preview_letter (output).draftExpiresAt` | ISO timestamp when draft expires (24h) |
+| `quote_and_preview_letter (output).draftExpiresAt` | ISO timestamp when draft expires (3 days) |
 | `quote_and_preview_letter (output).draftId` | Unique draft ID required for send_letter |
 | `quote_and_preview_letter (output).giftCard` | Present on a gift send: the card its extra printed page carries |
 | `quote_and_preview_letter (output).giftLettersAvailable` | Unsent gift letters on the account, when there are any |
@@ -64,7 +64,7 @@ Models never saw these: tools/list did not serve them.
 | `quote_and_preview_letter_with_header_image (input).imageUrl` | URL of header image (fallback if no file attached) |
 | `quote_and_preview_letter_with_header_image (input).sender` | Return address (optional - will use saved return address if not provided) |
 | `quote_and_preview_letter_with_header_image (input).signOff` | Closing/signature (e.g., 'Sincerely, Name') |
-| `quote_and_preview_letter_with_header_image (output).draftExpiresAt` | ISO timestamp when draft expires (24h) |
+| `quote_and_preview_letter_with_header_image (output).draftExpiresAt` | ISO timestamp when draft expires (3 days) |
 | `quote_and_preview_letter_with_header_image (output).draftId` | Unique draft ID required for send_letter |
 | `quote_and_preview_letter_with_header_image (output).giftCard` | Present on a gift send: the card its extra printed page carries |
 | `quote_and_preview_letter_with_header_image (output).giftLettersAvailable` | Unsent gift letters on the account, when there are any |
@@ -86,7 +86,7 @@ Models never saw these: tools/list did not serve them.
 | `quote_and_preview_letter_with_image (input).imageUrl` | URL of image (fallback if no file attached) |
 | `quote_and_preview_letter_with_image (input).sender` | Return address (optional - will use saved return address if not provided) |
 | `quote_and_preview_letter_with_image (input).signOff` | Closing/signature (e.g., 'Sincerely, Name') |
-| `quote_and_preview_letter_with_image (output).draftExpiresAt` | ISO timestamp when draft expires (24h) |
+| `quote_and_preview_letter_with_image (output).draftExpiresAt` | ISO timestamp when draft expires (3 days) |
 | `quote_and_preview_letter_with_image (output).draftId` | Unique draft ID required for send_letter |
 | `quote_and_preview_letter_with_image (output).giftCard` | Present on a gift send: the card its extra printed page carries |
 | `quote_and_preview_letter_with_image (output).giftLettersAvailable` | Unsent gift letters on the account, when there are any |
@@ -107,7 +107,7 @@ Models never saw these: tools/list did not serve them.
 | `quote_and_preview_postcard (input).imageUrl` | REQUIRED when using a hosted image: set this to the imageUrl returned by confirm_uploaded_image (the upload widget flow) or another publicly accessible image URL. This is the URL of the image for the postcard front. |
 | `quote_and_preview_postcard (input).sender` | Return address (optional - will use saved return address if not provided) |
 | `quote_and_preview_postcard (input).size` | Postcard size (currently only 6x9 is supported) |
-| `quote_and_preview_postcard (output).draftExpiresAt` | ISO timestamp when draft expires (24h) |
+| `quote_and_preview_postcard (output).draftExpiresAt` | ISO timestamp when draft expires (3 days) |
 | `quote_and_preview_postcard (output).draftId` | Unique draft ID required for send_postcard |
 | `quote_and_preview_postcard (output).giftCard` | Present on a gift send: the card its extra printed page carries |
 | `quote_and_preview_postcard (output).giftLettersAvailable` | Unsent gift letters on the account, when there are any |

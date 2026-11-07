@@ -1591,7 +1591,7 @@ approved with **Allow once** ran. Passed, except the Pay & Send step, which was 
 
 Background: each draft is sent at most once, but two drafts can hold the same letter, and the #411
 recovery makes that likely. A send from the balance, or a new Pay & Send checkout, is now refused
-when the account has the same mail from the last 24 hours. It goes through only when the person
+when the account has the same mail from the last 3 days (24 hours before November 2026). It goes through only when the person
 asks for another copy ([letter-send-flow.md](letter-send-flow.md)).
 
 - [x] Refresh the (DEV) connector. Its settings page should list `sendAnotherCopy` in the input

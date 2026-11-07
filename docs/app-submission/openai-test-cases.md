@@ -333,7 +333,7 @@ and stays out when it should not (precision).
 | Letter too long (past three pages with room to write; past one page for a gift letter) | Clear error with the line count and the page limit, or, for a gift letter past one page, that a gift letter pays for one page |
 | No image provided for postcard | Clear error explaining image is required |
 | Not enough letters | Preview shows `canSendNow: false` with an explanation, and the card offers Pay & Send or a letter pack |
-| Draft expired (after 24 hours) | Clear error suggesting to create new preview |
+| Draft expired (after 3 days) | Clear error suggesting to create new preview |
 | Non-US address | "Letter IRL currently only supports mailing within the United States." with the address that is not |
 | Send without preview | "send_letter requires a draftId from a letter preview tool." |
 | Wrong draft type (letter draft to send_postcard) | Clear error explaining the mismatch |

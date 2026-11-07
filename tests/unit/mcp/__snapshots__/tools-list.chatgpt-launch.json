@@ -643,12 +643,12 @@
           ]
         }
       ],
-      "openai/outputTemplate": "ui://widgets/LetterPreviewCard.html@v100",
+      "openai/outputTemplate": "ui://widgets/LetterPreviewCard.html@v101",
       "openai/widgetAccessible": true,
       "openai/toolInvocation/invoking": "Generating preview...",
       "openai/toolInvocation/invoked": "Preview ready",
       "ui": {
-        "resourceUri": "ui://widgets/LetterPreviewCard.html@v100",
+        "resourceUri": "ui://widgets/LetterPreviewCard.html@v101",
         "widgetAccessible": true
       }
     }
@@ -1322,7 +1322,7 @@
           ]
         }
       ],
-      "openai/outputTemplate": "ui://widgets/LetterHeaderImagePreviewCard.html@v100",
+      "openai/outputTemplate": "ui://widgets/LetterHeaderImagePreviewCard.html@v101",
       "openai/widgetAccessible": true,
       "openai/fileParams": [
         "image"
@@ -1330,7 +1330,7 @@
       "openai/toolInvocation/invoking": "Processing letter with header image...",
       "openai/toolInvocation/invoked": "Preview ready",
       "ui": {
-        "resourceUri": "ui://widgets/LetterHeaderImagePreviewCard.html@v100",
+        "resourceUri": "ui://widgets/LetterHeaderImagePreviewCard.html@v101",
         "widgetAccessible": true
       }
     }
@@ -2004,7 +2004,7 @@
           ]
         }
       ],
-      "openai/outputTemplate": "ui://widgets/LetterInlineImagePreviewCard.html@v100",
+      "openai/outputTemplate": "ui://widgets/LetterInlineImagePreviewCard.html@v101",
       "openai/widgetAccessible": true,
       "openai/fileParams": [
         "image"
@@ -2012,7 +2012,7 @@
       "openai/toolInvocation/invoking": "Processing letter with image...",
       "openai/toolInvocation/invoked": "Preview ready",
       "ui": {
-        "resourceUri": "ui://widgets/LetterInlineImagePreviewCard.html@v100",
+        "resourceUri": "ui://widgets/LetterInlineImagePreviewCard.html@v101",
         "widgetAccessible": true
       }
     }
@@ -2020,7 +2020,7 @@
   {
     "name": "send_letter",
     "title": "Send a letter",
-    "description": "Send a physical letter using a draft from a preview tool. Requires a draftId and confirm: true. A retry returns the existing order, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
+    "description": "Send a physical letter using a draft from a preview tool. Requires a draftId and confirm: true. A retry returns the existing order, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 3 days, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2035,7 +2035,7 @@
           "type": "string"
         },
         "sendAnotherCopy": {
-          "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.",
+          "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 3 days. Leave it out otherwise.",
           "type": "boolean"
         }
       },
@@ -2182,7 +2182,7 @@
   {
     "name": "create_mail_checkout",
     "title": "Pay & Send a letter or postcard",
-    "description": "Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
+    "description": "Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward. If the same mail was sent or paid for from this account in the last 3 days, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2194,7 +2194,7 @@
           "type": "string"
         },
         "sendAnotherCopy": {
-          "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.",
+          "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 3 days. Leave it out otherwise.",
           "type": "boolean"
         }
       },
@@ -2400,7 +2400,7 @@
           ]
         }
       ],
-      "openai/outputTemplate": "ui://widgets/PackCheckoutCard.html@v100",
+      "openai/outputTemplate": "ui://widgets/PackCheckoutCard.html@v101",
       "openai/toolInvocation/invoking": "Preparing letter pack checkout...",
       "openai/toolInvocation/invoked": "Letter pack checkout ready",
       "openai/widgetAccessible": true,
@@ -2408,7 +2408,7 @@
       "openWorldHint": true,
       "idempotentHint": false,
       "ui": {
-        "resourceUri": "ui://widgets/PackCheckoutCard.html@v100",
+        "resourceUri": "ui://widgets/PackCheckoutCard.html@v101",
         "widgetAccessible": true
       }
     }
@@ -3766,7 +3766,7 @@
           ]
         }
       ],
-      "openai/outputTemplate": "ui://widgets/PostcardPreviewCard.html@v100",
+      "openai/outputTemplate": "ui://widgets/PostcardPreviewCard.html@v101",
       "openai/widgetAccessible": true,
       "openai/fileParams": [
         "image",
@@ -3775,7 +3775,7 @@
       "openai/toolInvocation/invoking": "Processing postcard...",
       "openai/toolInvocation/invoked": "Postcard preview ready",
       "ui": {
-        "resourceUri": "ui://widgets/PostcardPreviewCard.html@v100",
+        "resourceUri": "ui://widgets/PostcardPreviewCard.html@v101",
         "widgetAccessible": true
       }
     }
@@ -3783,7 +3783,7 @@
   {
     "name": "send_postcard",
     "title": "Send a postcard",
-    "description": "Send a physical postcard using a draft from quote_and_preview_postcard. Requires a draftId and confirm: true. A retry returns the existing order, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
+    "description": "Send a physical postcard using a draft from quote_and_preview_postcard. Requires a draftId and confirm: true. A retry returns the existing order, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 3 days, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3798,7 +3798,7 @@
           "type": "string"
         },
         "sendAnotherCopy": {
-          "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.",
+          "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 3 days. Leave it out otherwise.",
           "type": "boolean"
         }
       },
@@ -6317,12 +6317,12 @@
           ]
         }
       ],
-      "openai/outputTemplate": "ui://widgets/GetStartedCard.html@v100",
+      "openai/outputTemplate": "ui://widgets/GetStartedCard.html@v101",
       "openai/toolInvocation/invoking": "Opening getting-started guide...",
       "openai/toolInvocation/invoked": "Getting-started guide ready",
       "readOnlyHint": true,
       "ui": {
-        "resourceUri": "ui://widgets/GetStartedCard.html@v100"
+        "resourceUri": "ui://widgets/GetStartedCard.html@v101"
       }
     }
   },
@@ -6397,14 +6397,14 @@
           ]
         }
       ],
-      "openai/outputTemplate": "ui://widgets/ImageUploadCard.html@v100",
+      "openai/outputTemplate": "ui://widgets/ImageUploadCard.html@v101",
       "openai/widgetAccessible": true,
       "openai/toolInvocation/invoking": "Opening photo picker...",
       "openai/toolInvocation/invoked": "Photo picker ready",
       "readOnlyHint": false,
       "idempotentHint": false,
       "ui": {
-        "resourceUri": "ui://widgets/ImageUploadCard.html@v100",
+        "resourceUri": "ui://widgets/ImageUploadCard.html@v101",
         "widgetAccessible": true
       }
     }

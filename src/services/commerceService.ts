@@ -130,7 +130,7 @@ export interface CreatePackCheckoutParams {
 export interface CreateJitCheckoutParams {
   userId: string;
   draftId: string;
-  /** The person asked for another copy of mail sent or paid for in the last 24 hours (#412). */
+  /** The person asked for another copy of mail sent or paid for in the last 3 days (#412). */
   allowDuplicate?: boolean;
   /**
    * Where Stripe returns the person, when not the purchase return page: the
@@ -1273,7 +1273,7 @@ async function prepareJitOrder(
     const orderId = randomUUID();
     const expiresAt = checkoutExpiry(new Date(draft.expires_at));
     // #412: a NEW checkout for the same mail sent, paid for or awaiting
-    // payment in the last 24 hours is refused unless the person asked for
+    // payment in the last 3 days is refused unless the person asked for
     // another copy. Here, as the last refusal before the insert, because only
     // here is a new order certain: every reuse has returned above, a stale or
     // repriced row has just been cancelled for a replacement, the draft is

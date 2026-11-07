@@ -45,7 +45,7 @@ export interface CreateMailOrderParams {
   funding?: MailFunding;
   /**
    * The person asked for another copy of mail sent or paid for in the last
-   * 24 hours (#412). Prepaid sends only; Pay & Send is checked when its
+   * 3 days (#412). Prepaid sends only; Pay & Send is checked when its
    * checkout is created.
    */
   allowDuplicate?: boolean;

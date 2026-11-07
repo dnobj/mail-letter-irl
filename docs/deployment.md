@@ -958,7 +958,7 @@ the PDFs.
 
 **Rolling back below migration 039.** Do not roll the API back to a build older than migration 039 while
 letters with `content.rendererVersion` are queued or held, or while drafts with `renderer_version` are
-unexpired (24 hours). An older build ignores the version and sends them as HTML, printed from a different
+unexpired (3 days, `DRAFT_LIFETIME_HOURS`). An older build ignores the version and sends them as HTML, printed from a different
 layout than the person previewed.
 - Postcards set a later floor: the build that merged #545 is the first to print a postcard's version. Do
   not roll back below it while postcards with `content.rendererVersion` are queued or held, or postcard
@@ -970,7 +970,7 @@ layout than the person previewed.
     holds once the newer build is back.
   - An older build would redact a themed draft but keep its date line, initials and headline, and no later
     sweep revisits a redacted draft. Roll back only with no `pdf-2` draft whose content is still live
-    (`redacted_at IS NULL`), not merely none unexpired: drafts expire in 24 hours, but are swept days later.
+    (`redacted_at IS NULL`), not merely none unexpired: drafts expire in 3 days, but are swept days later.
 - The 4x6 and 11x6 postcards set another (#594): #596's build is the first to print a `6x4` or `6x11`
   postcard with `content.rendererVersion`. An older build holds one as `render_refused` (`size`), and the
   Reject guidance above would then refund mail that can print. Do not roll back below it while such a

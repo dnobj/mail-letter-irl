@@ -12,7 +12,7 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  * That gap is where this repository's defects come from (see
  * betaSpendLimits.postgres.test.ts). What only a real database settles here:
  *
- *   - the 24-hour window, written against TIMESTAMP columns with
+ *   - the 3-day window (a draft's lifetime), written against TIMESTAMP columns with
  *     `NOW() AT TIME ZONE 'UTC'`;
  *   - the uuid and varchar parameters, each bound once with one type;
  *   - md5() over JSON text and draft columns agreeing, so an image letter
@@ -372,13 +372,15 @@ describePostgres('duplicate mail check (#412)', () => {
     ).resolves.toMatchObject({ alreadyConsumed: false });
   });
 
-  it('counts only the last 24 hours', async () => {
+  it("counts only the last 3 days, a draft's whole lifetime", async () => {
     const userId = await seedUser();
-    await seedLetter(userId, { hoursAgo: 25 });
+    await seedLetter(userId, { hoursAgo: 73 });
     const draftId = await seedDraft(userId);
     await expect(findFor(userId, draftId)).resolves.toBeNull();
 
-    await seedLetter(userId, { hoursAgo: 23 });
+    // Inside 3 days but past the old 24 hours: a second draft made beside the
+    // first can still be sent this late, so it is still the same mail.
+    await seedLetter(userId, { hoursAgo: 71 });
     await expect(findFor(userId, draftId)).resolves.toMatchObject({ kind: 'sent' });
   });
 

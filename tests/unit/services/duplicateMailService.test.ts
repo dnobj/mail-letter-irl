@@ -154,6 +154,10 @@ describe('describeMailAge', () => {
     [3600, '1 hour ago'],
     [2 * 3600, '2 hours ago'],
     [23 * 3600 + 3599, '23 hours ago'],
+    [24 * 3600, '1 day ago'],
+    [47 * 3600 + 3599, '1 day ago'],
+    [48 * 3600, '2 days ago'],
+    [71 * 3600 + 3599, '2 days ago'],
     [-5, 'less than a minute ago']
   ])('%i seconds reads "%s"', (seconds, text) => {
     expect(describeMailAge(seconds)).toBe(text);
@@ -323,10 +327,10 @@ describe('findRecentDuplicateMail', () => {
     const { db, calls } = fakeDb({});
     await findRecentDuplicateMail(db, params);
     const [letters, orders] = [calls[0].sql, calls[1].sql];
-    expect(letters).toContain("l.created_at > (NOW() AT TIME ZONE 'UTC') - INTERVAL '24 hours'");
+    expect(letters).toContain("l.created_at > (NOW() AT TIME ZONE 'UTC') - INTERVAL '72 hours'");
     expect(letters).toContain("l.status NOT IN ('failed', 'cancelled')");
     expect(letters).toContain('l.letter_id <> $3');
-    expect(orders).toContain("o.created_at > (NOW() AT TIME ZONE 'UTC') - INTERVAL '24 hours'");
+    expect(orders).toContain("o.created_at > (NOW() AT TIME ZONE 'UTC') - INTERVAL '72 hours'");
     expect(orders).toContain('o.letter_id IS NULL');
     expect(orders).toContain('o.draft_id <> $2::uuid');
     expect(orders).toContain("o.status IN ('paid', 'fulfillment_pending')");

@@ -8,8 +8,8 @@
  * letters are printed and paid for.
  *
  * So before a send from balance, and before a new Pay & Send checkout, the
- * server looks for the same mail from the same account in the last 24 hours
- * (a draft's whole lifetime). A match refuses the call unless the caller says
+ * server looks for the same mail from the same account in the last 3 days
+ * (a draft's whole lifetime, DRAFT_LIFETIME_HOURS). A match refuses the call unless the caller says
  * the person asked for another copy.
  *
  * "The same mail", as agreed with the owner on 2026-09-17:
@@ -34,8 +34,9 @@
  */
 
 import type pg from 'pg';
+import { DRAFT_LIFETIME_HOURS } from '../config/drafts.js';
 
-export const DUPLICATE_MAIL_WINDOW_HOURS = 24;
+export const DUPLICATE_MAIL_WINDOW_HOURS = DRAFT_LIFETIME_HOURS;
 export const DUPLICATE_MAIL_ERROR_CODE = 'DUPLICATE_RECENT_MAIL';
 /** Widget-only details on the refusal (see registerTools.ts). */
 export const DUPLICATE_MAIL_META_KEY = 'letterirl/duplicateMail';
@@ -141,7 +142,10 @@ export function describeMailAge(ageSeconds: number): string {
   if (minutes < 1) return 'less than a minute ago';
   if (minutes < 60) return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
   const hours = Math.floor(minutes / 60);
-  return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+  if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+  // The window is a draft's 3 days (DRAFT_LIFETIME_HOURS), so "50 hours ago" reads as days.
+  const days = Math.floor(hours / 24);
+  return days === 1 ? '1 day ago' : `${days} days ago`;
 }
 
 /** Written for the model: what happened, and what it may do next. */

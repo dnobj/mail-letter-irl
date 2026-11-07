@@ -611,7 +611,7 @@ export interface CreateDraftParams {
   previewHtml?: string;
   senderValidation?: Record<string, unknown>;
   recipientValidation?: Record<string, unknown>;
-  expiresInHours?: number;  // Default: 24
+  expiresInHours?: number;  // Default: 72 (DRAFT_LIFETIME_HOURS)
   // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
   layoutType?: LetterLayoutType;          // Default: 'text_only'
   headerImageData?: string;               // Base64 data URI for header image
@@ -905,7 +905,7 @@ export interface CreatePostcardDraftParams {
   previewHtml?: string;
   senderValidation?: Record<string, unknown>;
   recipientValidation?: Record<string, unknown>;
-  expiresInHours?: number;        // Default: 24
+  expiresInHours?: number;        // Default: 72 (DRAFT_LIFETIME_HOURS)
   /** Funded by a gift letter and printed with its card (migration 033). */
   isGiftSend?: boolean;
   /** The renderer that drew the preview (#534 Phase 4); absent for the legacy HTML. */

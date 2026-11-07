@@ -577,7 +577,7 @@ describe('refusalFor (#470)', () => {
     expect(refusal.status).toBe(409);
     expect(refusal.body).toEqual({
       error: 'duplicate',
-      message: 'The same mail went out from this account in the last 24 hours.',
+      message: 'The same mail went out from this account in the last 3 days.',
       duplicate: { kind: 'sent', mailType: 'letter', recipientName: 'Sam', ageMinutes: 122 }
     });
   });

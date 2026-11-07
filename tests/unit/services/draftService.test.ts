@@ -87,8 +87,9 @@ describe('draftService', () => {
       expect(vi.mocked(db.query).mock.calls[0][0]).toContain(`RETURNING draft_id, expires_at, ${CONTENT_VERSION_COLUMNS}`);
     });
 
-    it('should create a draft with 24-hour expiration by default', async () => {
+    it('should create a draft with 3-day expiration by default', async () => {
       const mockDraft = testDrafts.pending();
+      const before = Date.now();
 
       vi.mocked(db.query).mockResolvedValueOnce({
         rows: [{ draft_id: mockDraft.draft_id, expires_at: mockDraft.expires_at }],
@@ -113,6 +114,28 @@ describe('draftService', () => {
         expect.stringContaining('INSERT INTO letter_drafts'),
         expect.any(Array)
       );
+      // The INSERT's expiry is 72 hours out (DRAFT_LIFETIME_HOURS), so an agent's send link lasts into the next day.
+      const insertParams = vi.mocked(db.query).mock.calls[0][1] as unknown[];
+      const expiries = insertParams.filter((p): p is Date => p instanceof Date);
+      expect(expiries).toHaveLength(1);
+      expect(Math.abs(expiries[0].getTime() - (before + 72 * 60 * 60 * 1000))).toBeLessThan(5_000);
+    });
+
+    it('gives a postcard draft the same 3 days by default', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [{ draft_id: 'draft-p', expires_at: new Date() }], rowCount: 1, command: 'INSERT', oid: 0, fields: [] });
+      const before = Date.now();
+      await createPostcardDraft({
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        message: 'Wish you were here',
+        frontImageData: 'data:image/jpeg;base64,/9j/4AAQ',
+        frontImageUrl: 'https://files.example/a.jpg',
+      });
+      const insertParams = vi.mocked(db.query).mock.calls[0][1] as unknown[];
+      const expiries = insertParams.filter((p): p is Date => p instanceof Date);
+      expect(expiries).toHaveLength(1);
+      expect(Math.abs(expiries[0].getTime() - (before + 72 * 60 * 60 * 1000))).toBeLessThan(5_000);
     });
 
     it('stores the signature a preview was drawn with in its own column, and NULL without one (#608)', async () => {
@@ -868,7 +891,7 @@ describe('draftService', () => {
       expect(Math.abs(before - 4 * 24 * 60 * 60 * 1000 - params[3].getTime())).toBeLessThan(5_000);
     });
 
-    it('measures an unsent draft from its own expiry, four days, whatever olderThanDays is (#730)', async () => {
+    it('measures an unsent draft from its own expiry, two days, whatever olderThanDays is (#730)', async () => {
       vi.mocked(db.query).mockResolvedValueOnce({ rows: [], rowCount: 0, command: 'DELETE', oid: 0, fields: [] });
       const before = Date.now();
       await cleanupOldDrafts(7);
@@ -876,15 +899,16 @@ describe('draftService', () => {
       expect(sql.replace(/\s+/g, ' ')).toContain("(CASE WHEN status = 'expired' THEN expires_at < $3 ELSE COALESCE(");
       expect(sql.match(/\$3/g)).toHaveLength(1);
       expect(params[2]).toBeInstanceOf(Date);
-      // Four days: inside the seven from the expiry or from creation, with room for the daily sweep's drift.
-      expect(Math.abs(before - 4 * 24 * 60 * 60 * 1000 - params[2].getTime())).toBeLessThan(5_000);
+      // Two days: a 3-day draft goes about 5 days after its creation, 6 with the
+      // daily sweep's drift, inside the seven from the expiry or from creation.
+      expect(Math.abs(before - 2 * 24 * 60 * 60 * 1000 - params[2].getTime())).toBeLessThan(5_000);
 
-      // Fixed, not taken from olderThanDays: a caller passing 2 does not delete every expired draft at once.
+      // Fixed, not taken from olderThanDays: a caller passing 1 does not delete every expired draft at once.
       vi.mocked(db.query).mockResolvedValueOnce({ rows: [], rowCount: 0, command: 'DELETE', oid: 0, fields: [] });
       const again = Date.now();
-      await cleanupOldDrafts(2);
+      await cleanupOldDrafts(1);
       const [, shortParams] = vi.mocked(db.query).mock.calls[1] as unknown as [string, [Date, number, Date]];
-      expect(Math.abs(again - 4 * 24 * 60 * 60 * 1000 - shortParams[2].getTime())).toBeLessThan(5_000);
+      expect(Math.abs(again - 2 * 24 * 60 * 60 * 1000 - shortParams[2].getTime())).toBeLessThan(5_000);
     });
   });
 

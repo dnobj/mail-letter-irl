@@ -7,7 +7,7 @@ This document describes the current draft, payment, outbox, and provider workflo
 
 ## Preview
 
-Preview tools validate the user's input, render the appropriate widget, and create a 24-hour database draft. Previewing does not deduct a letter send and does not create a provider order.
+Preview tools validate the user's input, render the appropriate widget, and create a 3-day database draft (`DRAFT_LIFETIME_HOURS`, `src/config/drafts.ts`). Previewing does not deduct a letter send and does not create a provider order.
 
 | Tool | Layout | Text limit |
 | --- | --- | --- |
@@ -142,7 +142,7 @@ envelope reveal is on (#576, [ui-widgets.md](ui-widgets.md)). The `POST`:
     - make a production send from the card and from the page.
 
 A Pay & Send checkout opened before the switch still mails when the person
-pays, for as long as the checkout lasts: at most the draft's 24 hours. The
+pays, for as long as the checkout lasts: at most 24 hours, and never past the draft's 3 days. The
 person's own payment for that exact mail is the trigger, so this is expected,
 not a gap.
 
@@ -256,7 +256,7 @@ A send names a draft by its id, and a draft can change after the person saw it: 
 
 Each draft is sent at most once, but two drafts can hold the same mail. On ChatGPT web a preview call approved with "Allow once" can finish late, after the preview card has made its own draft (#411). If the person sends one draft from the card and confirms the other in the chat, two identical letters are mailed and paid for (#412).
 
-So a send from balance, and a new Pay & Send checkout, is refused when the account has the same mail from the last 24 hours (a draft's whole lifetime), unless the call passes `sendAnotherCopy: true`. The check lives in `src/services/duplicateMailService.ts`.
+So a send from balance, and a new Pay & Send checkout, is refused when the account has the same mail from the last 3 days (a draft's whole lifetime), unless the call passes `sendAnotherCopy: true`. The check lives in `src/services/duplicateMailService.ts`.
 
 - **The same mail.** Every one of these matches, ignoring capitalization and runs of whitespace:
   - the kind (letter or postcard), and the letter's layout or the postcard's size;
@@ -604,7 +604,7 @@ Generated images receive a capability URL backed by a private Railway bucket. Th
 ## Required Tests
 
 - duplicate and concurrent send calls create one order and one deduction;
-- a second draft of the same mail is refused within 24 hours, from balance and at a new Pay & Send checkout, and goes through only with `sendAnotherCopy: true` (`tests/integration/duplicateMail.postgres.test.ts`);
+- a second draft of the same mail is refused within 3 days, from balance and at a new Pay & Send checkout, and goes through only with `sendAnotherCopy: true` (`tests/integration/duplicateMail.postgres.test.ts`);
 - insufficient balance rolls back all effects;
 - `429`, `503`, timeout, and network failures are held as ambiguous rather than resubmitted;
 - a terminal failure returns the customer's Letter Pack exactly once, and an ambiguous one never does;
