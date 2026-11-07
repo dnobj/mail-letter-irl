@@ -1,6 +1,6 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** October 23, 2026
+**Last Updated:** November 7, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
 
@@ -342,7 +342,7 @@ log: a login, no signup).
 
 ## Applications
 
-This section describes the development tenant.
+This section describes the development tenant, except section 7, which is production only.
 
 **The free plan allows 10 applications and SSO integrations per tenant.** The
 development tenant reached the limit on 2026-09-26, when the other MCP apps'
@@ -545,7 +545,7 @@ check signs in through CIMD, using its own document, so Auth0 refused it with `U
 | API access | `Letter IRL MCP`: `mail:read`, `mail:draft`, `mail:send`, user-delegated only; no client access; **Always grant all permissions** off |
 | Connections | Username-Password-Authentication, github, google-oauth2 |
 
-- **It was imported on production first**, because Glama's listing checks the production URL from
+- **It was imported on production only**, because Glama's listing checks the production URL from
   the registry. Development has no Glama client. Development has had no free application slot
   since 2026-09-28.
 - **Production reached the 10-application limit with this import.** The next import on either

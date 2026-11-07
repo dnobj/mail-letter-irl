@@ -134,7 +134,7 @@ Owed before stage A, on DEV at the head being promoted:
 
 **Still open:** GIFT-01's iPhone scan. #837 (an unconfirmed email signing in from an app saw Auth0's
 generic error page) is fixed on DEV by website #86 and the tenant's error page setting; production
-takes the setting in step 10 below. LINK-02 passed on DEV for Google, GitHub and email,
+took the setting on 2026-11-07 (step 10 below). LINK-02 passed on DEV for Google, GitHub and email,
 and signing out of a session from before the switch can no longer be tried there (the rotation of
 `AUTH0_SECRET` signed everyone out): both are production checks at stage B.
 
@@ -183,7 +183,8 @@ must be ready before the API deploys against it
    its grant).
 8. The applications: remove legacy entries within the tenant's application limit, then import the
    apps chosen for launch, keeping one slot for OpenClaw: its client document is served by the
-   production website, so it is imported after stage A.
+   production website, so it is imported after stage A. **That slot went to Glama on 2026-11-07**
+   (the tenant doc, Applications section 7), so a slot must be freed before OpenClaw is imported.
 9. The custom domain `auth.letterirl.com`, steps 1 and 2 of the tenant doc's "Moving a tenant to a custom
    domain": verified, emails switched, Google and GitHub callbacks in place. Done 2026-10-20; steps 3 and 4
    wait for stage B.
@@ -191,7 +192,8 @@ must be ready before the API deploys against it
     (website #86), so after stage A: Settings → General → Error Pages → **Custom**, URL
     `https://letterirl.com/sign-in-error`. Check it at stage B with a sign-up from an app that is not
     confirmed yet: the person lands on our page with the confirmation-link sentence, not Auth0's
-    error page.
+    error page. **Done 2026-11-07** (the setting, read back after a reload); the check with an
+    unconfirmed sign-up is still to do.
 
 ### Production variables set ahead (owner, or an agent with approval)
 
