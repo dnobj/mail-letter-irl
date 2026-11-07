@@ -130,6 +130,7 @@ describe('draftService', () => {
         recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
         message: 'Wish you were here',
         frontImageData: 'data:image/jpeg;base64,/9j/4AAQ',
+        frontImageUrl: 'https://files.example/a.jpg',
       });
       const insertParams = vi.mocked(db.query).mock.calls[0][1] as unknown[];
       const expiries = insertParams.filter((p): p is Date => p instanceof Date);
