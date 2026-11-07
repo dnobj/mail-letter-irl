@@ -298,7 +298,7 @@ hosted `checkoutUrl`, exact server-configured amount/currency, product
 description, expiry, and current order status. Payment is authorization to mail
 the immutable draft; the model must not call `send_letter` or `send_postcard`
 after payment. A new checkout for mail sent, paid for or awaiting payment in the
-last 24 hours is refused unless `sendAnotherCopy` is true
+last 3 days is refused unless `sendAnotherCopy` is true
 ([letter-send-flow.md](letter-send-flow.md#the-same-mail-twice)). A draft whose pages,
 and so its price, changed while the checkout was being made is refused before any
 order (`DRAFT_CHANGED`, #586), so trying again charges the price it has now. A `contentVersion` other than the draft's own, because the draft changed after the person saw it, is refused before any order (`DRAFT_CHANGED_SINCE_SHOWN`, #695; [letter-send-flow.md](letter-send-flow.md#what-the-person-saw-695)). And an earlier checkout whose

@@ -958,7 +958,7 @@ the PDFs.
 
 **Rolling back below migration 039.** Do not roll the API back to a build older than migration 039 while
 letters with `content.rendererVersion` are queued or held, or while drafts with `renderer_version` are
-unexpired (24 hours). An older build ignores the version and sends them as HTML, printed from a different
+unexpired (3 days, `DRAFT_LIFETIME_HOURS`). An older build ignores the version and sends them as HTML, printed from a different
 layout than the person previewed.
 - Postcards set a later floor: the build that merged #545 is the first to print a postcard's version. Do
   not roll back below it while postcards with `content.rendererVersion` are queued or held, or postcard

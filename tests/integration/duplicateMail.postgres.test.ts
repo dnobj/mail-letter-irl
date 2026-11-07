@@ -12,7 +12,7 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  * That gap is where this repository's defects come from (see
  * betaSpendLimits.postgres.test.ts). What only a real database settles here:
  *
- *   - the 24-hour window, written against TIMESTAMP columns with
+ *   - the 3-day window (a draft's lifetime), written against TIMESTAMP columns with
  *     `NOW() AT TIME ZONE 'UTC'`;
  *   - the uuid and varchar parameters, each bound once with one type;
  *   - md5() over JSON text and draft columns agreeing, so an image letter

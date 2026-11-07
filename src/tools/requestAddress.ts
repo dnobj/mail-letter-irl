@@ -19,7 +19,7 @@ import {
  * shows only the sender's first name, and takes a U.S. address or a decline.
  * Letter IRL never contacts the recipient.
  *
- * The letter waits in the conversation, not as a draft: a draft lasts a day
+ * The letter waits in the conversation, not as a draft: a draft lasts 3 days
  * and needs its address. get_address_request returns the address once it is
  * given, for the preview. Listed only while LETTER_IRL_ADDRESS_REQUESTS_ENABLED
  * is on (src/server.ts).

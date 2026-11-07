@@ -16,8 +16,8 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  *   - Sent letter content: 90 days. A letter that failed for good counts from
  *     its creation, and its failed job no longer holds it (#730).
  *   - Drafts attached to a PAID order: the same schedule.
- *   - Unsent drafts never paid for: within 7 days (#730: deleted 4 days after
- *     their expiry, for the daily sweep's drift). cleanupOldDrafts() DELETES the
+ *   - Unsent drafts never paid for: within 7 days (#730: deleted 2 days after
+ *     their 3-day expiry, for the daily sweep's drift). cleanupOldDrafts() DELETES the
  *     ones it can; purgeAbandonedDraftContent handles the ones the schema
  *     forbids deleting. cleanupOldDrafts() also deletes a sent draft with no
  *     order 7 days after the send (its letter keeps the content), except a

@@ -158,10 +158,6 @@ describe('describeMailAge', () => {
     [47 * 3600 + 3599, '1 day ago'],
     [48 * 3600, '2 days ago'],
     [71 * 3600 + 3599, '2 days ago'],
-    [24 * 3600, '1 day ago'],
-    [47 * 3600 + 3599, '1 day ago'],
-    [48 * 3600, '2 days ago'],
-    [71 * 3600 + 3599, '2 days ago'],
     [-5, 'less than a minute ago']
   ])('%i seconds reads "%s"', (seconds, text) => {
     expect(describeMailAge(seconds)).toBe(text);
