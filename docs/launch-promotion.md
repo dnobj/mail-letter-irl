@@ -1,6 +1,6 @@
 # Launch Promotion Plan
 
-**Last Updated:** October 23, 2026
+**Last Updated:** November 7, 2026
 
 The plan for promoting the launch version to production (#702, part of #680; tracker #158). It says
 what is pending, in what order it goes, what each system needs and when, how to check each stage,
