@@ -126,11 +126,11 @@ describe('draftService', () => {
       const before = Date.now();
       await createPostcardDraft({
         userId: testUsers.sarah.user_id,
-        sender: testAddresses.validSender,
-        recipient: testAddresses.validRecipient,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
         message: 'Wish you were here',
         frontImageData: 'data:image/jpeg;base64,/9j/4AAQ',
-      } as Parameters<typeof createPostcardDraft>[0]);
+      });
       const insertParams = vi.mocked(db.query).mock.calls[0][1] as unknown[];
       const expiries = insertParams.filter((p): p is Date => p instanceof Date);
       expect(expiries).toHaveLength(1);
