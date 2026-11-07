@@ -87,8 +87,9 @@ describe('draftService', () => {
       expect(vi.mocked(db.query).mock.calls[0][0]).toContain(`RETURNING draft_id, expires_at, ${CONTENT_VERSION_COLUMNS}`);
     });
 
-    it('should create a draft with 24-hour expiration by default', async () => {
+    it('should create a draft with 3-day expiration by default', async () => {
       const mockDraft = testDrafts.pending();
+      const before = Date.now();
 
       vi.mocked(db.query).mockResolvedValueOnce({
         rows: [{ draft_id: mockDraft.draft_id, expires_at: mockDraft.expires_at }],
@@ -113,6 +114,27 @@ describe('draftService', () => {
         expect.stringContaining('INSERT INTO letter_drafts'),
         expect.any(Array)
       );
+      // The INSERT's expiry is 72 hours out (DRAFT_LIFETIME_HOURS), so an agent's send link lasts into the next day.
+      const insertParams = vi.mocked(db.query).mock.calls[0][1] as unknown[];
+      const expiries = insertParams.filter((p): p is Date => p instanceof Date);
+      expect(expiries).toHaveLength(1);
+      expect(Math.abs(expiries[0].getTime() - (before + 72 * 60 * 60 * 1000))).toBeLessThan(5_000);
+    });
+
+    it('gives a postcard draft the same 3 days by default', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [{ draft_id: 'draft-p', expires_at: new Date() }], rowCount: 1, command: 'INSERT', oid: 0, fields: [] });
+      const before = Date.now();
+      await createPostcardDraft({
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender,
+        recipient: testAddresses.validRecipient,
+        message: 'Wish you were here',
+        frontImageData: 'data:image/jpeg;base64,/9j/4AAQ',
+      } as Parameters<typeof createPostcardDraft>[0]);
+      const insertParams = vi.mocked(db.query).mock.calls[0][1] as unknown[];
+      const expiries = insertParams.filter((p): p is Date => p instanceof Date);
+      expect(expiries).toHaveLength(1);
+      expect(Math.abs(expiries[0].getTime() - (before + 72 * 60 * 60 * 1000))).toBeLessThan(5_000);
     });
 
     it('stores the signature a preview was drawn with in its own column, and NULL without one (#608)', async () => {
