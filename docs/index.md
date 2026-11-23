@@ -100,6 +100,7 @@ maintenance job.
 - [OpenAI Apps SDK Owner Checklist](app-submission/owner-checklist.md) - owner-managed tasks and the readiness gate
 - [OpenAI Test Cases](app-submission/openai-test-cases.md) - test prompts, expected behavior, tool annotations
 - [Demo Scenarios](app-submission/demo-scenarios.md) - demo scenarios for submission videos and reviewers
+- [Changing the API After Approval](app-submission/changing-the-api-after-approval.md) - what production changes ChatGPT and Claude show at once, hold for a scan, or send to review
 - [MCP Registry](mcp-registry.md) - the listing in the official MCP Registry, and how to publish it
 - [MCP Clients Plan](mcp-multi-client-plan.md) - Claude, Codex and other agents before launch: send safety, sign-in, cards, the Connect page (#145)
 
