@@ -8,9 +8,9 @@
       "interface": {
         "displayName": "Letter IRL",
         "shortDescription": "Mail real letters & postcards",
-        "longDescription": "Letter IRL sends real, physical letters and postcards through the U.S. mail, from a conversation in ChatGPT.\n\nWrite a thank-you letter to a friend, send a note with a photo, or turn a picture into a postcard. Letter IRL prints it and mails it through USPS.\n\nWhat you can send:\n- Letters of one to three pages: text only, with a header image, or with an enclosed photo\n- Stationery themes, and your own signature printed under the closing\n- Postcards in 4x6, 6x9 and 11x6, with a full photo, a border and caption, a \"Greetings from\" front, or a collage of two to four photos\n- Mail timed to arrive by a date you choose (USPS does not guarantee First-Class dates)\n- USPS Certified Mail, with an optional electronic return receipt\n\nHow it works:\n1. Tell ChatGPT what you want to send and to whom.\n2. Letter IRL checks the addresses and shows a preview. Previews are free.\n3. You press Send on the preview. Only you send it: ChatGPT never mails anything on its own.\n\nSending is paid. A Letter Pack is a set of prepaid mailings bought ahead; each pays for a one-page letter sent by standard First-Class Mail, or one 6x9 postcard. Anything a pack cannot pay for, such as Certified Mail, a longer letter or another postcard size, and any piece when you have no prepaid letters, is paid on its own with Pay & Send. Both are paid on Letter IRL's checkout page in your browser, never inside ChatGPT. Letter IRL sells physical mail only.\n\nU.S. mailing addresses only. Delivery dates are estimates from USPS First-Class Mail.",
+        "longDescription": "Letter IRL sends real, physical letters and postcards through the U.S. mail, from a conversation in ChatGPT.\n\nWrite a thank-you letter to a friend, send a note with a photo, or turn a picture into a postcard. Letter IRL prints it and mails it through USPS.\n\nWhat you can send:\n- Letters of one to three pages: text only, with a header image, or with an enclosed photo\n- Stationery themes, and your own signature printed under the closing\n- Postcards in 4x6, 6x9 and 11x6, with a full photo, a border and caption, a \"Greetings from\" front, or a collage of two to four photos\n- Mail timed to arrive by a date you choose (USPS does not guarantee First-Class dates)\n- USPS Certified Mail, with an optional electronic return receipt\n\nHow it works:\n1. Tell ChatGPT what you want to send and to whom.\n2. Letter IRL checks the addresses and shows a preview.\n3. You press Send on the preview. Only you send it: ChatGPT never mails anything on its own.\n\nYou pay for mail on Letter IRL's checkout page in your browser, never inside ChatGPT. Letter IRL sells physical mail only.\n\nU.S. mailing addresses only. Delivery dates are estimates from USPS First-Class Mail.",
         "developerName": "Objective Works",
-        "category": "Productivity",
+        "category": "Communication",
         "websiteURL": "https://letterirl.com",
         "supportURL": "https://letterirl.com/support",
         "privacyPolicyURL": "https://letterirl.com/privacy",
@@ -42,14 +42,14 @@
             {
               "description": "Sending: only the person sends, with the card's Send button. Continue in the same conversation as the preview case.",
               "prompt": "Send it.",
-              "tools_triggered": "send_letter",
-              "expected_behavior": "Asked in chat, ChatGPT calls no tool to send: it points to the preview card's Send button. When the reviewer presses Send on the card, the card calls send_letter for that draft, paid from the prepaid balance, and shows the order as placed and accepted by the printer. The balance drops by one letter. One real letter is mailed to the controlled address."
+              "tools_triggered": "request_send, send_letter",
+              "expected_behavior": "Asked in chat, ChatGPT sends nothing. It points to the preview card's Send button, or calls request_send, which only returns a link to Letter IRL's confirmation page, where the person would press Send. When the reviewer presses Send on the card, the card calls send_letter for that draft, paid from the prepaid balance, and shows the order as placed and accepted by the printer. The balance drops by one letter. One real letter is mailed to the controlled address."
             },
             {
-              "description": "Preview a postcard from an image.",
-              "prompt": "Make a postcard for the address in my reviewer notes with a photo of a lighthouse.",
+              "description": "Preview a postcard from an image ChatGPT generates. Two turns in the same conversation: ChatGPT makes the image first, then Letter IRL makes the postcard from it.",
+              "prompt": "First: \"Create an image of a lighthouse on a rocky coast at sunset.\" Then: \"Use Letter IRL to make a postcard from that image for the address in my reviewer notes.\"",
               "tools_triggered": "quote_and_preview_postcard",
-              "expected_behavior": "The image comes from ChatGPT's own image generation or from an upload; Letter IRL makes no images. The postcard preview card shows the front and the message side, the size and the cost, with a Send button. Nothing is mailed unless the reviewer presses Send."
+              "expected_behavior": "ChatGPT's own image generation draws the lighthouse; Letter IRL makes no images. The second turn passes that image to quote_and_preview_postcard, and the postcard preview card shows it on the front at 6x9, the message on the back, the cost (1 prepaid letter) and a Send Postcard button. Nothing is mailed unless the reviewer presses Send."
             },
             {
               "description": "Read-only account questions.",

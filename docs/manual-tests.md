@@ -1110,7 +1110,7 @@ request log's list of known names comes from the tool list of an app that takes 
       request. After "you did not call the tool, call it now" the call ran, but
       the reply claimed a card that this tool does not render. The genuine URL
       was reachable only in the developer-mode "Called tool" response panel.
-      Live Stripe Checkout URLs now use the `/g/pay/` path.)
+      Live Stripe Checkout URLs now use the `/g/pay/` path; `/f/pay/` was seen on 2026-11-02, so the letter varies.)
 - [ ] With the card at "pack t9" (widget v87, #730), no checkout tab opens until the card's link is
       pressed: the card shows the link and waits.
 - [x] Open the link. Stripe Checkout shows the pack name, the price, and the

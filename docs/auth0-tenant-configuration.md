@@ -1,6 +1,6 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** October 23, 2026
+**Last Updated:** November 7, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
 
@@ -100,7 +100,7 @@ Use this table to verify each application has the correct settings:
 | GitHub Connection | Connections | `is_domain_connection: true` |
 | Username-Password | Connections | `is_domain_connection: true` |
 | Consent screen shows the scope descriptions | No dashboard page. Tenant flag `use_scope_descriptions_for_consent`, set through the Management API | `true`. Development set on 2026-09-28; production at the launch promotion (#267) |
-| Error page | Settings → General → Error Pages | **Custom**, URL `<website>/sign-in-error` of the same environment (#837). Production once the website with website #86 is promoted |
+| Error page | Settings → General → Error Pages | **Custom**, URL `<website>/sign-in-error` of the same environment (#837). Development since 2026-10-26; production since 2026-11-07 |
 
 **The error page, #837.** When the linking Action refuses a sign-in that started in an app (an
 unconfirmed email, for example), Auth0 does not return the refusal to the app: it shows its own
@@ -118,6 +118,12 @@ the line sending the person back to their app, and Auth0's reference. Auth0 sent
 written, apostrophes unescaped, with `client_id`, `connection` and `lang` beside it. The app itself
 is still never told, so Claude Code waited until its sign-in timed out. An unrelated Auth0 error
 (`invalid_request` from `/v2/logout`) landed on the same page with its general fallback.
+
+Production stayed on Generic after website #86 was promoted. That was found on 2026-11-07, when a
+new password account signing in from Glama got Auth0's own page. The setting was switched the same
+day and read back after a reload. Before switching, the production website's `/sign-in-error` was
+checked with the confirmation-link sentence: it showed that sentence and the line sending the
+person back to their app.
 
 **The consent flag, #267.** Without it, Auth0's consent screen builds labels from the scope names,
 so `mail:read` reads "mail your read". With it, the screen shows each scope's description from the
@@ -336,14 +342,16 @@ log: a login, no signup).
 
 ## Applications
 
-This section describes the development tenant.
+This section describes the development tenant, except section 7, which is production only.
 
 **The free plan allows 10 applications and SSO integrations per tenant.** The
 development tenant reached the limit on 2026-09-26, when the other MCP apps'
 documents were imported (section 6 below). **Create application** is disabled
 at the limit. Each app we import needs a slot in each tenant, and production has
 the same cap. On 2026-09-28 deleting Mail Letter IRL (section 2) made room for
-OpenClaw (section 6), so the tenant is at the limit again.
+OpenClaw (section 6), so the tenant is at the limit again. Production reached
+the limit on 2026-11-07 with the Glama import (section 7). A full tenant still
+signs people in; it only refuses new applications.
 
 ### 1. Default App - deleted
 
@@ -521,6 +529,31 @@ All five connected on development on 2026-09-26, recognised by name in the log:
 
 OpenClaw has not connected yet. OpenClaw 2026.9.6 needs Node 24.16 or later, or 26.1 or later
 (CLIENT-06).
+
+### 7. Glama (production only, 2026-11-07)
+
+Glama lists MCP servers from the MCP Registry and checks each one's health every hour. Its health
+check signs in through CIMD, using its own document, so Auth0 refused it with `Unknown client:
+<document URL>` (`invalid_request`) until the document was imported.
+
+| Property | Value |
+|---|---|
+| Auth0 client | `tpc_867LDnEKfUqqFNx82pgUxj` (production) |
+| Document | `https://glama.ai/api/app/mcp/oauth/client-metadata.json` |
+| Callback | `https://glama.ai/api/app/mcp/oauth/callback` |
+| Grants | `authorization_code`, `refresh_token`; public client, no secret |
+| API access | `Letter IRL MCP`: `mail:read`, `mail:draft`, `mail:send`, user-delegated only; no client access; **Always grant all permissions** off |
+| Connections | Username-Password-Authentication, github, google-oauth2 |
+
+- **It was imported on production only**, because Glama's listing checks the production URL from
+  the registry. Development has no Glama client. Development has had no free application slot
+  since 2026-09-28.
+- **Production reached the 10-application limit with this import.** The next import on either
+  tenant, OpenClaw's production document included, needs a slot freed first.
+- **The server doesn't recognise Glama**: its document is not in `src/auth/clientProfiles.ts`, so
+  Glama gets the generic profile, which trusts nothing.
+- **Glama's health check only initializes a session and lists tools.** It never calls one. Its
+  test profile signs in as a dedicated zero-letter account.
 
 ---
 
