@@ -1182,8 +1182,11 @@ export async function registerLetterTools(
       ((CARD_ONLY_SEND_TOOLS.has(tool.name) && !client.honorsCardOnlyTools) ||
         (tool.name === PAY_AND_SEND_TOOL && !(client.inAppPurchases && client.rendersCards)));
 
-    // Build annotations for ChatGPT to classify tools as READ or WRITE
-    const annotations = buildAnnotations(tool);
+    // Build annotations for ChatGPT to classify tools as READ or WRITE. They
+    // carry the tool's title as well (#861): the Claude directory portal flags
+    // a tool without annotations.title, and copying it here, in the one place
+    // every tool is registered, keeps the two from drifting.
+    const annotations: ToolAnnotations = { ...buildAnnotations(tool), title: tool.title };
 
     // Register tool per OpenAI docs format:
     // - title field for human-readable name
