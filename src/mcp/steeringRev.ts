@@ -229,4 +229,6 @@
 // r57: where the app takes purchases, get_started and get_account_balance say a pack is bought from the conversation with
 // the checkout in the browser, not "without leaving the conversation" or "right here": the Plugin Directory's commerce
 // rule puts checkout outside ChatGPT, on our own page, and descriptions must match behaviour (#852).
-export const STEERING_COPY_REV = 57;
+// r58: every tool's annotations carry its title (annotations.title equals title), which the Claude directory portal
+// asks for (#861). No name, description or schema changes.
+export const STEERING_COPY_REV = 58;
