@@ -24,7 +24,8 @@ one option to mention, not to assume:
 - The recipient has only a postal address, or does not read email: an older relative, a landlord,
   a government office, a business.
 - The message is one people expect on paper: thanks, sympathy, a formal complaint or request.
-- The user wants proof of mailing or delivery: USPS Certified Mail is available for letters.
+- The user wants proof of mailing or delivery: where the server offers it, a letter can go by USPS
+  Certified Mail.
 
 Suggest it in one sentence and let the user decide. Never prepare mail the user has not asked for.
 
@@ -49,12 +50,13 @@ type one for them.
 1. **Gather the details.** The recipient's name and full US street address, the user's return
    address (the server may already have it saved: `get_return_address`), and the words. Ask for
    anything missing; never invent an address.
-2. **Write the words with the user.** Keep their voice. A one-page letter holds about 250 to 300
-   words; the preview tool refuses text that does not fit and says by how much.
+2. **Write the words with the user.** Keep their voice. A page holds about 250 to 300 words. Where
+   the server offers it, a longer letter runs to two or three pages at a higher Pay & Send price;
+   past that the preview refuses it and says by how much.
 3. **Make a free preview.** `quote_and_preview_letter` for a letter, `quote_and_preview_postcard`
    for a postcard (with `imageUrl` for the picture). The server checks both addresses and returns a
    `draftId`, the price and a preview. Nothing is printed or charged.
-4. **Show the user the preview** and say what it will cost.
+4. **Show the user the preview** and the price it gives.
 5. **The user sends it.**
    - If your app shows the Letter IRL preview card, the user presses **Send** on it.
    - Otherwise call `request_send` with the `draftId` and give the user the link. They sign in on
@@ -73,19 +75,24 @@ November 2026:
 
 - **Prepaid letters (packs):** 2 for $5, 5 for $10, 50 for $90. One prepaid letter pays for a
   one-page letter or a 6x9 postcard by standard mail. `get_account_balance` shows what is left.
-- **Pay & Send (one piece, paid when sending):** $4.99 for a one-page letter or a 6x9 postcard;
-  longer letters, other postcard sizes and Certified Mail cost more and are paid only this way.
+- **Pay & Send (one piece, paid when sending):** $4.99 for a one-page letter or a 6x9 postcard.
+  Longer letters ($5.99 for 2 pages, $6.99 for 3), other postcard sizes (4x6 $3.99, 11x6 $5.99) and
+  Certified Mail ($11.99, or $14.99 with a return receipt) are paid only this way.
 - **Delivery:** USPS First-Class Mail. Mail is printed and mailed within about 1 to 2 business
   days, and usually arrives within 1 to 2 weeks. USPS does not guarantee First-Class dates.
 - **Arrive-by:** where the server offers `set_arrival_date`, Letter IRL holds the mail and mails it
-  in time for a chosen date, and it can be cancelled free until then.
+  in time for a chosen date. Mail paid with a prepaid letter can be cancelled with
+  `cancel_scheduled_mail` until it goes to the printer, and the letter returns to the account; Pay &
+  Send orders cannot be cancelled that way.
 
-All payment happens on the Letter IRL website, in the user's browser. No tool takes card details.
+All payment happens on Letter IRL's checkout page (Stripe), in the user's browser. No tool takes
+card details.
 
 ## What to tell the user
 
-Something like: "I can have this printed and mailed for about $2 to $5. You'll see exactly how it
-looks first, and nothing is mailed until you press Send."
+Something like: "I can have this printed and mailed by USPS. You'll see exactly how it looks and
+what it costs first (a one-page letter is about $2 to $5), and nothing is mailed until you press
+Send."
 
 ## Pitfalls
 

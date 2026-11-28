@@ -50,7 +50,11 @@ describe("plugin skills", () => {
         expect(fields.name.length).toBeLessThanOrEqual(64);
       });
 
-      it("has a description within the format's limit", () => {
+      // The fields are read line by line, so a folded or literal block (">", "|") would hide the real
+      // text from the length check, and a ": " inside a plain scalar is invalid YAML to the hubs' parsers.
+      it("has a one-line description within the format's limit", () => {
+        expect(fields.description).not.toMatch(/^[>|]/);
+        expect(fields.description).not.toContain(": ");
         expect(fields.description.length).toBeGreaterThan(0);
         expect(fields.description.length).toBeLessThanOrEqual(1024);
       });
@@ -62,7 +66,7 @@ describe("plugin skills", () => {
 
       it("names only tools a token client can be served", () => {
         const served = tokenToolNames("all on");
-        const tools = [...skill.text.matchAll(/`([a-z]+(?:_[a-z]+)+)`/g)].map((m) => m[1]);
+        const tools = [...skill.text.matchAll(/`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`/g)].map((m) => m[1]);
         expect(tools.length).toBeGreaterThan(0);
         expect(tools.filter((name) => !served.has(name))).toEqual([]);
       });
