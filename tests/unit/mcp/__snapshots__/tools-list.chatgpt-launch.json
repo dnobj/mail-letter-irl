@@ -626,6 +626,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Preview a letter",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -1305,6 +1306,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Preview a letter with a header image",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -1987,6 +1989,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Preview a letter with an enclosed image",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -2146,6 +2149,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Send a letter",
       "readOnlyHint": false,
       "destructiveHint": true,
       "idempotentHint": true,
@@ -2266,6 +2270,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Pay & Send a letter or postcard",
       "readOnlyHint": false,
       "destructiveHint": true,
       "idempotentHint": true,
@@ -2383,6 +2388,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Buy a letter pack",
       "readOnlyHint": false,
       "destructiveHint": true,
       "idempotentHint": false,
@@ -2481,6 +2487,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "List letter packs",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -2554,6 +2561,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Redeem a promo or gift code",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true,
@@ -2706,6 +2714,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Check a purchase",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -2848,6 +2857,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Check an order's status",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -2937,6 +2947,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Check letter balance",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -3123,6 +3134,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "List recent orders",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -3749,6 +3761,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Preview a postcard",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -3909,6 +3922,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Send a postcard",
       "readOnlyHint": false,
       "destructiveHint": true,
       "idempotentHint": true,
@@ -4022,6 +4036,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Set the arrival date",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true,
@@ -4125,6 +4140,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Cancel scheduled mail",
       "readOnlyHint": false,
       "destructiveHint": true,
       "idempotentHint": true,
@@ -4405,6 +4421,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Change the stationery",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true,
@@ -4580,6 +4597,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Change how a letter travels",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true,
@@ -4764,6 +4782,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Change the letter's words",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true,
@@ -4961,6 +4980,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Change the postcard style",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true,
@@ -5059,6 +5079,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Save a signature",
       "readOnlyHint": false,
       "destructiveHint": true,
       "idempotentHint": false,
@@ -5124,6 +5145,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Get the saved signature",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -5182,6 +5204,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Remove the saved signature",
       "readOnlyHint": false,
       "destructiveHint": true,
       "idempotentHint": true,
@@ -5372,6 +5395,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Sign or unsign a letter",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true,
@@ -5498,6 +5522,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Get a link to send a preview",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -5816,6 +5841,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Check a preview",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -5951,6 +5977,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Save return address",
       "readOnlyHint": false,
       "destructiveHint": true,
       "idempotentHint": true,
@@ -6038,6 +6065,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Get return address",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -6095,6 +6123,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Clear return address",
       "readOnlyHint": false,
       "destructiveHint": true,
       "idempotentHint": true,
@@ -6190,6 +6219,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Suggest a feature",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -6244,6 +6274,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Profile",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -6300,6 +6331,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Get started",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -6380,6 +6412,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Upload an image",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": false,
@@ -6452,6 +6485,7 @@
       "additionalProperties": false
     },
     "annotations": {
+      "title": "Confirm an uploaded image",
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true,
